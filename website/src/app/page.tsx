@@ -1,0 +1,457 @@
+"use client";
+
+import Link from "next/link";
+
+import { ReactLenis } from "lenis/react";
+import { useEventListener } from "usehooks-ts";
+
+import { Fade } from "react-awesome-reveal";
+import { useEffect, useRef, useState } from "react";
+
+import { FaToolbox } from "react-icons/fa6";
+import { GiBookmarklet } from "react-icons/gi";
+import { IoArrowDownCircleSharp, IoLogoGithub, IoSpeedometer } from "react-icons/io5";
+
+import isMobile from "is-mobile";
+
+import { AppleIcon } from "@/components/icons/apple";
+import { LinuxIcon } from "@/components/icons/linux";
+import { WindowsIcon } from "@/components/icons/windows";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+
+import { Experiment } from "./experiment";
+import { LandingRendererComponent } from "./renderer";
+
+import "./landing.css";
+
+export default function HomePage() {
+	const section1Ref = useRef<HTMLDivElement>(null);
+	const section2Ref = useRef<HTMLDivElement>(null);
+	const section3Ref = useRef<HTMLDivElement>(null);
+	const section4Ref = useRef<HTMLDivElement>(null);
+
+	const [scrollRatio, setScrollRatio] = useState(0);
+
+	const [featuresVisible, setFeaturesVisible] = useState(false);
+
+	const [section2Visible, setSection2Visible] = useState(false);
+	const [section3Visible, setSection3Visible] = useState(false);
+	const [section4Visible, setSection4Visible] = useState(false);
+
+	const [mobile, setMobile] = useState(true);
+
+	useEffect(() => {
+		setMobile(isMobile());
+		window.scrollTo({ top: 0, behavior: "instant" });
+	}, []);
+
+	useEventListener("scroll", () => {
+		if (section2Ref.current && section3Ref.current) {
+			const bb2 = section2Ref.current.getBoundingClientRect();
+			setSection2Visible(bb2.top <= 0 && bb2.bottom > 0);
+
+			const bb3 = section3Ref.current.getBoundingClientRect();
+			setSection3Visible(bb3.top <= 0 && bb3.bottom > 0);
+
+			setFeaturesVisible((bb2.top < screen.height * 0.5 && bb2.bottom > 0) || (bb3.top < screen.height * 0.5 && bb3.bottom > 0));
+		}
+
+		if (section4Ref.current) {
+			const bb = section4Ref.current.getBoundingClientRect();
+			setSection4Visible(bb.top <= 0 && bb.bottom > 0);
+		}
+
+		updateScrollRatio();
+	});
+
+	function updateScrollRatio() {
+		setScrollRatio(window.scrollY / (document.body.scrollHeight - screen.height));
+	}
+
+	return (
+		<ReactLenis root>
+			<main className="min-w-screen min-h-screen text-neutral-50">
+				<div
+					style={{
+						filter: `brightness(${featuresVisible ? 0 : 1})`,
+					}}
+					className="fixed top-0 left-0 w-screen h-screen z-0 transition-all duration-1000 ease-in-out"
+				>
+					<LandingRendererComponent scrollRatio={scrollRatio} postProcessVisible={!section4Visible} />
+				</div>
+
+				<div className="absolute 2xl:fixed top-0 left-0 w-full px-5 z-50">
+					<div className="flex justify-between items-center w-full">
+						<img alt="" src="/logo.svg" className="h-14 lg:h-20 -ml-12" />
+
+						<Link
+							href="/download"
+							onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+							className={`hidden lg:flex items-center gap-2 text-black bg-neutral-50 rounded-full px-5 py-2 ${section2Visible ? "" : "pointer-events-none opacity-0"} transition-all duration-1000 ease-in-out`}
+						>
+							<IoArrowDownCircleSharp className="w-6 h-6 opacity-75" />
+							Download
+						</Link>
+					</div>
+				</div>
+
+				{/* Page 1 */}
+				<div className="flex flex-col justify-center md:justify-end items-center gap-5 w-screen min-h-screen max-w-7xl mx-auto" ref={section1Ref}>
+					<div className="flex flex-col gap-4 w-full">
+						<Fade cascade damping={0.1} triggerOnce direction="up">
+							<Fade>
+								<div className="text-5xl md:text-7xl lg:text-8xl xl:text-9xl font-semibold font-sans drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)] tracking-tighter text-center px-5">
+									Babylon.js Editor
+								</div>
+							</Fade>
+
+							<Fade>
+								<div className="text-center text-xl md:text-3xl max-w-64 md:max-w-max font-semibold tracking-tighter drop-shadow-[0_1px_1px_rgba(0,0,0,1)] mx-auto px-5">
+									Focus more on <b className="text-[hsl(254,50%,60%)]">creating</b> and less on <b className="text-[rgb(187,70,75)]">coding</b>.
+								</div>
+							</Fade>
+
+							<div className="hidden lg:flex justify-center gap-4 pt-4">
+								<div className="flex flex-col justify-center items-center gap-4">
+									<Link href="/download">
+										<button className="flex items-center gap-2 text-black bg-neutral-50 rounded-full px-5 py-2">
+											<IoArrowDownCircleSharp className="w-6 h-6 opacity-75" />
+											Download the App
+										</button>
+									</Link>
+
+									<div className="flex items-center gap-2">
+										<WindowsIcon color="white" className="opacity-50" />
+										<AppleIcon color="white" className="opacity-50" />
+										<LinuxIcon color="white" className="opacity-50" />
+									</div>
+								</div>
+							</div>
+
+							<div className="w-full h-full object-contain">
+								<img alt="" src="/screenshots/large.png" className="max-h-[65dvh] object-contain z-50 mx-auto hidden sm:hidden md:hidden lg:hidden xl:block" />
+								<img alt="" src="/screenshots/medium.png" className="max-h-[75dvh] object-contain z-50 mx-auto hidden sm:hidden md:hidden lg:block xl:hidden" />
+								<img alt="" src="/screenshots/small.png" className="max-h-[75dvh] object-contain z-50 mx-auto lg:hidden" />
+							</div>
+						</Fade>
+					</div>
+				</div>
+
+				{/* Page 2 */}
+				<div className="min-h-screen" ref={section2Ref}>
+					<Experiment
+						mobile={mobile}
+						mobileAvailable={false}
+						title={
+							<div className="flex flex-col items-center">
+								<div className="text-lg md:text-2xl lg:text-3xl xl:text-4xl tracking-tighter">Presenting</div>
+								<div className="font-[o4b] py-10 text-white drop-shadow-[0_0_25px_rgba(220,38,38,0.8)]">Out 4 Blood</div>
+								<div className="text-lg md:text-xl lg:text-2xl xl:text-3xl tracking-tighter">A game achieved using Babylon.js Editor</div>
+							</div>
+						}
+						runLabel="Run game"
+						coverVideo="https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/experiments/horde/cover.mp4"
+						youtubeVideo="https://www.youtube.com/watch?v=Fz4fvaGhO68"
+						liveLink="https://cesharpe.com/o4b"
+					>
+						<>
+							<b>Out 4 Blood</b> is a hardcore multiplayer zombie wave-survival shooter built for relentless co-op action and intense last-stand gameplay.
+							<br />
+							From scene assembly and lighting to gameplay scripting, the entire game was created <b>100% with the Babylon.js Editor</b>, showcasing a complete
+							end-to-end production pipeline inside the engine.
+							<br />
+							The game features high-quality 3D assets sourced from Quixel, Sketchfab, Fab, and Mixamo, while its real-time multiplayer experience is powered by{" "}
+							<Link href="https://colyseus.io/" target="_blank" className="underline underline-offset-4">
+								Colyseus
+							</Link>
+							<br />
+							The entire user interface was built exclusively with React, delivering a modern, responsive UI layer on top of the gameplay experience.
+						</>
+					</Experiment>
+				</div>
+
+				{/* Page 3 */}
+				<div className="flex flex-col justify-center pt-10 lg:pt-24 w-screen min-h-screen mx-auto" ref={section3Ref}>
+					<div
+						className={`flex flex-col lg:flex-row w-full py-10 lg:py-24 ${featuresVisible ? "bg-neutral-950" : "transparent"} z-0 px-5 transition-all duration-3000 ease-in-out`}
+					>
+						<div className="flex flex-col lg:flex-row max-w-7xl mx-auto">
+							<Fade triggerOnce className="hidden lg:block w-full">
+								<IoSpeedometer size={128} className="mx-auto" />
+							</Fade>
+
+							<Fade triggerOnce className="w-full">
+								<div className="flex flex-col justify-center gap-2">
+									<div className="flex justify-between items-center text-3xl drop-shadow-[0_1px_1px_rgba(0,0,0,1)]">
+										Built-in Templates
+										<div className="lg:hidden flex gap-2">
+											<IoSpeedometer />
+										</div>
+									</div>
+									<div className="drop-shadow-[0_1px_1px_rgba(0,0,0,1)]">
+										Kickstart your development with built-in templates, including{" "}
+										<Link target="_blank" href="https://nextjs.org" className="underline underline-offset-4">
+											Next.js
+										</Link>
+										,{" "}
+										<Link target="_blank" href="https://www.solidjs.com" className="underline underline-offset-4">
+											SolidJS
+										</Link>
+										,{" "}
+										<Link target="_blank" href="https://www.electronjs.org/" className="underline underline-offset-4">
+											Electron
+										</Link>
+										,{" "}
+										<Link target="_blank" href="https://nuxt.com/" className="underline underline-offset-4">
+											Nuxt
+										</Link>{" "}
+										and Vanilla templates, allowing you to bypass the tedious setup process and dive straight into building your project.
+										<br />
+										Those templates come with example code, making it easier for you to understand and implement complex game mechanics quickly and efficiently.
+									</div>
+								</div>
+							</Fade>
+						</div>
+					</div>
+
+					<div className={`flex flex-col lg:flex-row w-full max-w-7xl mx-auto pt-10 py-10 lg:py-24 px-5`}>
+						<div className="flex justify-center items-center max-w-7xl mx-auto">
+							<Fade triggerOnce className="w-full">
+								<div className="flex flex-col justify-center gap-2">
+									<div className="flex justify-between items-center text-3xl drop-shadow-[0_1px_1px_rgba(0,0,0,1)]">
+										Open-Source
+										<div className="lg:hidden flex gap-2">
+											<IoLogoGithub />
+										</div>
+									</div>
+									<div className="drop-shadow-[0_1px_1px_rgba(0,0,0,1)]">
+										The Babylon.js Editor is an open-source project maintained by the community. The sources are available on{" "}
+										<Link target="_blank" href="https://github.com/BabylonJS/Editor" className="underline underline-offset-4">
+											Github
+										</Link>
+										.
+										<br />
+										Enjoy features and improvements driven by community feedbacks and contributions, ensuring the Editor evolves to meet the real-world needs of
+										its users.
+									</div>
+								</div>
+							</Fade>
+
+							<Fade triggerOnce className="hidden lg:block w-full">
+								<IoLogoGithub size={128} className="mx-auto" />
+							</Fade>
+						</div>
+					</div>
+
+					<div
+						className={`flex flex-col lg:flex-row w-full py-10 lg:py-24 ${featuresVisible ? "bg-neutral-950" : "transparent"} z-0 px-5 transition-all duration-3000 ease-in-out`}
+					>
+						<div className="flex flex-col lg:flex-row max-w-7xl mx-auto">
+							<Fade triggerOnce className="w-full">
+								<div className="hidden lg:block relative w-44 h-44 mx-auto">
+									<div className="absolute top-1/2 left-1/2 -translate-x-[calc(50%+32px)] -translate-y-[calc(50%+42px)] scale-[2] lg:scale-[5]">
+										<WindowsIcon color="#fff" />
+									</div>
+									<div className="absolute top-1/2 left-1/2 -translate-x-[calc(50%-72px)] -translate-y-[calc(50%-42px)] scale-[2] lg:scale-[5]">
+										<AppleIcon color="#fff" />
+									</div>
+									<div className="absolute top-1/2 left-1/2 -translate-x-[calc(50%-164px)] -translate-y-[calc(50%+42px)] scale-[2] lg:scale-[5]">
+										<LinuxIcon color="#fff" />
+									</div>
+								</div>
+							</Fade>
+
+							<Fade triggerOnce className="w-full">
+								<div className="flex flex-col justify-center gap-2">
+									<div className="flex justify-between items-center text-3xl drop-shadow-[0_1px_1px_rgba(0,0,0,1)]">
+										Cross-Platform
+										<div className="lg:hidden flex gap-2">
+											<WindowsIcon color="#fff" />
+											<AppleIcon color="#fff" />
+											<LinuxIcon color="#fff" />
+										</div>
+									</div>
+									<div className="drop-shadow-[0_1px_1px_rgba(0,0,0,1)]">
+										The Babylon.js Editor is available on Windows, macOS, and Linux.
+										<br />
+										Enjoy a unified development environment that supports all major platforms, allowing you to focus on creativity and innovation rather than
+										compatibility issues.
+										<br />
+										Leverage the power of modern Web technologies to create stunning 3D video games and applications, all within an user-friendly Editor
+										application.
+									</div>
+								</div>
+							</Fade>
+						</div>
+					</div>
+
+					<div className={`flex flex-col lg:flex-row w-full max-w-7xl mx-auto py-10 lg:py-24 px-5`}>
+						<div className="flex justify-center items-center max-w-7xl mx-auto">
+							<Fade triggerOnce className="w-full">
+								<div className="flex flex-col justify-center gap-2">
+									<div className="flex justify-between items-center text-3xl drop-shadow-[0_1px_1px_rgba(0,0,0,1)]">
+										Integrated Tools
+										<div className="lg:hidden flex gap-2">
+											<FaToolbox />
+										</div>
+									</div>
+									<div className="drop-shadow-[0_1px_1px_rgba(0,0,0,1)]">
+										Enhance your development process, enabling you to bring your most ambitious projects to life with ease and efficiency.
+										<br />
+										Experience the power of high-resolution textures with support of advanced formats like automatic KTX compressed textures. This feature
+										allows to incorporate stunning 4K textures into your projects, optimizing performance without sacrificing visual quality.
+									</div>
+								</div>
+							</Fade>
+
+							<Fade triggerOnce className="hidden lg:block w-full">
+								<FaToolbox size={128} className="mx-auto" />
+							</Fade>
+						</div>
+					</div>
+
+					{/* Page 3 */}
+					<div className="relative flex justify-center items-center w-screen min-h-screen bg-neutral-950">
+						<Carousel className="w-full">
+							<CarouselContent>
+								<CarouselItem className="basis-full">
+									<Experiment
+										mobile={mobile}
+										mobileAvailable={true}
+										title="Hunter Experiment"
+										coverVideo="https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/experiments/hunter/cover.mp4"
+										youtubeVideo="https://youtu.be/fx-KlrvxDT0?si=lEpA4rDuaR1XGl4W"
+										liveLink="https://editor.babylonjs.com/experiments/hunter"
+									>
+										<>
+											This scene began as a simple test and gradually evolved into a real-time cinematic and technical showcase.
+											<br />
+											It focuses on the support and use of <b>animated 3D models</b> with <b>skeletons</b> support in the Babylon.js Editor.
+											<br />
+											All 3D assets come exclusively from <b>Fab</b> using the{" "}
+											<Link href="https://editor.babylonjs.com/documentation/plugins/fab" target="_blank" className="underline underline-offset-4">
+												Babylon.js Editor Fab Plugin
+											</Link>
+											. The characters were created with Mixamo and animated using Mixamo’s animation library.
+											<br />
+											Blender was used to merge, retarget, and unify all animations into a single, reusable character model.
+										</>
+									</Experiment>
+								</CarouselItem>
+								<CarouselItem className="basis-full">
+									<Experiment
+										mobile={mobile}
+										mobileAvailable={false}
+										title="Mansion Experiment"
+										coverVideo="https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/experiments/mansion/cover.mp4"
+										youtubeVideo="https://youtu.be/vg5E8CY2F5w?si=-rEoBhdAmq-Opz9K"
+										liveLink="https://editor.babylonjs.com/experiments/mansion"
+									>
+										<>
+											To celebrate the release of Babylon.js Editor v5, a POC of a cinematic editor has been developed to produce a <b>short film</b>.
+											<br />
+											This short film has been made 100% using the Babylon.js Editor from <b>scene assembly</b> and <b>lighting</b> to animating.
+											<br />
+											The Editor's promise: bringing simplicity & fluidity to the creation of 3D games and applications. 3D models come from Quixel, Sketchfab
+											and Fab.com.
+										</>
+									</Experiment>
+								</CarouselItem>
+							</CarouselContent>
+							<CarouselPrevious
+								className={`
+									absolute top-12 left-5 text-black
+									md:left-10
+									lg:top-1/2 lg:-translate-y-1/2 lg:left-10
+									lg:scale-150
+								`}
+							/>
+							<CarouselNext
+								className={`
+									absolute top-12 right-5 text-black
+									md:right-10
+									lg:top-1/2 lg:-translate-y-1/2 lg:right-10
+									lg:scale-150
+								`}
+							/>
+						</Carousel>
+					</div>
+
+					{/* Page 4 */}
+					<div className="relative flex flex-col w-screen min-h-screen bg-black">
+						<Fade triggerOnce className="flex justify-center items-center w-full p-10 lg:pt-20 lg:pb-0">
+							<div className="flex flex-col gap-10">
+								<div className="text-5xl md:text-7xl lg:text-8xl xl:text-9xl font-semibold font-sans drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)] tracking-tighter text-center px-5">
+									Documentation
+								</div>
+
+								<GiBookmarklet color="white" className="w-52 h-52 lg:w-96 lg:h-96 mx-auto drop-shadow-[0_1px_1px_rgba(0,0,0,1)]" />
+
+								<div className="text-center drop-shadow-[0_1px_1px_rgba(0,0,0,1)]">
+									Learn how to use the Babylon.js Editor and start building your own video game or app.
+									<br />
+									Once you have covered all the chapters you will be aware, at a foundation level, of what the Babylon.js Editor has to offer you.
+								</div>
+
+								<div className="flex justify-center">
+									<Link href="/documentation" className="flex justify-center items-center gap-2 text-black bg-neutral-50 rounded-full px-5 py-2">
+										Go to documentation
+									</Link>
+								</div>
+							</div>
+						</Fade>
+
+						<Fade triggerOnce className="flex justify-center items-center w-full max-w-[75vw] mx-auto bg-black">
+							<video className="w-full h-full object-contain scale-[1.35] pt-2 lg:scale-100 lg:pt-0" autoPlay muted playsInline loop>
+								<source src="https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/bjs_speedesign.mp4" type="video/mp4" />
+							</video>
+						</Fade>
+					</div>
+				</div>
+
+				{/* Page 3 */}
+				{/* <div className="flex flex-col justify-between w-screen min-h-screen max-w-3xl px-5 mx-auto" ref={section3Ref}>
+                    <div />
+
+                    <div className="text-center max-w-3xl mx-auto">
+                        <Fade className="text-7xl" triggerOnce>
+                            See it in action
+                        </Fade>
+                    </div>
+
+                    <div />
+                </div> */}
+
+				<div className="flex flex-col justify-between w-screen h-[100dvh] max-w-3xl px-5 mx-auto" />
+
+				{/* Page 4 */}
+				<div className="flex flex-col justify-center items-center gap-5 w-screen min-h-screen max-w-3xl px-5 mx-auto">
+					<div className="text-4xl md:text-7xl font-semibold font-sans drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)] tracking-tighter text-center px-5">
+						<Fade>Babylon.js Editor</Fade>
+					</div>
+
+					<div className="text-xl text-center drop-shadow-[0_1px_1px_rgba(0,0,0,1)]">
+						<Fade>Download for Windows, macOS and Linux</Fade>
+					</div>
+
+					<div className="flex flex-col justify-center items-center gap-4">
+						<Fade>
+							<Link href="/download">
+								<button className="flex items-center gap-2 text-black bg-neutral-50 rounded-full px-5 py-2">
+									<IoArrowDownCircleSharp className="w-6 h-6 opacity-75" />
+									Download the App
+								</button>
+							</Link>
+						</Fade>
+
+						<div className="flex items-center gap-2">
+							<WindowsIcon color="white" className="opacity-50" />
+							<AppleIcon color="white" className="opacity-50" />
+							<LinuxIcon color="white" className="opacity-50" />
+						</div>
+					</div>
+				</div>
+			</main>
+		</ReactLenis>
+	);
+}

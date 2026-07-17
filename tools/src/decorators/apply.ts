@@ -1,0 +1,410 @@
+import { Node } from "@babylonjs/core/node";
+import { Scene } from "@babylonjs/core/scene";
+import { Observer } from "@babylonjs/core/Misc/observable";
+import { Material } from "@babylonjs/core/Materials/material";
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
+import { PointerInfo } from "@babylonjs/core/Events/pointerEvents";
+import { KeyboardInfo } from "@babylonjs/core/Events/keyboardEvents";
+import { PickingInfo } from "@babylonjs/core/Collisions/pickingInfo";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
+import { GPUParticleSystem } from "@babylonjs/core/Particles/gpuParticleSystem";
+import { NodeParticleSystemSet } from "@babylonjs/core/Particles/Node/nodeParticleSystemSet";
+
+import { AdvancedDynamicTexture } from "@babylonjs/gui/2D/advancedDynamicTexture";
+
+import { loadJsonFile } from "../tools/request";
+import { getNodeById, getNodeByName } from "../tools/scene";
+import { copyAndParseRagdollConfiguration } from "../tools/ragdoll";
+import { ISpriteAnimation, SpriteManagerNode } from "../tools/sprite";
+import { isAbstractMesh, isNode, isSoundNode, isSprite, isTransformNode } from "../tools/guards";
+
+import { scriptAssetsCache } from "../loading/script/preload";
+import { getScriptByClassForObject } from "../loading/script/apply";
+
+import { IPointerEventDecoratorOptions } from "./events";
+import { VisibleInInspectorDecoratorConfiguration, VisibleInInspectorDecoratorEntityConfiguration, VisibleInspectorDecoratorAssetConfiguration } from "./inspector";
+
+export interface ISceneDecoratorData {
+	// @nodeFromScene
+	_NodesFromScene?: {
+		nodeName: string;
+		propertyKey: string | Symbol;
+	}[];
+
+	// @componentFromScene
+	_ComponentsFromScene?: {
+		componentConstructor: new (...args: any) => any;
+		propertyKey: string | Symbol;
+	}[];
+
+	// @nodeFromDescendants
+	_NodesFromDescendants?: {
+		nodeName: string;
+		propertyKey: string | Symbol;
+		directDescendantsOnly: boolean;
+	}[];
+
+	// @fromAnimationGroups
+	_AnimationGroups?: {
+		animationGroupName: string;
+		propertyKey: string | Symbol;
+	}[];
+
+	// @soundFromScene
+	_SoundsFromScene?: {
+		soundName: string;
+		propertyKey: string | Symbol;
+	}[];
+
+	// @guiFromAsset
+	_GuiFromAsset?: {
+		pathInAssets: string;
+		onGuiCreated?: (instance: unknown, gui: AdvancedDynamicTexture) => unknown;
+		propertyKey: string | Symbol;
+	}[];
+
+	// @fromParticleSystems
+	_ParticleSystemsFromScene?: {
+		particleSystemName: string;
+		directDescendantsOnly: boolean;
+		propertyKey: string | Symbol;
+	}[];
+
+	// @visibleAsNumber, @visibleAsBoolean etc.
+	_VisibleInInspector?: {
+		label?: string;
+		propertyKey: string | Symbol;
+		configuration: VisibleInInspectorDecoratorConfiguration;
+	}[];
+
+	// @sceneAsset
+	_SceneAssets?: {
+		sceneName: string;
+		propertyKey: string | Symbol;
+	}[];
+
+	// @onPointerEvent
+	_PointerEvents?: {
+		eventTypes: number[];
+		options: IPointerEventDecoratorOptions;
+		propertyKey: string | Symbol;
+	}[];
+
+	// @onKeyboardEvent
+	_KeyboardEvents?: {
+		eventTypes: number[];
+		propertyKey: string | Symbol;
+	}[];
+
+	// @spriteFromSpriteManager
+	_SpritesFromSpriteManager?: {
+		spriteName: string;
+		propertyKey: string | Symbol;
+	}[];
+
+	// @animationFromSprite
+	_AnimationsFromSprite?: {
+		animationName: string;
+		propertyKey: string | Symbol;
+	}[];
+}
+
+export function applyDecorators(scene: Scene, object: any, script: any, instance: any, rootUrl: string) {
+	const ctor = instance.constructor as ISceneDecoratorData;
+	if (!ctor) {
+		return;
+	}
+
+	// @nodeFromScene
+	ctor._NodesFromScene?.forEach((params) => {
+		instance[params.propertyKey.toString()] = getNodeByName(params.nodeName, scene);
+	});
+
+	// @componentFromScene
+	if (ctor._ComponentsFromScene?.length) {
+		scene.getEngine().onBeginFrameObservable.addOnce(() => {
+			ctor._ComponentsFromScene?.forEach((params) => {
+				const components: any[] = [];
+
+				const nodes = [scene, ...scene.transformNodes, ...scene.meshes, ...scene.lights, ...scene.cameras];
+				nodes.forEach((node) => {
+					const component = getScriptByClassForObject(node, params.componentConstructor);
+					if (component) {
+						components.push(component);
+					}
+				});
+
+				if (components.length > 1) {
+					throw new Error(
+						`Multiple components of type ${ctor._ComponentsFromScene![0].componentConstructor.name} found in scene for property "${ctor._ComponentsFromScene![0].propertyKey.toString()}".`
+					);
+				}
+
+				instance[params.propertyKey.toString()] = components[0] ?? null;
+			});
+		});
+	}
+
+	// @nodeFromDescendants
+	ctor._NodesFromDescendants?.forEach((params) => {
+		const descendant = (object as Partial<Node>).getDescendants?.(params.directDescendantsOnly, (node) => node.name === params.nodeName)[0];
+		instance[params.propertyKey.toString()] = descendant ?? null;
+	});
+
+	// @fromAnimationGroups
+	ctor._AnimationGroups?.forEach((params) => {
+		instance[params.propertyKey.toString()] = scene.getAnimationGroupByName(params.animationGroupName);
+	});
+
+	// @soundFromScene
+	ctor._SoundsFromScene?.forEach((params) => {
+		const sound = getNodeByName(params.soundName, scene);
+		if (sound && isSoundNode(sound)) {
+			instance[params.propertyKey.toString()] = sound ?? null;
+		}
+	});
+
+	// @guiFromAsset, deprecated
+	(ctor._GuiFromAsset ?? []).map(async (params) => {
+		const guiUrl = `${rootUrl}assets/${params.pathInAssets}`;
+
+		try {
+			const data = await loadJsonFile<any>(guiUrl);
+
+			const gui = AdvancedDynamicTexture.CreateFullscreenUI(data.name, true, scene);
+			gui.parseSerializedObject(data.content, false);
+
+			instance[params.propertyKey.toString()] = gui;
+			params.onGuiCreated?.(instance, gui);
+		} catch (e) {
+			console.error(`Failed to load GUI from asset: ${guiUrl}`);
+			throw e;
+		}
+	});
+
+	// @fromParticleSystems
+	ctor._ParticleSystemsFromScene?.forEach((params) => {
+		const particleSystem = scene.particleSystems?.find((particleSystem: ParticleSystem | GPUParticleSystem) => {
+			if (particleSystem.name !== params.particleSystemName) {
+				return false;
+			}
+
+			return params.directDescendantsOnly ? particleSystem.emitter === object : particleSystem;
+		});
+
+		instance[params.propertyKey.toString()] = particleSystem;
+	});
+
+	// @visibleAsNumber, @visibleAsBoolean etc.
+	(ctor._VisibleInInspector ?? []).forEach((params) => {
+		const propertyKey = params.propertyKey.toString();
+		const attachedScripts = script.values;
+
+		if (!attachedScripts) {
+			throw new Error(`No values found for script with key "${script.key}".`);
+		}
+
+		if (attachedScripts.hasOwnProperty(propertyKey) && attachedScripts[propertyKey].hasOwnProperty("value")) {
+			const value = attachedScripts[propertyKey].value;
+
+			switch (params.configuration.type) {
+				case "number":
+				case "boolean":
+				case "keymap":
+				case "string":
+					instance[propertyKey] = value;
+					break;
+
+				case "vector2":
+					instance[propertyKey] = Vector2.FromArray(value);
+					break;
+				case "vector3":
+					instance[propertyKey] = Vector3.FromArray(value);
+					break;
+
+				case "color3":
+					instance[propertyKey] = Color3.FromArray(value);
+					break;
+				case "color4":
+					instance[propertyKey] = Color4.FromArray(value);
+					break;
+
+				case "entity":
+					const entityType = (params.configuration as VisibleInInspectorDecoratorEntityConfiguration).entityType;
+					switch (entityType) {
+						case "node":
+						case "sound":
+							instance[propertyKey] = getNodeById(value, scene) ?? null;
+							break;
+						case "animationGroup":
+							instance[propertyKey] = scene.getAnimationGroupByName(value) ?? null;
+							break;
+						case "particleSystem":
+							instance[propertyKey] = scene.particleSystems?.find((ps) => ps.id === value) ?? null;
+							break;
+					}
+					break;
+
+				case "texture":
+					if (value) {
+						instance[propertyKey] = Texture.Parse(value, scene, rootUrl);
+					}
+					break;
+
+				case "asset":
+					if (value) {
+						const assetType = (params.configuration as VisibleInspectorDecoratorAssetConfiguration).assetType;
+						const data = scriptAssetsCache.get(value);
+
+						switch (assetType) {
+							case "json":
+							case "gui":
+							case "scene":
+							case "navmesh":
+							case "cinematic":
+								instance[propertyKey] = data;
+								break;
+
+							case "ragdoll":
+								instance[propertyKey] = copyAndParseRagdollConfiguration(data);
+								break;
+
+							case "nodeParticleSystemSet":
+								const npss = NodeParticleSystemSet.Parse(data);
+								instance[propertyKey] = npss;
+								break;
+
+							case "material":
+								instance[propertyKey] = Material.Parse(data, scene, rootUrl);
+								break;
+						}
+					}
+			}
+		}
+	});
+
+	let pointerObserver: Observer<PointerInfo> | null = null;
+	let keyboardObserver: Observer<KeyboardInfo> | null = null;
+
+	// @onPointerEvent
+	if (ctor._PointerEvents?.length) {
+		const wrongMeshListener = ctor._PointerEvents.find((params) => params.options.mode === "attachedMeshOnly");
+		if (wrongMeshListener && !isAbstractMesh(object)) {
+			throw new Error(`@onPointerEvent with mode "attachedMeshOnly" can only be used on scripts attached to meshes (extends AbstractMesh).`);
+		}
+
+		const wrongSceneListener = ctor._PointerEvents.find((params) => params.options.mode !== "global");
+		if (wrongSceneListener && !isNode(object)) {
+			throw new Error(`@onPointerEvent with mode different from "global" can be used only on scripts attached to Node: Mesh, Light, Camera, TransformNode.`);
+		}
+
+		pointerObserver = scene.onPointerObservable.add((pointerInfo) => {
+			let pickInfo: PickingInfo | null = null;
+
+			ctor._PointerEvents!.forEach((params) => {
+				if (!params.eventTypes.includes(pointerInfo.type)) {
+					return;
+				}
+
+				const propertyKey = params.propertyKey.toString();
+
+				if (params.options.mode === "global") {
+					return instance[propertyKey]?.(pointerInfo);
+				}
+
+				pickInfo = pointerInfo.pickInfo;
+				if (!pickInfo) {
+					pickInfo = scene.pick(
+						scene.pointerX,
+						scene.pointerY,
+						(m) => {
+							return m.isVisible && m.isPickable && m.isEnabled(true) && !m._masterMesh;
+						},
+						false
+					);
+				}
+
+				const pickedMesh = pickInfo.pickedMesh;
+				if (pickedMesh) {
+					if (params.options.mode === "attachedMeshOnly" && pickedMesh === object) {
+						return instance[propertyKey]?.(pointerInfo);
+					}
+
+					if (params.options.mode === "includeDescendants" && isNode(object)) {
+						const descendants = [object, ...object.getDescendants(false)];
+						const pickedDescendant = descendants.find((d) => d === pickedMesh);
+						if (pickedDescendant) {
+							return instance[propertyKey]?.(pointerInfo);
+						}
+					}
+				}
+			});
+		});
+	}
+
+	// @onKeyboardEvent
+	if (ctor._KeyboardEvents?.length) {
+		keyboardObserver = scene.onKeyboardObservable.add((keyboardInfo) => {
+			ctor._KeyboardEvents!.forEach((params) => {
+				if (!params.eventTypes.includes(keyboardInfo.type)) {
+					return;
+				}
+
+				instance[params.propertyKey.toString()]?.(keyboardInfo);
+			});
+		});
+	}
+
+	// @spriteFromSpriteManager
+	if (ctor._SpritesFromSpriteManager?.length) {
+		const spriteManagerNode = object as SpriteManagerNode;
+
+		if (!isTransformNode(spriteManagerNode) || !spriteManagerNode.isSpriteManager) {
+			return console.error(`@spriteFromSpriteManager decorator can only be used on SpriteManagerNode.`);
+		}
+
+		if (!spriteManagerNode.spriteManager) {
+			return console.error(`SpriteManagerNode "${spriteManagerNode.name}" has no sprite manager assigned.`);
+		}
+
+		ctor._SpritesFromSpriteManager?.forEach((params) => {
+			const sprite = spriteManagerNode.spriteManager?.sprites.find((s) => s.name === params.spriteName) || null;
+			instance[params.propertyKey.toString()] = sprite;
+		});
+	}
+
+	// @animationFromSprite
+	if (ctor._AnimationsFromSprite?.length) {
+		if (!isSprite(object)) {
+			return console.error(`@animationFromSprite decorator can only be used in scripts attached on Sprite.`);
+		}
+
+		const spriteAnimations = object.metadata?.spriteAnimations as ISpriteAnimation[];
+		if (!spriteAnimations?.length) {
+			return console.error(`Sprite "${object.name}" has no sprite animations assigned.`);
+		}
+
+		ctor._AnimationsFromSprite.forEach((params) => {
+			const animation = spriteAnimations.find((a) => a.name === params.animationName);
+			if (animation) {
+				instance[params.propertyKey.toString()] = animation ?? null;
+			} else {
+				console.warn(`Sprite animation named "${params.animationName}" not found on sprite "${object.name}".`);
+			}
+		});
+	}
+
+	// @sceneAsset
+	ctor._SceneAssets?.forEach((params) => {
+		instance[params.propertyKey.toString()] = scriptAssetsCache.get(params.sceneName);
+	});
+
+	return {
+		observers: {
+			pointerObserver,
+			keyboardObserver,
+		},
+	};
+}

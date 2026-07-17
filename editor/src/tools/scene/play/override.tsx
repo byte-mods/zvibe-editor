@@ -1,0 +1,371 @@
+import { isAbsolute } from "path";
+import { join, dirname } from "path/posix";
+
+import { Engine, WebRequest, Observable, Observer, ExitPointerlock, ExitFullscreen, SerializationHelper } from "babylonjs";
+
+import { getCurrentCallStack } from "../../tools";
+
+import { Editor } from "../../../editor/main";
+
+const savedConsoleMethods: Record<string, any> = {
+	log: console.log,
+	info: console.info,
+	warn: console.warn,
+	error: console.error,
+};
+
+const savedWindowMethods: Record<string, any> = {
+	fetch: window.fetch,
+
+	setTimeout: window.setTimeout,
+	clearTimeout: window.clearTimeout,
+
+	setInterval: window.setInterval,
+	clearInterval: window.clearInterval,
+};
+
+const savedWebRequestMethods: Record<string, any> = {
+	open: WebRequest.prototype.open,
+};
+
+const savedEngineMethods: Record<string, any> = {
+	createTexture: Engine.prototype.createTexture,
+	createCubeTexture: Engine.prototype.createCubeTexture,
+	createRawCubeTextureFromUrl: Engine.prototype.createRawCubeTextureFromUrl,
+};
+
+const savedTextureMethods: Record<string, any> = {
+	textureParser: null,
+};
+
+const savedObservableMethods: Record<string, any> = {
+	add: Observable.prototype.add,
+	addOnce: Observable.prototype.addOnce,
+	remove: Observable.prototype.remove,
+	clear: Observable.prototype.clear,
+};
+
+const savedHtmlElementMethods: Record<string, any> = {
+	addEventListener: HTMLElement.prototype.addEventListener,
+	removeEventListener: HTMLElement.prototype.removeEventListener,
+};
+
+const savedObservableListeners: {
+	callback: any;
+	observer: Observer<any>;
+	observable: Observable<any>;
+}[] = [];
+
+const savedHtmlElementListeners: {
+	element: HTMLElement;
+	type: string;
+	listener: EventListenerOrEventListenerObject;
+}[] = [];
+
+const savedTimeoutIds: number[] = [];
+const savedIntervalIds: number[] = [];
+
+function normalizeUrl(url: string) {
+	if (url.startsWith("scene/")) {
+		url = url.substring("scene/".length);
+	}
+
+	if (url.startsWith("/scene/")) {
+		url = url.substring("/scene/".length);
+	}
+
+	return url;
+}
+
+/**
+ * To play scene inline in the editor, we need to override some methods.
+ * This function restores all the orignal methods for all object that have been overridden.
+ */
+export function restorePlayOverrides(editor: Editor) {
+	console.log = savedConsoleMethods.log;
+	console.info = savedConsoleMethods.info;
+	console.warn = savedConsoleMethods.warn;
+	console.error = savedConsoleMethods.error;
+
+	window.fetch = savedWindowMethods.fetch;
+
+	window.setTimeout = savedWindowMethods.setTimeout;
+	window.clearTimeout = savedWindowMethods.clearTimeout;
+
+	window.setInterval = savedWindowMethods.setInterval;
+	window.clearInterval = savedWindowMethods.clearInterval;
+
+	savedTimeoutIds.forEach((id) => {
+		clearTimeout(id);
+	});
+	savedTimeoutIds.splice(0, savedTimeoutIds.length);
+
+	savedIntervalIds.forEach((id) => {
+		clearInterval(id);
+	});
+	savedIntervalIds.splice(0, savedIntervalIds.length);
+
+	WebRequest.prototype.open = savedWebRequestMethods.open;
+
+	Engine.prototype.createTexture = savedEngineMethods.createTexture;
+	Engine.prototype.createCubeTexture = savedEngineMethods.createCubeTexture;
+	Engine.prototype.createRawCubeTextureFromUrl = savedEngineMethods.createRawCubeTextureFromUrl;
+	SerializationHelper._TextureParser = savedTextureMethods.textureParser;
+
+	Observable.prototype.add = savedObservableMethods.add;
+	Observable.prototype.addOnce = savedObservableMethods.addOnce;
+	Observable.prototype.remove = savedObservableMethods.remove;
+	Observable.prototype.clear = savedObservableMethods.clear;
+
+	savedObservableListeners.forEach((listener) => {
+		listener.observable.remove(listener.observer);
+	});
+	savedObservableListeners.splice(0, savedObservableListeners.length);
+
+	HTMLElement.prototype.addEventListener = savedHtmlElementMethods.addEventListener;
+	HTMLElement.prototype.removeEventListener = savedHtmlElementMethods.removeEventListener;
+
+	savedHtmlElementListeners.forEach((listener) => {
+		listener.element.removeEventListener(listener.type, listener.listener);
+	});
+	savedHtmlElementListeners.splice(0, savedHtmlElementListeners.length);
+
+	// Restore engine state
+	const engine = editor.layout.preview.engine;
+
+	if (engine.isPointerLock) {
+		ExitPointerlock();
+	}
+
+	if (engine.isFullscreen) {
+		ExitFullscreen();
+	}
+
+	engine.resize();
+}
+
+export function applyOverrides(editor: Editor) {
+	// Console
+	const consoleMethodsList = ["log", "warn", "error", "info"];
+	consoleMethodsList.forEach((method) => {
+		console[method] = (...args: any[]) => {
+			const node = (
+				<div className="text-inherit">
+					<b className="font-bold text-[#2d72d2]">[{method.toUpperCase()}] </b>
+					{args.join(", ")}
+				</div>
+			);
+
+			switch (method) {
+				case "log":
+					editor.layout.console.log(node);
+					break;
+				case "warn":
+					editor.layout.console.warn(node);
+					break;
+				case "error":
+					editor.layout.console.error(node);
+					break;
+				case "info":
+					editor.layout.console.log(node);
+					break;
+			}
+
+			savedConsoleMethods[method].apply(window, args);
+		};
+	});
+
+	const projectDir = dirname(editor.state.projectPath ?? "");
+	const publicDir = join(projectDir, "public");
+	const publicScene = join(publicDir, "scene");
+
+	// Fetch
+	window.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+		if (!isAbsolute(input.toString())) {
+			input = normalizeUrl(input.toString());
+			input = join(publicDir, input.toString());
+		}
+
+		return savedWindowMethods.fetch.call(window, input, init);
+	};
+
+	window.setTimeout = ((callback: (...args: any[]) => void, timeout?: number, ...args: any[]) => {
+		const id = savedWindowMethods.setTimeout.call(
+			window,
+			(...args: any[]) => {
+				callback(...args);
+				const index = savedTimeoutIds.indexOf(id);
+				if (index !== -1) {
+					savedTimeoutIds.splice(index, 1);
+				}
+			},
+			timeout,
+			...args
+		);
+		savedTimeoutIds.push(id);
+		return id;
+	}) as any;
+
+	window.clearTimeout = (id: number) => {
+		const index = savedTimeoutIds.indexOf(id);
+		if (index !== -1) {
+			savedTimeoutIds.splice(index, 1);
+		}
+
+		return savedWindowMethods.clearTimeout.call(window, id);
+	};
+
+	window.setInterval = (handler: TimerHandler, timeout?: number) => {
+		const id = savedWindowMethods.setInterval.call(window, handler, timeout);
+		savedIntervalIds.push(id);
+		return id;
+	};
+
+	window.clearInterval = (id: number) => {
+		const index = savedIntervalIds.indexOf(id);
+		if (index !== -1) {
+			savedIntervalIds.splice(index, 1);
+		}
+
+		return savedWindowMethods.clearInterval.call(window, id);
+	};
+
+	// HTML Element
+	HTMLElement.prototype.addEventListener = function (type: string, listener: EventListenerOrEventListenerObject, ...args: any[]) {
+		if (!getCurrentCallStack().includes(projectDir)) {
+			return savedHtmlElementMethods.addEventListener.call(this, type, listener, ...args);
+		}
+
+		savedHtmlElementListeners.push({
+			type,
+			listener,
+			element: this,
+		});
+
+		return savedHtmlElementMethods.addEventListener.call(this, type, listener, ...args);
+	};
+
+	HTMLElement.prototype.removeEventListener = function (type: string, listener: EventListenerOrEventListenerObject, ...args: any[]) {
+		const index = savedHtmlElementListeners.findIndex((config) => {
+			return config.element === this && config.type === type && config.listener === listener;
+		});
+
+		if (index !== -1) {
+			savedHtmlElementListeners.splice(index, 1);
+		}
+
+		return savedHtmlElementMethods.removeEventListener.call(this, type, listener, ...args);
+	};
+
+	// WebRequest
+	WebRequest.prototype.open = function (method: string, url: string) {
+		if (url && !isAbsolute(url)) {
+			url = normalizeUrl(url);
+			url = join(publicDir, url);
+		}
+
+		const temporaryTextureIndex = url?.indexOf(".bjseditor") ?? -1;
+		if (temporaryTextureIndex !== -1) {
+			url = join(publicDir, "..", url.substring(temporaryTextureIndex));
+		}
+
+		return savedWebRequestMethods.open.call(this, method, url);
+	};
+
+	// Engine
+	Engine.prototype.createRawCubeTextureFromUrl = (url: string, ...args: any[]) => {
+		if (url && url.includes(publicScene)) {
+			url = url.replace(publicScene, projectDir);
+		}
+
+		return savedEngineMethods.createRawCubeTextureFromUrl.call(editor.layout.preview.engine, url, ...args);
+	};
+
+	Engine.prototype.createCubeTexture = (rootUrl: string, ...args: any[]) => {
+		if (rootUrl && rootUrl.includes(publicScene)) {
+			rootUrl = rootUrl.replace(publicScene, projectDir);
+		}
+
+		return savedEngineMethods.createCubeTexture.call(editor.layout.preview.engine, rootUrl, ...args);
+	};
+
+	Engine.prototype.createTexture = (url: string, ...args: any[]) => {
+		if (url) {
+			if (!isAbsolute(url) && !url.startsWith("data:")) {
+				url = normalizeUrl(url);
+				url = join(publicScene, url);
+			}
+
+			const temporaryTextureIndex = url?.indexOf(".bjseditor") ?? -1;
+			const isExtractedTexture = url.includes("assets/editor-generated_extracted-textures");
+
+			if (temporaryTextureIndex !== -1) {
+				url = join(publicDir, "..", url.substring(temporaryTextureIndex));
+			} else if (url?.includes(publicScene) && !isExtractedTexture) {
+				url = url.replace(publicScene, projectDir);
+			}
+		}
+
+		return savedEngineMethods.createTexture.call(editor.layout.preview.engine, url, ...args);
+	};
+
+	// Textures
+	savedTextureMethods.textureParser = SerializationHelper._TextureParser;
+
+	// Observable
+	Observable.prototype.add = function (callback: any, ...args: any[]) {
+		if (!getCurrentCallStack().includes(projectDir)) {
+			return savedObservableMethods.add.call(this, callback, ...args);
+		}
+
+		const observer = savedObservableMethods.add.call(this, callback, ...args);
+
+		savedObservableListeners.push({
+			observer,
+			callback,
+			observable: this,
+		});
+
+		return observer;
+	};
+
+	Observable.prototype.addOnce = function (callback: any, ...args: any[]) {
+		if (!getCurrentCallStack().includes(projectDir)) {
+			return savedObservableMethods.addOnce.call(this, callback, ...args);
+		}
+
+		const observer = savedObservableMethods.addOnce.call(this, callback, ...args);
+
+		savedObservableListeners.push({
+			observer,
+			callback,
+			observable: this,
+		});
+
+		return observer;
+	};
+
+	Observable.prototype.remove = function (callbackOrObserver: any, ...args: any[]) {
+		const index = savedObservableListeners.findIndex((config) => {
+			return config.observer === callbackOrObserver || config.callback === callbackOrObserver;
+		});
+
+		if (index !== -1) {
+			savedObservableListeners.splice(index, 1);
+		}
+
+		return savedObservableMethods.remove.call(this, callbackOrObserver, ...args);
+	};
+
+	Observable.prototype.clear = function () {
+		for (let i = 0; i < savedObservableListeners.length; ++i) {
+			const config = savedObservableListeners[i];
+
+			if (config.observable === this) {
+				savedObservableMethods.remove.call(this, config.observer);
+				savedObservableListeners.splice(i, 1);
+				--i;
+			}
+		}
+	};
+}

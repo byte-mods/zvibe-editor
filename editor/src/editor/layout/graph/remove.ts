@@ -1,0 +1,246 @@
+import { Node, Light, AbstractMesh, Scene, IParticleSystem, Sprite, Skeleton } from "babylonjs";
+
+import { unique } from "../../../tools/tools";
+import { isSprite } from "../../../tools/guards/sprites";
+import { registerUndoRedo } from "../../../tools/undoredo";
+import { updateAllLights } from "../../../tools/light/shadows";
+import { isClusteredLight } from "../../../tools/light/cluster";
+import { isAnyParticleSystem } from "../../../tools/guards/particles";
+import { isAdvancedDynamicTexture } from "../../../tools/guards/texture";
+import { getLinkedAnimationGroupsFor } from "../../../tools/animation/group";
+import { isNode, isMesh, isAbstractMesh, isInstancedMesh, isCollisionInstancedMesh, isLight, isCamera, isAnyTransformNode, isSkeleton } from "../../../tools/guards/nodes";
+
+import { Editor } from "../../main";
+
+type _RemoveNodeData = {
+	node: Node;
+	parent: Node | null;
+	isClusteredLight: boolean;
+
+	lights: Light[];
+	skeletons: Skeleton[];
+	particleSystems: IParticleSystem[];
+};
+
+/**
+ * Removes the currently selected nodes in the graph with undo/redo support.
+ * @param editor defines the reference to the editor used to get the selected nodes and refresh the graph.
+ */
+export function removeNodes(editor: Editor) {
+	const scene = editor.layout.preview.scene;
+
+	const allData = editor.layout.graph
+		.getSelectedNodes()
+		.filter((n) => n.nodeData)
+		.map((n) => n.nodeData);
+
+	const nodes = allData
+		.filter((n) => isNode(n))
+		.map((node) => {
+			const attached = [node]
+				.concat(node.getDescendants(false, (n) => isNode(n)))
+				.map((descendant) => (isMesh(descendant) ? [descendant, ...descendant.instances] : [descendant]))
+				.flat()
+				.map((descendant) => {
+					return {
+						node: descendant,
+						parent: descendant.parent,
+						skeletons: scene.skeletons.filter((skeleton) => isAbstractMesh(descendant) && descendant.skeleton === skeleton),
+						particleSystems: scene.particleSystems.filter((ps) => ps.emitter === descendant),
+						isClusteredLight: isLight(descendant) && isClusteredLight(descendant, editor),
+						lights: scene.lights.filter((light) => {
+							return light
+								.getShadowGenerator()
+								?.getShadowMap()
+								?.renderList?.includes(descendant as AbstractMesh);
+						}),
+					} as _RemoveNodeData;
+				});
+
+			return attached;
+		})
+		.flat();
+
+	const skeletons = unique(
+		nodes
+			.map((d) => d.skeletons)
+			.flat()
+			.filter((skeleton) => {
+				return scene.meshes.find((mesh) => mesh.skeleton === skeleton && !nodes.find((d) => d.node === mesh)) === undefined;
+			})
+			.concat(allData.filter((d) => isSkeleton(d)))
+	);
+
+	const particleSystems = unique(
+		nodes
+			.map((d) => d.particleSystems)
+			.flat()
+			.concat(allData.filter((d) => isAnyParticleSystem(d)))
+	);
+
+	const sprites = allData.filter((d) => isSprite(d)) as Sprite[];
+	const advancedGuiTextures = allData.filter((d) => isAdvancedDynamicTexture(d));
+	const animationGroups = getLinkedAnimationGroupsFor([...particleSystems, ...advancedGuiTextures, ...nodes.map((d) => d.node)], scene);
+
+	registerUndoRedo({
+		executeRedo: true,
+		action: () => {
+			editor.layout.graph.refresh();
+			editor.layout.preview.gizmo.setAttachedObject(null);
+			editor.layout.inspector.setEditedObject(editor.layout.preview.scene);
+
+			updateAllLights(scene);
+		},
+		undo: () => {
+			nodes.forEach((d) => {
+				restoreNodeData(editor, d, scene);
+			});
+
+			particleSystems.forEach((particleSystem) => {
+				scene.addParticleSystem(particleSystem);
+			});
+
+			skeletons.forEach((skeleton) => {
+				scene.addSkeleton(skeleton);
+			});
+
+			sprites.forEach((sprite) => {
+				sprite.manager.sprites.push(sprite);
+			});
+
+			advancedGuiTextures.forEach((node) => {
+				scene.addTexture(node);
+
+				const layer = scene.layers.find((layer) => layer.texture === node);
+				if (layer) {
+					layer.isEnabled = true;
+				}
+			});
+
+			animationGroups.forEach((targetedAnimations, animationGroup) => {
+				targetedAnimations.forEach((targetedAnimation) => {
+					animationGroup.addTargetedAnimation(targetedAnimation.animation, targetedAnimation.target);
+				});
+
+				if (!scene.animationGroups.includes(animationGroup)) {
+					scene.addAnimationGroup(animationGroup);
+				}
+			});
+		},
+		redo: () => {
+			nodes.forEach((d) => {
+				removeNodeData(editor, d, scene);
+			});
+
+			particleSystems.forEach((particleSystem) => {
+				scene.removeParticleSystem(particleSystem);
+			});
+
+			skeletons.forEach((skeleton) => {
+				scene.removeSkeleton(skeleton);
+			});
+
+			sprites.forEach((sprite) => {
+				const index = sprite.manager.sprites.indexOf(sprite);
+				if (index !== -1) {
+					sprite.manager.sprites.splice(index, 1);
+				}
+			});
+
+			advancedGuiTextures.forEach((node) => {
+				scene.removeTexture(node);
+
+				const layer = scene.layers.find((layer) => layer.texture === node);
+				if (layer) {
+					layer.isEnabled = false;
+				}
+			});
+
+			animationGroups.forEach((targetedAnimations, animationGroup) => {
+				targetedAnimations.forEach((targetedAnimation) => {
+					animationGroup.removeTargetedAnimation(targetedAnimation.animation);
+				});
+
+				if (!animationGroup.targetedAnimations.length) {
+					scene.removeAnimationGroup(animationGroup);
+				} else {
+					console.log(nodes.find((d) => d.node === animationGroup.targetedAnimations[0].target));
+				}
+			});
+		},
+	});
+
+	editor.layout.preview.selectionOutlineLayer.clearSelection();
+}
+
+function restoreNodeData(editor: Editor, data: _RemoveNodeData, scene: Scene) {
+	const node = data.node;
+
+	if (isAbstractMesh(node)) {
+		if (isInstancedMesh(node) || isCollisionInstancedMesh(node)) {
+			node.sourceMesh.addInstance(node);
+		}
+
+		scene.addMesh(node);
+
+		data.lights.forEach((light) => {
+			light.getShadowGenerator()?.getShadowMap()?.renderList?.push(node);
+		});
+	}
+
+	if (isAnyTransformNode(node)) {
+		scene.addTransformNode(node);
+	}
+
+	if (isLight(node)) {
+		scene.addLight(node);
+
+		if (data.isClusteredLight) {
+			editor.layout.preview.clusteredLightContainer.addLight(node);
+		}
+	}
+
+	if (isCamera(node)) {
+		scene.addCamera(node);
+	}
+}
+
+function removeNodeData(editor: Editor, data: _RemoveNodeData, scene: Scene) {
+	const node = data.node;
+
+	if (isAbstractMesh(node)) {
+		if (isInstancedMesh(node) || isCollisionInstancedMesh(node)) {
+			node.sourceMesh.removeInstance(node);
+		}
+
+		scene.removeMesh(node);
+
+		data.lights.forEach((light) => {
+			const renderList = light.getShadowGenerator()?.getShadowMap()?.renderList;
+			const index = renderList?.indexOf(node) ?? -1;
+			if (index !== -1) {
+				renderList?.splice(index, 1);
+			}
+		});
+	}
+
+	if (isAnyTransformNode(node)) {
+		scene.removeTransformNode(node);
+	}
+
+	if (isLight(node)) {
+		if (data.isClusteredLight) {
+			editor.layout.preview.clusteredLightContainer.removeLight(node);
+		}
+
+		scene.removeLight(node);
+	}
+
+	if (isCamera(node)) {
+		scene.removeCamera(node);
+
+		if (node === editor.layout.preview._previewCamera) {
+			editor.layout.preview.setCameraPreviewActive(null);
+		}
+	}
+}

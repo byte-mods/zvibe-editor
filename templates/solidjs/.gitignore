@@ -1,0 +1,46 @@
+dist
+.wrangler
+.output
+.vercel
+.netlify
+.vinxi
+app.config.timestamp_*.js
+
+# Environment
+.env
+.env*.local
+
+# dependencies
+/node_modules
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+*.launch
+.settings/
+
+# Temp
+gitignore
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Editor directories and files
+.bjseditor
+.babylon-editor/asset-locks/
+.babylon-editor/changelists.json
+.babylon-editor/merge-rules.json
+.babylon-editor/collaboration.json
+.babylon-editor/remote-collaboration.json
+.babylon-editor/remote-collaboration-events.json
+.babylon-editor/remote-collaboration-events.json.corrupt-*.json
+.babylon-editor/collaboration-revisions.json
+.babylon-editor/collaboration-node-edits.json
+.babylon-editor/collaboration-structure.json
+.babylon-editor/collaborative-text/
+.babylon-editor/collaborative-lists.json
+.babylon-editor/*.operation
+certs/collaboration.crt
+certs/collaboration.key

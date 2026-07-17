@@ -1,93 +1,143 @@
-# Babylon Zvibe Editor
+# Babylon.js Editor 5
 
+**Focus more on creating and less on coding.**
 
+## Introduction
 
-## Getting started
+The Babylon.js Editor is a desktop application used to create and edit 3D scenes using the Babylon.js 3D engine.
+The Editor is available on Windows, macOS and Linux.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+It includes built-in templates, including a Next.js template, allowing you to bypass the tedious setup process and dive straight into building your project.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+The model-import pipeline supports exact artist-authored LOD groups as well as generated deformation-safe LODs. Both workflows are available from the Model Inspector and the local MCP server, and produce the same runtime links in editor and CLI builds.
 
-## Add your files
+The asset browser treats corrupt or mislabeled image files as recoverable assets: thumbnail and resize failures fall back to a generic image card instead of producing unhandled renderer exceptions. Development reloads are scoped to application windows so Electron DevTools and internal renderers are not traversed by the legacy reloader. Unpackaged builds keep DevTools opt-in to avoid Electron protocol diagnostics for every new window: use `Cmd/Ctrl+Alt+I` for the focused window, or launch with `AUTO_OPEN_DEVTOOLS=true` when automatic opening is specifically needed.
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+✌️ The website is available here: https://editor.babylonjs.com
 
+🏛️ The documentation is available here: https://editor.babylonjs.com/documentation
+
+## Download
+
+**v5.4.2**
+
+- Windows x64: https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/updates/BabylonJS%20Editor%20Setup%205.4.2.exe
+- macOS Apple Chip: https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/updates/BabylonJS%20Editor-5.4.2-arm64.dmg
+- macOS Intel Chip: https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/updates/x64/BabylonJS%20Editor-5.4.2.dmg
+- Linux x64: https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/updates/BabylonJS%20Editor-5.4.2.AppImage
+- Linux arm64: https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/updates/BabylonJS%20Editor-5.4.2-arm64.AppImage
+
+## Prerequisites
+
+### Prerequisites for Windows
+
+On **Windows**, you need some tools to be present in the system like Python and C++ compiler. Windows users can easily install them by running the following command in PowerShell as administrator:
+
+```bash
+# For more information see https://github.com/felixrieseberg/windows-build-tools
+npm install --global --production windows-build-tools
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/gaming4934950/babylon-zvibe-editor.git
-git branch -M main
-git push -uf origin main
+
+The following are also needed:
+
+- [Windows SDK](https://developer.microsoft.com/en-us/windows/downloads/windows-10-sdk) - only the "Desktop C++ Apps" components are needed to be installed
+- Spectre-mitigated libraries - In order to avoid the build error "MSB8040: Spectre-mitigated libraries are required for this project", open the Visual Studio Installer, press the Modify button, navigate to the "Individual components" tab, search "Spectre", and install an option like "MSVC v143 - VS 2022 C++ x64/x86 Spectre-mitigated libs (Latest)" (the exact option to install will depend on your version of Visual Studio as well as your operating system architecture)
+
+### Prerequisites for macOS
+
+On **macOS**, you need to install XCode in order to compile native modules used by the Editor.
+You can get XCode from the [AppStore](https://apps.apple.com/fr/app/xcode/id497799835?mt=12)
+
+### Prerequisites for Linux (apt)
+
+```bash
+sudo apt install -y make python build-essential
 ```
 
-## Integrate with your tools
+## Installing and building
 
-* [Set up project integrations](https://gitlab.com/gaming4934950/babylon-zvibe-editor/-/settings/integrations)
+First, install the dependencies. This repository uses yarn classic.
 
-## Collaborate with your team
+```bash
+yarn install
+```
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+To build the editor and its associated tools, use the "build" command:
 
-## Test and Deploy
+```bash
+yarn build
+```
 
-Use the built-in continuous integration in GitLab.
+## Running
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+Using the command line at the root of the repository, just type:
 
-***
+```bash
+yarn start
+```
 
-# Editing this README
+The devtools will open automatically.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+## Developing
 
-## Suggestions for a good README
+To watch the Editor and its dependencies, use the following command:
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+```bash
+yarn watch-editor-all
+```
 
-## Name
-Choose a self-explaining name for your project.
+Using Visual Studio Code, you can also use a specific task to watch the Editor and other packages.
+Just type `Ctrl+Shift+B` (or `Cmd+Shift+B` on macOS) and select the task `watch-all-editor`.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+Before contributing, please ensure that all code is formatted correctly and respects the project's coding rules.
+You can lint files using the following command:
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```bash
+yarn lint
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+And you can fix all fixable issues using:
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+```bash
+yarn lint-fix
+```
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## Packaging
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+Due to the native dependencies, builds on macOS must be performed on a macOS machine and builds on Windows must be performed on a Windows machine with all the requirements installed (XCode, C++ compilers etc.).
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+To package the Editor, just use the "**package**" command.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+```bash
+# For the current platform and architecture
+yarn package --noSign
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+# By providing the target architecture
+yarn package --noSign --x64
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+# For both architectures
+yarn package --noSign --arm64 --x64
+```
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+This will re-install the depdendencies to ensure they are up-to-date, build the Editor and its tools to finally package the Electron application for the desired target.
 
-## License
-For open source projects, say how it is licensed.
+In order to sign the application on **macOS**, you need to add a **.env** file at the root of the repository and set the following environment variables:
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```env
+APPLE_ID=
+APPLE_APP_SPECIFIC_PASSWORD=
+APPLE_TEAM_ID=
+```
+
+Then use the package command by omitting the **--noSign** flag:
+
+```bash
+# For the current platform and architecture
+yarn package
+
+# By providing the target architecture
+yarn package --x64
+
+# For both architectures
+yarn package --arm64 --x64
+```
