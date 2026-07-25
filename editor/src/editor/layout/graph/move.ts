@@ -6,7 +6,14 @@ import { registerUndoRedo } from "../../../tools/undoredo";
 import { isClusteredLight } from "../../../tools/light/cluster";
 import { isAnyParticleSystem } from "../../../tools/guards/particles";
 import { isAbstractMesh, isClusteredLightContainer, isLight, isNode } from "../../../tools/guards/nodes";
-import { applyNodeParentingConfiguration, applyTransformNodeParentingConfiguration, IOldNodeHierarchyConfiguration } from "../../../tools/node/parenting";
+import {
+	applyNodeParentingConfiguration,
+	applyTransformNodeParentingConfiguration,
+	getNodeParentingConfiguration,
+	IOldNodeHierarchyConfiguration,
+} from "../../../tools/node/parenting";
+
+import { ISceneObjectMovePlan, planSceneObjectMove } from "../../../project/scene-workspace-move";
 
 import { Editor } from "../../main";
 
@@ -126,4 +133,56 @@ export function setNewParentForGraphSelectedNodes(editor: Editor, newParent: any
 	});
 
 	editor.layout.graph.refresh();
+}
+
+/** Moves selected authored roots between synthetic scene roots without creating Babylon parents. */
+export function moveGraphSelectedNodesToScene(editor: Editor, targetScene: string): void {
+	const selectedObjects = editor.layout.graph
+		.getSelectedNodes()
+		.map((node) => node.nodeData)
+		.filter((object): object is object => object !== null && (typeof object === "object" || typeof object === "function"));
+	moveSceneObjectsToScene(editor, selectedObjects, targetScene);
+}
+
+/** Moves an exact object selection between authored scenes and registers complete ownership/parent undo. */
+export function moveSceneObjectsToScene(editor: Editor, selectedObjects: object[], targetScene: string): ISceneObjectMovePlan {
+	const plan = planSceneObjectMove(editor.layout.preview.scene, editor.sceneWorkspace, selectedObjects, targetScene);
+	const parentConfigurations = new Map(plan.rootNodes.map((node) => [node, getNodeParentingConfiguration(node)]));
+
+	registerUndoRedo({
+		executeRedo: true,
+		action: () => void editor.layout.graph.refresh(),
+		undo: () => {
+			restoreMoveOwners(editor, plan);
+			parentConfigurations.forEach((configuration, node) => applyNodeParentingConfiguration(node, configuration));
+		},
+		redo: () => {
+			const tempTransformNode = new TransformNode("sceneMoveTempParent", editor.layout.preview.scene);
+			try {
+				editor.sceneWorkspace.claimObjects(plan.targetScene, plan.objects, true);
+				plan.rootNodes.forEach((node) => {
+					if (node.parent) {
+						applyTransformNodeParentingConfiguration(node, null, tempTransformNode);
+					}
+				});
+			} catch (error) {
+				restoreMoveOwners(editor, plan);
+				parentConfigurations.forEach((configuration, node) => applyNodeParentingConfiguration(node, configuration));
+				throw error;
+			} finally {
+				tempTransformNode.dispose(false, true);
+			}
+		},
+	});
+	return plan;
+}
+
+function restoreMoveOwners(editor: Editor, plan: ISceneObjectMovePlan): void {
+	const objectsByOwner = new Map<string, object[]>();
+	plan.previousOwners.forEach((owner, object) => {
+		const objects = objectsByOwner.get(owner) ?? [];
+		objects.push(object);
+		objectsByOwner.set(owner, objects);
+	});
+	objectsByOwner.forEach((objects, owner) => editor.sceneWorkspace.claimObjects(owner, objects, true));
 }

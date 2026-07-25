@@ -46,7 +46,7 @@ describe("editor/assets-browser/image-item", () => {
 		pathExists.mockResolvedValue(true);
 		toBuffer.mockRejectedValue(new Error("Input file contains unsupported image format"));
 		sharp.mockReturnValue({
-			resize: () => ({ toBuffer }),
+			resize: () => ({ png: () => ({ toBuffer }) }),
 		});
 	});
 
@@ -71,7 +71,7 @@ describe("editor/assets-browser/image-item", () => {
 			}
 			return {
 				metadata: () => Promise.resolve({ width: 128, height: 128 }),
-				resize: () => ({ toBuffer: () => Promise.resolve(resized) }),
+				resize: () => ({ png: () => ({ toBuffer: () => Promise.resolve(resized) }) }),
 			};
 		});
 		const forceUpdate = vi.fn();

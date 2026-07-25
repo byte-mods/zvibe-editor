@@ -63,22 +63,38 @@ function nextPowerOfTwo(value: number): number {
 function packAtlasSources(
 	sources: IAtlasSource[],
 	width: number,
-	padding: number
-): { placements: Map<string, { x: number; y: number; width: number; height: number }>; height: number } | null {
+	padding: number,
+	allowRotation: boolean
+): { placements: Map<string, { x: number; y: number; width: number; height: number; rotated: boolean }>; height: number } | null {
 	let x = padding;
 	let y = padding;
 	let rowHeight = 0;
-	const placements = new Map<string, { x: number; y: number; width: number; height: number }>();
+	const placements = new Map<string, { x: number; y: number; width: number; height: number; rotated: boolean }>();
 	for (const source of sources) {
-		if (source.width + padding * 2 > width) return null;
-		if (x + source.width + padding > width) {
+		const orientations = [
+			{ width: source.width, height: source.height, rotated: false },
+			...(allowRotation && source.width !== source.height ? [{ width: source.height, height: source.width, rotated: true }] : []),
+		];
+		const choose = (atX: number, currentRowHeight: number): (typeof orientations)[number] | null =>
+			orientations
+				.filter((orientation) => atX + orientation.width + padding <= width)
+				.sort(
+					(a, b) =>
+						Math.max(currentRowHeight, a.height) - Math.max(currentRowHeight, b.height) || atX + a.width - (atX + b.width) || Number(a.rotated) - Number(b.rotated)
+				)[0] ?? null;
+		let orientation = choose(x, rowHeight);
+		if (!orientation) {
 			x = padding;
 			y += rowHeight + padding;
 			rowHeight = 0;
+			orientation = choose(x, rowHeight);
 		}
-		placements.set(source.path, { x, y, width: source.width, height: source.height });
-		x += source.width + padding;
-		rowHeight = Math.max(rowHeight, source.height);
+		if (!orientation) {
+			return null;
+		}
+		placements.set(source.path, { x, y, ...orientation });
+		x += orientation.width + padding;
+		rowHeight = Math.max(rowHeight, orientation.height);
 	}
 	return { placements, height: y + rowHeight + padding };
 }
@@ -241,6 +257,7 @@ export async function packSpriteAtlas(_scene: Scene, data: any, options: IMCPAct
 	const directory = dirname(projectConfiguration.path!);
 	const sourcePaths = [...new Set<string>(data.sourcePaths)].sort();
 	const trimTransparent = data.trimTransparent === true;
+	const allowRotation = data.allowRotation === true;
 	const sources: any[] = await Promise.all(
 		sourcePaths.map(async (path) => {
 			if (extname(path).toLowerCase() !== ".png") throw new Error(`Atlas source "${path}" must be a PNG file.`);
@@ -297,9 +314,9 @@ export async function packSpriteAtlas(_scene: Scene, data: any, options: IMCPAct
 	if (new Set(names).size !== names.length) throw new Error("Atlas source filenames must be unique; rename duplicate PNG filenames before packing.");
 
 	let packed: ReturnType<typeof packAtlasSources> = null;
-	let atlasWidth = nextPowerOfTwo(Math.max(...sources.map((source) => source.width + padding * 2)));
+	let atlasWidth = nextPowerOfTwo(Math.max(...sources.map((source) => (allowRotation ? Math.min(source.width, source.height) : source.width) + padding * 2)));
 	while (atlasWidth <= maxSize) {
-		const candidate = packAtlasSources(sources, atlasWidth, padding);
+		const candidate = packAtlasSources(sources, atlasWidth, padding, allowRotation);
 		if (candidate && nextPowerOfTwo(candidate.height) <= maxSize) {
 			packed = candidate;
 			break;
@@ -310,11 +327,24 @@ export async function packSpriteAtlas(_scene: Scene, data: any, options: IMCPAct
 
 	const outputPath = resolveProjectPath(data.outputPath);
 	const atlasHeight = nextPowerOfTwo(packed.height);
+	const composites = await Promise.all(
+		sources.map(async (source) => {
+			const placement = packed!.placements.get(source.path)!;
+			return {
+				input: placement.rotated
+					? await sharp(source.input ?? source.absolutePath)
+							.rotate(90)
+							.png()
+							.toBuffer()
+					: (source.input ?? source.absolutePath),
+				left: placement.x,
+				top: placement.y,
+			};
+		})
+	);
 	await ensureDir(dirname(outputPath));
 	await sharp({ create: { width: atlasWidth, height: atlasHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-		.composite(
-			sources.map((source) => ({ input: source.input ?? source.absolutePath, left: packed!.placements.get(source.path)!.x, top: packed!.placements.get(source.path)!.y }))
-		)
+		.composite(composites)
 		.png()
 		.toFile(outputPath);
 	const frames = Object.fromEntries(
@@ -324,9 +354,9 @@ export async function packSpriteAtlas(_scene: Scene, data: any, options: IMCPAct
 				basename(source.path),
 				{
 					frame: { x: placement.x, y: placement.y, w: placement.width, h: placement.height },
-					rotated: false,
+					rotated: placement.rotated,
 					trimmed: source.trimmed,
-					spriteSourceSize: { x: source.trimX ?? 0, y: source.trimY ?? 0, w: placement.width, h: placement.height },
+					spriteSourceSize: { x: source.trimX ?? 0, y: source.trimY ?? 0, w: source.width, h: source.height },
 					sourceSize: { w: source.sourceWidth, h: source.sourceHeight },
 				},
 			];
@@ -346,6 +376,8 @@ export async function packSpriteAtlas(_scene: Scene, data: any, options: IMCPAct
 		height: atlasHeight,
 		padding,
 		trimTransparent,
+		allowRotation,
+		rotatedFrames: sources.filter((source) => packed!.placements.get(source.path)!.rotated).map((source) => basename(source.path)),
 		frames: Object.keys(frames),
 	};
 }

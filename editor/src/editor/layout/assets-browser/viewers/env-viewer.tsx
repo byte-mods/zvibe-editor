@@ -2,7 +2,7 @@ import { basename, extname } from "path/posix";
 
 import { useEffect, useRef } from "react";
 
-import { Engine, Scene, CreateSphere, ArcRotateCamera, Vector3, PBRMaterial, CubeTexture, Texture, HDRCubeTexture } from "babylonjs";
+import { Engine, Scene, CreateSphere, ArcRotateCamera, Vector3, PBRMaterial, CubeTexture, Texture, EXRCubeTexture, HDRCubeTexture } from "babylonjs";
 
 import { showAlert } from "../../../../ui/dialog";
 
@@ -30,13 +30,16 @@ function AssetBrowserEnvViewer(props: IAssetBrowserEnvViewerProps) {
 		const scene = new Scene(engine);
 		scene.clearColor.set(0, 0, 0, 0);
 
-		let texture: CubeTexture | HDRCubeTexture | null = null;
+		let texture: CubeTexture | HDRCubeTexture | EXRCubeTexture | null = null;
 		switch (extname(props.absolutePath).toLowerCase()) {
 			case ".env":
 				texture = CubeTexture.CreateFromPrefilteredData(props.absolutePath, scene);
 				break;
 			case ".hdr":
 				texture = new HDRCubeTexture(props.absolutePath, scene, 512);
+				break;
+			case ".exr":
+				texture = new EXRCubeTexture(props.absolutePath, scene, 512);
 				break;
 		}
 

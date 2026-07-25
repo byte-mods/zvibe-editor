@@ -44,6 +44,9 @@ export class AssimpJSLoader implements ISceneLoaderPluginAsync {
 		".dxf": {
 			isBinary: true,
 		},
+		".blend": {
+			isBinary: true,
+		},
 	};
 
 	public constructor(

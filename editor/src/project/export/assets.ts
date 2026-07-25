@@ -8,6 +8,7 @@ import {
 	normalizeFontImporterSettings,
 	normalizeMaterialImporterSettings,
 	ModelImporterPlatform,
+	TextureImporterPlatform,
 	normalizeModelImporterSettings,
 	normalizeTextureImporterSettings,
 	normalizeVideoImporterSettings,
@@ -32,11 +33,11 @@ import { getModelImporterSourceFingerprint, processModelImporterOutput } from ".
 import { processAnimationImporterOutput } from "../../mcp/assets/animation-importer";
 import { processTextureImporterOutput } from "../../mcp/assets/texture-importer";
 
-const supportedImagesExtensions: string[] = [".jpg", ".jpeg", ".webp", ".png", ".bmp", ".gif", ".tif", ".tiff", ".svg"];
+const supportedImagesExtensions: string[] = [".jpg", ".jpeg", ".webp", ".png", ".bmp", ".gif", ".tif", ".tiff", ".tga", ".psd", ".psb", ".svg", ".hdr", ".exr"];
 const supportedCubeTexturesExtensions: string[] = [".env", ".dds", ".hdr"];
 const supportedAudioExtensions: string[] = [".mp3", ".wav", ".wave", ".ogg", ".flac", ".m4a"];
 const supportedVideoExtensions: string[] = [".mp4", ".webm", ".ogv", ".mov"];
-const supportedModelExtensions: string[] = [".glb", ".gltf", ".babylon", ".fbx", ".obj", ".stl", ".dae", ".3ds"];
+const supportedModelExtensions: string[] = [".glb", ".gltf", ".babylon", ".fbx", ".obj", ".stl", ".dae", ".3ds", ".ms3d", ".b3d", ".x", ".lwo", ".dxf", ".blend"];
 const supportedFontExtensions: string[] = [".ttf", ".otf", ".woff", ".woff2"];
 const supportedAnimationExtensions: string[] = [".animation", ".animations", ".animator", ".controller"];
 const supportedMaterialExtensions: string[] = [".material", ".mtl"];
@@ -56,9 +57,14 @@ const supportedExtensions: string[] = [
 	...supportedMiscExtensions,
 ];
 
+function isUnsupportedImageFormatError(error: unknown): boolean {
+	return error instanceof Error && /unsupported image format/i.test(error.message);
+}
+
 export type ProcessFileOptions = {
 	optimize: boolean;
 	modelPlatform?: ModelImporterPlatform;
+	assetPlatform?: TextureImporterPlatform;
 	scenePath: string;
 	projectDir: string;
 	exportedAssets: string[];
@@ -103,7 +109,10 @@ async function generatedTextureAssets(runtimePath: string, outputRoot: string): 
 			runtime.outputPath,
 			runtime.readableBitmapPath,
 			runtime.readableDescriptorPath,
+			runtime.previewPath,
+			runtime.environmentPath,
 			...(Array.isArray(runtime.mipmaps) ? runtime.mipmaps.map((mipmap: { path?: unknown }) => mipmap.path) : []),
+			...(Array.isArray(runtime.cubeFaces) ? runtime.cubeFaces.map((face: { path?: unknown }) => face.path) : []),
 		].filter((candidate) => candidate !== null && candidate !== undefined);
 		const paths = candidates.map((candidate) => safeGeneratedAssetPath(outputRoot, candidate));
 		return paths.length > 0 && paths.every((path: string | null): path is string => path !== null) ? paths : null;
@@ -237,8 +246,9 @@ export async function processAssetFile(editor: Editor, file: string, options: Pr
 	const fileStat = await stat(file);
 	const modelSettings = importer.kind === "model" ? normalizeModelImporterSettings(importer.settings) : null;
 	const modelSourceFingerprint = modelSettings ? await getModelImporterSourceFingerprint(file, modelSettings) : null;
+	const targetPlatform = options.assetPlatform ?? options.modelPlatform ?? "default";
 	const hash = `${fileStat.mtimeMs}:${JSON.stringify(importer)}${modelSourceFingerprint ? `:${modelSourceFingerprint}` : ""}${
-		importer.kind === "model" ? `:platform:${options.modelPlatform ?? "default"}` : ""
+		importer.kind === "model" || importer.kind === "texture" ? `:platform:${targetPlatform}` : ""
 	}`;
 
 	isNewFile = !options.cache[relativePath] || options.cache[relativePath] !== hash;
@@ -289,7 +299,19 @@ export async function processAssetFile(editor: Editor, file: string, options: Pr
 	) {
 		if (textureSettings) {
 			await removeGeneratedTextureAssets(textureRuntimePath, options.scenePath);
-			const result = await processTextureImporterOutput(file, finalPath, textureSettings);
+			let result: Awaited<ReturnType<typeof processTextureImporterOutput>>;
+			try {
+				result = await processTextureImporterOutput(file, finalPath, textureSettings, targetPlatform);
+			} catch (error) {
+				if (!isUnsupportedImageFormatError(error)) {
+					throw error;
+				}
+
+				delete options.cache[relativePath];
+				await remove(expectedTexturePath);
+				editor.layout.console.warn(`Skipped invalid image asset "${relativePath}": ${(error as Error).message}`);
+				return;
+			}
 			const portablePath = (path: string | null): string | null => (path ? path.replace(`${options.scenePath}/`, "") : null);
 			const runtime = {
 				version: 1,
@@ -300,6 +322,9 @@ export async function processAssetFile(editor: Editor, file: string, options: Pr
 				generateMipmaps: result.settings.generateMipmaps,
 				readableBitmapPath: portablePath(result.readableBitmapPath),
 				readableDescriptorPath: portablePath(result.readableDescriptorPath),
+				previewPath: portablePath(result.previewPath ?? null),
+				cubeFaces: result.highDynamicRange?.cubeFaces.map((face) => ({ ...face, path: portablePath(face.path) })) ?? [],
+				environmentPath: portablePath(result.highDynamicRange?.environmentPath ?? null),
 				mipmaps: result.mipmaps.map((mipmap) => ({ path: portablePath(mipmap.path), width: mipmap.width, height: mipmap.height })),
 				result: {
 					...result,
@@ -307,6 +332,14 @@ export async function processAssetFile(editor: Editor, file: string, options: Pr
 					outputPath: portablePath(result.outputPath),
 					readableBitmapPath: portablePath(result.readableBitmapPath),
 					readableDescriptorPath: portablePath(result.readableDescriptorPath),
+					previewPath: portablePath(result.previewPath ?? null),
+					highDynamicRange: result.highDynamicRange
+						? {
+								...result.highDynamicRange,
+								environmentPath: portablePath(result.highDynamicRange.environmentPath),
+								cubeFaces: result.highDynamicRange.cubeFaces.map((face) => ({ ...face, path: portablePath(face.path) })),
+							}
+						: null,
 					mipmaps: result.mipmaps.map((mipmap) => ({ ...mipmap, path: portablePath(mipmap.path) })),
 				},
 			};
@@ -317,6 +350,9 @@ export async function processAssetFile(editor: Editor, file: string, options: Pr
 				...result.mipmaps.map((mipmap) => mipmap.path),
 				...(result.readableBitmapPath ? [result.readableBitmapPath] : []),
 				...(result.readableDescriptorPath ? [result.readableDescriptorPath] : []),
+				...(result.previewPath ? [result.previewPath] : []),
+				...(result.highDynamicRange?.cubeFaces.map((face) => face.path) ?? []),
+				...(result.highDynamicRange?.environmentPath && result.highDynamicRange.environmentPath !== result.outputPath ? [result.highDynamicRange.environmentPath] : []),
 				textureRuntimePath,
 			];
 		} else if (importer.kind === "audio" && supportedAudioExtensions.includes(extension)) {

@@ -1,4 +1,3 @@
-import sharp from "sharp";
 import { pathExists, writeFile } from "fs-extra";
 import { basename, dirname, extname, join, relative } from "path/posix";
 
@@ -13,6 +12,7 @@ import { IoResizeSharp } from "react-icons/io5";
 
 import { getPowerOfTwoUntil } from "../../../../tools/maths/scalar";
 import { findAvailableFilename } from "../../../../tools/fs";
+import { openProjectImage } from "../../../../tools/assets/image";
 
 import { projectConfiguration } from "../../../../project/configuration";
 import { convertImageAsset } from "../../../../mcp/assets/assets";
@@ -101,8 +101,8 @@ export class AssetBrowserImageItem extends AssetsBrowserItem {
 				return this._markThumbnailUnavailable();
 			}
 
-			const buffer = (await sharp(this.props.absolutePath).resize(256, 256).toBuffer()) as Buffer<ArrayBuffer>;
-			this._thumbnailPath = URL.createObjectURL(new Blob([buffer]));
+			const buffer = await (await openProjectImage(this.props.absolutePath)).resize(256, 256).png().toBuffer();
+			this._thumbnailPath = URL.createObjectURL(new Blob([new Uint8Array(buffer)]));
 			this._thumbnailError = false;
 		} catch {
 			// Files can be corrupt or merely use an image extension. Keep the asset usable without leaking an unhandled Sharp rejection.
@@ -120,7 +120,7 @@ export class AssetBrowserImageItem extends AssetsBrowserItem {
 		}
 
 		try {
-			const metadata = await sharp(this.props.absolutePath).metadata();
+			const metadata = await (await openProjectImage(this.props.absolutePath)).metadata();
 			if (metadata.width && metadata.height) {
 				this._size.width = metadata.width;
 				this._size.height = metadata.height;
@@ -171,7 +171,7 @@ export class AssetBrowserImageItem extends AssetsBrowserItem {
 			selectedFiles.map(async (file) => {
 				try {
 					const availableResizes: ISize[] = [];
-					const metadata = await sharp(file).metadata();
+					const metadata = await (await openProjectImage(file)).metadata();
 
 					if (metadata.width && metadata.height) {
 						let width = metadata.width * 0.5;
@@ -196,7 +196,7 @@ export class AssetBrowserImageItem extends AssetsBrowserItem {
 						return;
 					}
 
-					const buffer = await sharp(file).resize(width, height).toBuffer();
+					const buffer = await (await openProjectImage(file)).resize(width, height).png().toBuffer();
 					await writeFile(file, buffer);
 					resizedCount += 1;
 				} catch {
@@ -222,7 +222,7 @@ export class AssetBrowserImageItem extends AssetsBrowserItem {
 		}
 		const projectDirectory = dirname(projectConfiguration.path);
 		const selectedFiles = this.props.editor.layout.assets.state.selectedKeys.filter((path) =>
-			[".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff"].includes(extname(path).toLowerCase())
+			[".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff", ".tga", ".psd", ".psb"].includes(extname(path).toLowerCase())
 		);
 		const files = selectedFiles.length ? selectedFiles : [this.props.absolutePath];
 		try {

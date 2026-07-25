@@ -111,6 +111,7 @@ export class EditorTransformNodeInspector extends Component<IEditorInspectorImpl
 					label={<div className="w-14">Rotation</div>}
 					object={o}
 					property="proxy"
+					prefabOverride={{ object, property: "rotation" }}
 					asDegrees
 					step={0.1}
 					onFinishChange={() => onFinishChange?.()}

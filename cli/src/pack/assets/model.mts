@@ -7,6 +7,7 @@ import { LoadAssetContainerAsync, Material, NullEngine, Scene, SceneSerializer }
 import fs from "fs-extra";
 import {
 	convertAssimpModelFileToGlb,
+	blendRequiresExternalConverter,
 	configureSerializedModelGeneratedLods,
 	emptyExecutedModelImport,
 	executeModelImporterEntries,
@@ -21,18 +22,25 @@ import {
 } from "babylonjs-editor-tools";
 
 import { normalizedGlob } from "../../tools/fs.mjs";
+import { convertBlendFileToGlb } from "../../blender/converter.mjs";
 
 const MAX_MODEL_SOURCE_BYTES = 256 * 1024 * 1024;
-const supportedModelExtensions = [".glb", ".gltf", ".babylon", ".fbx", ".obj", ".stl", ".dae", ".3ds"];
-const legacyModelExtensions = new Set([".fbx", ".dae", ".3ds"]);
+const supportedModelExtensions = [".glb", ".gltf", ".babylon", ".fbx", ".obj", ".stl", ".dae", ".3ds", ".ms3d", ".b3d", ".x", ".lwo", ".dxf", ".blend"];
+const legacyModelExtensions = new Set([".fbx", ".dae", ".3ds", ".ms3d", ".b3d", ".x", ".lwo", ".dxf", ".blend"]);
 let assimpRuntimePromise: Promise<any> | null = null;
 
-async function resolveContainedResource(projectRoot: string, sourcePath: string, reference: string, dependencies?: Set<string>): Promise<Uint8Array | null> {
-	const cleanReference = reference.split(/[?#]/)[0];
-	let decoded: string;
+function decodeModelResourceReference(sourcePath: string, reference: string): string | null {
 	try {
-		decoded = decodeURIComponent(cleanReference);
+		const decoded = decodeURIComponent(reference.split(/[?#]/)[0]);
+		return extname(sourcePath).toLowerCase() === ".blend" && decoded.startsWith("//") ? decoded.slice(2) : decoded;
 	} catch {
+		return null;
+	}
+}
+
+async function resolveContainedResource(projectRoot: string, sourcePath: string, reference: string, dependencies?: Set<string>): Promise<Uint8Array | null> {
+	const decoded = decodeModelResourceReference(sourcePath, reference);
+	if (decoded === null) {
 		return null;
 	}
 	const root = await fs.realpath(projectRoot);
@@ -50,10 +58,8 @@ async function resolveContainedResource(projectRoot: string, sourcePath: string,
 }
 
 function resolveLegacyModelDependency(projectRoot: string, sourcePath: string, reference: string, dependencies: Set<string>): Uint8Array | null {
-	let decoded: string;
-	try {
-		decoded = decodeURIComponent(reference.split(/[?#]/)[0]);
-	} catch {
+	const decoded = decodeModelResourceReference(sourcePath, reference);
+	if (decoded === null) {
 		return null;
 	}
 	const candidate = resolve(dirname(sourcePath), decoded);
@@ -82,21 +88,51 @@ async function prepareModelSource(
 			legacyConversion: null,
 		};
 	}
-	assimpRuntimePromise ??= assimpFactory();
-	const converted = convertAssimpModelFileToGlb(await assimpRuntimePromise, { name: basename(sourcePath), content: source }, (reference) =>
-		resolveLegacyModelDependency(projectRoot, sourcePath, reference, dependencies)
-	);
-	return {
-		prepared: await prepareModelImporterSource(`${sourcePath}.glb`, converted.content, (reference) =>
-			resolveContainedResource(projectRoot, sourcePath, reference, dependencies)
-		),
-		legacyConversion: {
+	const extension = extname(sourcePath).toLowerCase();
+	const prepareConverted = async (
+		content: Uint8Array,
+		legacyConversion: NonNullable<IModelImporterResult["legacyConversion"]>
+	): Promise<{ prepared: Awaited<ReturnType<typeof prepareModelImporterSource>>; legacyConversion: IModelImporterResult["legacyConversion"] }> => ({
+		prepared: await prepareModelImporterSource(`${sourcePath}.glb`, content, (reference) => resolveContainedResource(projectRoot, sourcePath, reference, dependencies), {
+			sourceRelativeDoubleSlash: extension === ".blend",
+		}),
+		legacyConversion,
+	});
+	const convertWithBlender = async (): Promise<Awaited<ReturnType<typeof prepareConverted>>> => {
+		const converted = await convertBlendFileToGlb(sourcePath);
+		return prepareConverted(converted.content, {
+			engine: "blender",
+			inputFileCount: 1,
+			inputBytes: source.byteLength,
+			outputBytes: converted.outputBytes,
+		});
+	};
+	if (extension === ".blend" && blendRequiresExternalConverter(sourcePath, source)) {
+		return convertWithBlender();
+	}
+	try {
+		assimpRuntimePromise ??= assimpFactory();
+		const converted = convertAssimpModelFileToGlb(await assimpRuntimePromise, { name: basename(sourcePath), content: source }, (reference) =>
+			resolveLegacyModelDependency(projectRoot, sourcePath, reference, dependencies)
+		);
+		return prepareConverted(converted.content, {
 			engine: "assimp",
 			inputFileCount: converted.inputFileCount,
 			inputBytes: converted.inputBytes,
 			outputBytes: converted.outputBytes,
-		},
-	};
+		});
+	} catch (error) {
+		if (extension === ".blend") {
+			try {
+				return await convertWithBlender();
+			} catch (blenderError) {
+				throw new Error(
+					`Bundled Assimp conversion failed (${error instanceof Error ? error.message : String(error)}); Blender fallback failed (${blenderError instanceof Error ? blenderError.message : String(blenderError)}).`
+				);
+			}
+		}
+		throw error;
+	}
 }
 
 async function loadModelMaterialRemaps(scene: Scene, settings: IModelImporterSettings, projectRoot: string, dependencies: Set<string>): Promise<Record<string, Material>> {

@@ -16,7 +16,7 @@ export async function loadGuis(editor: Editor, guiFiles: string[], options: ISce
 			try {
 				const data = await readJSON(join(options.scenePath, "gui", file), "utf-8");
 
-				const gui = await applyImportedGuiFile(editor, join(options.projectPath, "assets", data.relativePath));
+				const gui = await applyImportedGuiFile(editor, join(options.projectPath, "assets", data.relativePath), true);
 
 				if (gui) {
 					gui.name = data.name;

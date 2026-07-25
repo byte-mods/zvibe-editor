@@ -9,7 +9,7 @@ export interface IAssetFileWorkerAnalysis {
 	contentHash: string | null;
 	hashDeferred: boolean;
 	dependencyCandidates: string[];
-	dependencyScanKind: "text" | "glb" | "fbx" | "3ds" | "archive" | "none";
+	dependencyScanKind: "text" | "glb" | "fbx" | "3ds" | "ms3d" | "b3d" | "x" | "lwo" | "dxf" | "blend" | "archive" | "none";
 	dependencyScanStatus: "complete" | "deferred" | "malformed" | "notApplicable";
 	dependencyScanMessage?: string;
 	dependencyScanDeferred: boolean;

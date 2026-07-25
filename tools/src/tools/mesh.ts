@@ -21,7 +21,7 @@ declare module "@babylonjs/core/Meshes/mesh" {
 	}
 }
 
-export function configureMeshDistanceOrScreenCoverage(scene: Scene) {
+export function configureMeshDistanceOrScreenCoverage(scene: Pick<Scene, "meshes">) {
 	scene.meshes.forEach((mesh) => {
 		if (!isMesh(mesh)) {
 			return;
@@ -41,7 +41,7 @@ export function configureMeshDistanceOrScreenCoverage(scene: Scene) {
  * @param scene defines the scene to update the meshes LOD levels in.
  * @see `SceneLoaderQualitySelector` for more information on the available quality levels.
  */
-export function applyMeshesLODQuality(quality: SceneLoaderQualitySelector, scene: Scene) {
+export function applyMeshesLODQuality(quality: SceneLoaderQualitySelector, scene: Pick<Scene, "meshes">) {
 	scene.meshes.forEach((mesh) => {
 		if (!isMesh(mesh)) {
 			return;

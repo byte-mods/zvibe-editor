@@ -4,3 +4,5 @@ export { s3, IS3Options } from "./s3/s3.mjs";
 export { overrideWorkerMethods } from "./tools/worker.mjs";
 
 export { CancellationToken } from "./tools/cancel.mjs";
+
+export { convertBlendFileToGlb, IBlenderConversionOptions, IBlenderConversionResult } from "./blender/converter.mjs";

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MdOutlineInfo } from "react-icons/md";
 
 import { Button, Popover } from "@blueprintjs/core";
@@ -15,6 +15,7 @@ import { getInspectorPropertyValue } from "../../../../tools/property";
 
 import { IEditorInspectorFieldProps } from "./field";
 import { EditorInspectorNumberField } from "./number";
+import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorColorFieldProps extends IEditorInspectorFieldProps {
 	noClamp?: boolean;
@@ -25,6 +26,7 @@ export interface IEditorInspectorColorFieldProps extends IEditorInspectorFieldPr
 }
 
 export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps) {
+	const prefab = usePrefabFieldOverride(props);
 	const color = getInspectorPropertyValue(props.object, props.property) as Color3 | Color4;
 
 	color.r = Scalar.Clamp(color.r, 0, 1);
@@ -33,6 +35,12 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 
 	const [value, setValue] = useState(color);
 	const [oldValue, setOldValue] = useState(color?.clone());
+
+	useEffect(() => {
+		const current = getInspectorPropertyValue(props.object, props.property) as Color3 | Color4;
+		setValue(current);
+		setOldValue(current?.clone());
+	}, [props.object, props.property, prefab.refreshVersion]);
 
 	function getPopoverContent() {
 		return (
@@ -64,6 +72,7 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 		}
 
 		props.onFinishChange?.(color, oldValue);
+		prefab.notifyChanged();
 	}
 
 	function handleChanelChange(value: number, channel: "r" | "g" | "b" | "a") {
@@ -71,12 +80,13 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 		setValue(color.clone());
 
 		props.onChange?.(color);
+		prefab.notifyChanged();
 	}
 
 	return (
-		<div className="flex gap-2 items-center px-2">
+		<div className={`flex gap-2 items-center px-2 ${prefab.entry ? "border-l-2 border-blue-500 bg-blue-500/5" : ""}`}>
 			<div className="flex gap-2 items-center w-32">
-				{props.label}
+				<div className={prefab.entry ? "font-semibold text-blue-300" : ""}>{props.label}</div>
 
 				{props.tooltip && (
 					<TooltipProvider delayDuration={0}>
@@ -89,12 +99,14 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 					</TooltipProvider>
 				)}
 			</div>
+			<PrefabFieldOverrideActions {...prefab} />
 
 			<div className="flex">
 				<EditorInspectorNumberField
 					key={`${props.property}.r=${color.r}`}
 					object={props.object}
 					property={`${props.property}.r`}
+					prefabOverride={false}
 					min={props.noClamp ? undefined : 0}
 					max={props.noClamp ? undefined : 1}
 					onChange={(v) => handleChanelChange(v, "r")}
@@ -103,6 +115,7 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 					key={`${props.property}.g=${color.g}`}
 					object={props.object}
 					property={`${props.property}.g`}
+					prefabOverride={false}
 					min={props.noClamp ? undefined : 0}
 					max={props.noClamp ? undefined : 1}
 					onChange={(v) => handleChanelChange(v, "g")}
@@ -111,6 +124,7 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 					key={`${props.property}.b=${color.b}`}
 					object={props.object}
 					property={`${props.property}.b`}
+					prefabOverride={false}
 					min={props.noClamp ? undefined : 0}
 					max={props.noClamp ? undefined : 1}
 					onChange={(v) => handleChanelChange(v, "b")}
@@ -121,6 +135,7 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 						key={`${props.property}.a=${(color as Color4).a}`}
 						object={props.object}
 						property={`${props.property}.a`}
+						prefabOverride={false}
 						min={props.noClamp ? undefined : 0}
 						max={props.noClamp ? undefined : 1}
 						onChange={(v) => handleChanelChange(v, "a")}
@@ -136,7 +151,7 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 							className={`
 								h-full aspect-square !rounded-lg !border-[1px] !border-solid !border-neutral-500 p-1
 								hover:!border-neutral-950 hover:dark:!border-neutral-50
-								transition-[border] duration-300 ease-in-out	
+								transition-[border] duration-300 ease-in-out
 							`}
 						/>
 					</Popover>

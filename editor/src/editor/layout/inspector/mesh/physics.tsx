@@ -1,22 +1,24 @@
 import { shell } from "electron";
 
 import { Component, ReactNode } from "react";
+import { toast } from "sonner";
 
 import { Divider } from "@blueprintjs/core";
 
 import { AbstractMesh, PhysicsAggregate, PhysicsShape, PhysicsShapeType, PhysicsMotionType, PhysicsMassProperties, Mesh } from "babylonjs";
 
 import { registerUndoRedo } from "../../../../tools/undoredo";
-import { getPhysicsShapeForMesh } from "../../../../tools/physics/shape";
 import { isInstancedMesh, isMesh } from "../../../../tools/guards/nodes";
 
 import { EditorInspectorSwitchField } from "../fields/switch";
 import { EditorInspectorNumberField } from "../fields/number";
 import { EditorInspectorSectionField } from "../fields/section";
 import { EditorInspectorListField, IEditorInspectorListFieldItem } from "../fields/list";
+import { PrefabFieldOverrideDecorator } from "../prefab-property-overrides";
 import { Button } from "../../../../ui/shadcn/ui/button";
 
 import { setMeshPhysics } from "../../../../mcp/meshes/meshes";
+import { addGameObjectComponent, inspectGameObjectComponents, removeGameObjectComponent } from "../../../../mcp/components/components";
 import { getPhysicsCollisionLayers, IPhysicsCollisionLayer } from "../../../../mcp/scene/scene";
 import { createDefaultVehicleWheels, createVehicle, deleteVehicle, listVehicles, setVehicle, setVehicleWheels } from "../../../../mcp/physics/vehicles";
 import { listInputActionMaps } from "../../../../mcp/input/input";
@@ -49,10 +51,19 @@ export class EditorMeshPhysicsInspector extends Component<IEditorMeshPhysicsInsp
 					</div>
 				}
 			>
-				<EditorInspectorSwitchField object={o} property="hasPhysicsBody" label="Enabled" noUndoRedo onChange={() => this._handleHasPhysicsAggregateChange()} />
+				<PrefabFieldOverrideDecorator object={this.props.mesh} property="metadata.physicsAggregate">
+					<EditorInspectorSwitchField
+						object={o}
+						property="hasPhysicsBody"
+						prefabOverride={false}
+						label="Enabled"
+						noUndoRedo
+						onChange={() => this._handleHasPhysicsAggregateChange()}
+					/>
 
-				{this.props.mesh.physicsAggregate && this._getPhysicsInspector(this.props.mesh.physicsAggregate)}
-				{this.props.mesh.physicsAggregate && this._getVehicleControllerInspector()}
+					{this.props.mesh.physicsAggregate && this._getPhysicsInspector(this.props.mesh.physicsAggregate)}
+					{this.props.mesh.physicsAggregate && this._getVehicleControllerInspector()}
+				</PrefabFieldOverrideDecorator>
 			</EditorInspectorSectionField>
 		);
 	}
@@ -190,34 +201,26 @@ export class EditorMeshPhysicsInspector extends Component<IEditorMeshPhysicsInsp
 	}
 
 	private _handleHasPhysicsAggregateChange(): void {
-		const aggregate = this.props.mesh.physicsAggregate;
-
-		registerUndoRedo({
-			executeRedo: true,
-			undo: () => {
-				this.props.mesh.physicsAggregate = aggregate;
-				this.props.mesh.physicsBody = aggregate?.body ?? null;
-			},
-			redo: () => {
-				if (aggregate) {
-					this.props.mesh.physicsBody = null;
-					this.props.mesh.physicsAggregate = null;
-
-					if (this.props.mesh.metadata.physicsAggregate) {
-						delete this.props.mesh.metadata.physicsAggregate;
-					}
-				} else {
-					const aggregate = new PhysicsAggregate(this.props.mesh, getPhysicsShapeForMesh(this.props.mesh), {
-						mass: 1,
-					});
-					aggregate.body.disableSync = true;
-
-					this.props.mesh.physicsAggregate = aggregate;
-				}
-			},
-		});
-
-		this.forceUpdate();
+		try {
+			const inspection = inspectGameObjectComponents(this.props.mesh.getScene(), { nodeId: this.props.mesh.id });
+			const physics = inspection.components.find((component: any) => component.type === "physics3d");
+			if (physics) {
+				removeGameObjectComponent(
+					this.props.mesh.getScene(),
+					{ nodeId: this.props.mesh.id, expectedFingerprint: inspection.fingerprint, componentId: physics.id },
+					{ editor: this.props.editor }
+				);
+			} else {
+				addGameObjectComponent(
+					this.props.mesh.getScene(),
+					{ nodeId: this.props.mesh.id, expectedFingerprint: inspection.fingerprint, type: "physics3d" },
+					{ editor: this.props.editor }
+				);
+			}
+			this.forceUpdate();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
 	}
 
 	private _getPhysicsInspector(aggregate: PhysicsAggregate): ReactNode {

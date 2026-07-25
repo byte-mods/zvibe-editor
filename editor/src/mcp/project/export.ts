@@ -308,7 +308,16 @@ export async function runBuildProfile(scene: Scene, data: any, options: IMCPActi
 	let profile: any;
 	try {
 		profile = findBuildProfile(scene, data);
-		await exportProject(options.editor, { ...profile.options, modelPlatform: normalizeModelImporterPlatform(profile.target), noDialog: true, noProgress: true });
+		const exported = await exportProject(options.editor, {
+			...profile.options,
+			modelPlatform: normalizeModelImporterPlatform(profile.target),
+			assetPlatform: normalizeModelImporterPlatform(profile.target),
+			noDialog: true,
+			noProgress: true,
+		});
+		if (!exported) {
+			throw new Error("Project export failed. Check the editor console for details.");
+		}
 		const report = await getExportReport(scene, data, options);
 		return {
 			profile: structuredClone(profile),
@@ -335,7 +344,16 @@ export async function buildBuildProfile(scene: Scene, data: any, options: IMCPAc
 		profile = validation.profile;
 		commands = validation.commands;
 		if (!validation.valid) throw new Error(`Build profile cannot run: ${validation.reasons.join(" ")}`);
-		await exportProject(options.editor, { ...profile.options, modelPlatform: normalizeModelImporterPlatform(profile.target), noDialog: true, noProgress: true });
+		const exported = await exportProject(options.editor, {
+			...profile.options,
+			modelPlatform: normalizeModelImporterPlatform(profile.target),
+			assetPlatform: normalizeModelImporterPlatform(profile.target),
+			noDialog: true,
+			noProgress: true,
+		});
+		if (!exported) {
+			throw new Error("Project export failed. Check the editor console for details.");
+		}
 		const projectPath = options.editor.state.projectPath!;
 		const environment = getBuildEnvironment(profile, dirname(projectPath));
 		for (const command of commands) {
@@ -403,11 +421,14 @@ export async function getExportReport(scene: Scene, data: any, options: IMCPActi
 
 export async function exportActiveScene(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
 	try {
-		await exportProject(options.editor, {
+		const exported = await exportProject(options.editor, {
 			optimize: data.optimize ?? true,
 			noDialog: true,
 			noProgress: true,
 		});
+		if (!exported) {
+			throw new Error("Project export failed. Check the editor console for details.");
+		}
 
 		const report = await getExportReport(_scene, data, options);
 		return { ...report, buildReport: recordBuildReport(_scene, { ...report, outcome: "exported" }) };

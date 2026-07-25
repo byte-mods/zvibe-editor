@@ -9,6 +9,7 @@ import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
 import { IEditorInspectorFieldProps } from "./field";
+import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorSwitchFieldProps extends IEditorInspectorFieldProps {
 	disabled?: boolean;
@@ -16,11 +17,12 @@ export interface IEditorInspectorSwitchFieldProps extends IEditorInspectorFieldP
 }
 
 export function EditorInspectorSwitchField(props: IEditorInspectorSwitchFieldProps) {
+	const prefab = usePrefabFieldOverride(props);
 	const [value, setValue] = useState<boolean>(getInspectorPropertyValue(props.object, props.property) ?? false);
 
 	useEffect(() => {
 		setValue(getInspectorPropertyValue(props.object, props.property) ?? false);
-	}, [props.object, props.property]);
+	}, [props.object, props.property, prefab.refreshVersion]);
 
 	return (
 		<div
@@ -34,6 +36,7 @@ export function EditorInspectorSwitchField(props: IEditorInspectorSwitchFieldPro
 				setValue(!value);
 				setInspectorEffectivePropertyValue(props.object, props.property, !value);
 				props.onChange?.(!value);
+				prefab.notifyChanged();
 
 				if (!props.noUndoRedo) {
 					registerSimpleUndoRedo({
@@ -48,11 +51,14 @@ export function EditorInspectorSwitchField(props: IEditorInspectorSwitchFieldPro
 			className={`
 				flex gap-2 justify-center items-center px-2 rounded-lg
 				${props.disabled ? "" : "cursor-pointer hover:bg-white/10"}
+				${prefab.entry ? "border-l-2 border-blue-500 bg-blue-500/5" : ""}
 				transition-all ease-in-out duration-300
 			`}
 		>
 			<div className="flex items-center gap-2 w-full text-ellipsis overflow-hidden whitespace-nowrap">
-				<div className={`${props.disabled ? "opacity-35" : ""} transition-all duration-300 ease-in-out`}>{props.label}</div>
+				<div className={`${props.disabled ? "opacity-35" : ""} ${prefab.entry ? "font-semibold text-blue-300" : ""} transition-all duration-300 ease-in-out`}>
+					{props.label}
+				</div>
 
 				{props.tooltip && (
 					<TooltipProvider delayDuration={0}>
@@ -67,6 +73,7 @@ export function EditorInspectorSwitchField(props: IEditorInspectorSwitchFieldPro
 					</TooltipProvider>
 				)}
 			</div>
+			<PrefabFieldOverrideActions {...prefab} />
 
 			<div className="flex justify-end w-14 py-2">
 				<Switch disabled={props.disabled} checked={value} onChange={() => {}} />

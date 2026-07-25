@@ -13,6 +13,7 @@ import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
 import { IEditorInspectorFieldProps } from "./field";
+import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 const mexp = new Mexp();
 
@@ -30,6 +31,7 @@ export interface IEditorInspectorNumberFieldProps extends IEditorInspectorFieldP
 }
 
 export function EditorInspectorNumberField(props: IEditorInspectorNumberFieldProps) {
+	const prefab = usePrefabFieldOverride(props);
 	const [shiftDown, setShiftDown] = useState(false);
 	const [pointerOver, setPointerOver] = useState(false);
 
@@ -44,7 +46,7 @@ export function EditorInspectorNumberField(props: IEditorInspectorNumberFieldPro
 	useEffect(() => {
 		setValue(getStartValue());
 		setOldValue(getStartValue());
-	}, [props.object, props.property, props.step]);
+	}, [props.object, props.property, props.step, prefab.refreshVersion]);
 
 	useEventListener("keydown", (ev) => {
 		if (ev.key === "Shift") {
@@ -108,7 +110,11 @@ export function EditorInspectorNumberField(props: IEditorInspectorNumberFieldPro
 	const ratio = hasMinMax ? getRatio() : 0;
 
 	return (
-		<div className="flex gap-2 items-center px-2" onMouseOver={() => setPointerOver(true)} onMouseLeave={() => setPointerOver(false)}>
+		<div
+			className={`flex gap-2 items-center px-2 ${prefab.entry ? "border-l-2 border-blue-500 bg-blue-500/5" : ""}`}
+			onMouseOver={() => setPointerOver(true)}
+			onMouseLeave={() => setPointerOver(false)}
+		>
 			{props.label && (
 				<div className="flex items-center gap-2 w-1/3 text-ellipsis overflow-hidden whitespace-nowrap">
 					<div
@@ -117,7 +123,7 @@ export function EditorInspectorNumberField(props: IEditorInspectorNumberFieldPro
                             transition-all duration-300 ease-in-out
                         `}
 					>
-						{props.label}
+						<div className={prefab.entry ? "font-semibold text-blue-300" : ""}>{props.label}</div>
 					</div>
 
 					{props.tooltip && (
@@ -132,6 +138,7 @@ export function EditorInspectorNumberField(props: IEditorInspectorNumberFieldPro
 					)}
 				</div>
 			)}
+			<PrefabFieldOverrideActions {...prefab} />
 
 			<input
 				type="text"
@@ -162,6 +169,7 @@ export function EditorInspectorNumberField(props: IEditorInspectorNumberFieldPro
 
 						setInspectorEffectivePropertyValue(props.object, props.property, float);
 						props.onChange?.(float);
+						prefab.notifyChanged();
 					}
 				}}
 				style={{
@@ -277,6 +285,7 @@ export function EditorInspectorNumberField(props: IEditorInspectorNumberFieldPro
 
 							setInspectorEffectivePropertyValue(props.object, props.property, finalValue);
 							props.onChange?.(finalValue);
+							prefab.notifyChanged();
 						})
 					);
 

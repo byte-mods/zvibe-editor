@@ -2,12 +2,12 @@ import { join, dirname, basename, extname } from "path/posix";
 import { pathExists, readJSON, readdir, remove, writeJSON } from "fs-extra";
 
 import { RenderTargetTexture, SceneSerializer } from "babylonjs";
-import { ModelImporterPlatform } from "babylonjs-editor-tools";
+import { ModelImporterPlatform, TextureImporterPlatform } from "babylonjs-editor-tools";
 
 import { toast } from "sonner";
 
 import { isNodeMaterial } from "../../tools/guards/material";
-import { isHDRCubeTexture } from "../../tools/guards/texture";
+import { isEXRCubeTexture, isHDRCubeTexture } from "../../tools/guards/texture";
 import { getCollisionMeshFor } from "../../tools/mesh/collision";
 import { storeTexturesBaseSize } from "../../tools/material/texture";
 import { extractNodeMaterialTextures } from "../../tools/material/extract";
@@ -42,15 +42,16 @@ import { ExportSceneProgressComponent, showExportSceneProgressDialog } from "./d
 export type IExportProjectOptions = {
 	optimize: boolean;
 	modelPlatform?: ModelImporterPlatform;
+	assetPlatform?: TextureImporterPlatform;
 	noDialog?: boolean;
 	noProgress?: boolean;
 };
 
 let exporting = false;
 
-export async function exportProject(editor: Editor, options: IExportProjectOptions): Promise<void> {
-	if (exporting) {
-		return;
+export async function exportProject(editor: Editor, options: IExportProjectOptions): Promise<boolean> {
+	if (exporting || !editor.state.projectPath || !editor.state.lastOpenedScenePath) {
+		return false;
 	}
 
 	exporting = true;
@@ -61,21 +62,20 @@ export async function exportProject(editor: Editor, options: IExportProjectOptio
 
 	try {
 		await _exportProject(editor, options);
+		return true;
 	} catch (e) {
 		console.log(e);
+		const message = e instanceof Error ? e.message : String(e);
 
-		editor.layout.console.error(`Error exporting project:\n ${e.message}`);
+		editor.layout.console.error(`Error exporting project:\n ${message}`);
 		toast.error("Error exporting project");
+		return false;
 	} finally {
 		exporting = false;
 	}
 }
 
 async function _exportProject(editor: Editor, options: IExportProjectOptions): Promise<void> {
-	if (!editor.state.projectPath || !editor.state.lastOpenedScenePath) {
-		return;
-	}
-
 	let progress: EditorExportProjectProgressComponent | null = null;
 	const toastId = toast(<EditorExportProjectProgressComponent ref={(r) => (progress = r)} />, {
 		dismissible: false,
@@ -83,8 +83,25 @@ async function _exportProject(editor: Editor, options: IExportProjectOptions): P
 	});
 
 	let dialog: ExportSceneProgressComponent | null = null;
-	if (!options.noDialog) {
-		dialog = await showExportSceneProgressDialog(editor, "Exporting scene...");
+	try {
+		if (!options.noDialog) {
+			dialog = await showExportSceneProgressDialog(editor, "Exporting scene...");
+		}
+
+		await _writeProjectExport(editor, options, (step) => {
+			progress?.step(step);
+			dialog?.step(step);
+		});
+	} finally {
+		toast.dismiss(toastId);
+		dialog?.dispose();
+	}
+}
+
+async function _writeProjectExport(editor: Editor, options: IExportProjectOptions, onProgress: (step: number) => void): Promise<void> {
+	const { projectPath, lastOpenedScenePath } = editor.state;
+	if (!projectPath || !lastOpenedScenePath) {
+		throw new Error("No project scene is open to export.");
 	}
 
 	const scene = editor.layout.preview.scene;
@@ -95,10 +112,10 @@ async function _exportProject(editor: Editor, options: IExportProjectOptions): P
 		saveRenderingConfigurationForCamera(scene.activeCamera);
 	}
 
-	const projectDir = dirname(editor.state.projectPath);
+	const projectDir = dirname(projectPath);
 	const publicPath = join(projectDir, "public");
 
-	const sceneName = basename(editor.state.lastOpenedScenePath).split(".").shift()!;
+	const sceneName = basename(lastOpenedScenePath).split(".").shift()!;
 
 	const scenePath = join(publicPath, "scene");
 	const extractedTexturesOutputPath = join(scenePath, "assets", "editor-generated_extracted-textures");
@@ -200,6 +217,11 @@ async function _exportProject(editor: Editor, options: IExportProjectOptions): P
 
 	// Configure environment texture
 	if (isHDRCubeTexture(scene.environmentTexture)) {
+		data.environmentTextureSize = 512;
+		data.environmentTextureType = "BABYLON.HDRCubeTexture";
+		data.environmentTextureRotationY = scene.environmentTexture.rotationY;
+	} else if (isEXRCubeTexture(scene.environmentTexture)) {
+		data.environmentTexture = `${scene.environmentTexture.name}.environment.hdr`;
 		data.environmentTextureSize = 512;
 		data.environmentTextureType = "BABYLON.HDRCubeTexture";
 		data.environmentTextureRotationY = scene.environmentTexture.rotationY;
@@ -405,19 +427,15 @@ async function _exportProject(editor: Editor, options: IExportProjectOptions): P
 		}
 
 		promises.push(
-			new Promise<void>(async (resolve) => {
-				await processAssetFile(editor, file.toString(), {
-					cache,
-					scenePath,
-					projectDir,
-					exportedAssets,
-					optimize: options.optimize,
-					modelPlatform: options.modelPlatform,
-				});
-				progress?.step(progressStep);
-				dialog?.step(progressStep);
-				resolve();
-			})
+			processAssetFile(editor, file.toString(), {
+				cache,
+				scenePath,
+				projectDir,
+				exportedAssets,
+				optimize: options.optimize,
+				modelPlatform: options.modelPlatform,
+				assetPlatform: options.assetPlatform ?? options.modelPlatform,
+			}).then(() => onProgress(progressStep))
 		);
 	}
 
@@ -427,9 +445,6 @@ async function _exportProject(editor: Editor, options: IExportProjectOptions): P
 		encoding: "utf-8",
 		spaces: "\t",
 	});
-
-	toast.dismiss(toastId);
-	dialog?.dispose();
 
 	if (options.optimize) {
 		toast.success("Project exported");

@@ -103,6 +103,10 @@ export class EditorToolbar extends Component<IEditorToolbarProps> {
 
 							<MenubarSeparator />
 
+							<MenubarItem onClick={() => this.props.editor.setState({ sceneManager: true })}>Scene Manager...</MenubarItem>
+
+							<MenubarSeparator />
+
 							<MenubarItem onClick={() => exportProject(this.props.editor, { optimize: false })}>
 								Generate Current Scene <MenubarShortcut>CTRL+G</MenubarShortcut>
 							</MenubarItem>

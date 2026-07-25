@@ -11,6 +11,10 @@ export interface IPreparedModelImporterSource {
 
 export type ModelImporterResourceResolver = (reference: string) => Promise<Uint8Array | null>;
 
+export interface IPrepareModelImporterSourceOptions {
+	sourceRelativeDoubleSlash?: boolean;
+}
+
 const GLB_MAGIC = 0x46546c67;
 const GLB_JSON_CHUNK = 0x4e4f534a;
 const MAX_MODEL_JSON_BYTES = 32 * 1024 * 1024;
@@ -38,13 +42,20 @@ function mimeType(path: string): string {
 	return types[extension] ?? "application/octet-stream";
 }
 
-function isExternalReference(value: unknown): value is string {
-	return typeof value === "string" && value.length > 0 && !value.startsWith("data:") && !/^[a-z][a-z0-9+.-]*:/i.test(value) && !value.startsWith("//");
+function isExternalReference(value: unknown, options: IPrepareModelImporterSourceOptions): value is string {
+	return (
+		typeof value === "string" &&
+		value.length > 0 &&
+		!value.startsWith("data:") &&
+		!/^[a-z][a-z0-9+.-]*:/i.test(value) &&
+		(options.sourceRelativeDoubleSlash === true || !value.startsWith("//"))
+	);
 }
 
 async function embedDocumentResources(
 	document: Record<string, unknown>,
-	resolveResource: ModelImporterResourceResolver
+	resolveResource: ModelImporterResourceResolver,
+	options: IPrepareModelImporterSourceOptions
 ): Promise<{ document: Record<string, unknown>; embeddedResourceCount: number; warnings: string[] }> {
 	const copy = structuredClone(document);
 	let embeddedResourceCount = 0;
@@ -52,7 +63,7 @@ async function embedDocumentResources(
 	for (const collectionName of ["buffers", "images"] as const) {
 		const collection = Array.isArray(copy[collectionName]) ? (copy[collectionName] as Array<Record<string, unknown>>) : [];
 		for (const entry of collection) {
-			if (!isExternalReference(entry.uri)) {
+			if (!isExternalReference(entry.uri, options)) {
 				continue;
 			}
 			const resource = await resolveResource(entry.uri);
@@ -147,12 +158,17 @@ function glbDocument(bytes: Uint8Array): Record<string, unknown> {
 }
 
 /** Creates a self-contained data URL so the same Babylon loader path can run in Electron and the headless CLI. */
-export async function prepareModelImporterSource(sourcePath: string, bytes: Uint8Array, resolveResource: ModelImporterResourceResolver): Promise<IPreparedModelImporterSource> {
+export async function prepareModelImporterSource(
+	sourcePath: string,
+	bytes: Uint8Array,
+	resolveResource: ModelImporterResourceResolver,
+	options: IPrepareModelImporterSourceOptions = {}
+): Promise<IPreparedModelImporterSource> {
 	const extension = extname(sourcePath).toLowerCase();
 	const warnings: string[] = [];
 	try {
 		if (extension === ".gltf") {
-			const embedded = await embedDocumentResources(parseDocument(bytes), resolveResource);
+			const embedded = await embedDocumentResources(parseDocument(bytes), resolveResource, options);
 			return {
 				supported: true,
 				pluginExtension: extension,
@@ -163,7 +179,7 @@ export async function prepareModelImporterSource(sourcePath: string, bytes: Uint
 			};
 		}
 		if (extension === ".glb") {
-			const embedded = await embedDocumentResources(glbDocument(bytes), resolveResource);
+			const embedded = await embedDocumentResources(glbDocument(bytes), resolveResource, options);
 			const output = rebuildGlb(bytes, embedded.document);
 			return {
 				supported: true,

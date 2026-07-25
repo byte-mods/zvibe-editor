@@ -41,7 +41,7 @@ import {
 } from "../../src/assets/model-lods";
 import { getOptimizedModelRigExposedTransform, synchronizeOptimizedModelRigExposedTransforms } from "../../src/assets/model-rig-optimizer";
 import { prepareModelImporterSource } from "../../src/assets/model-source";
-import { convertAssimpModelToGlb, IAssimpRuntime } from "../../src/assets/assimp-model";
+import { blendRequiresExternalConverter, convertAssimpModelToGlb, IAssimpRuntime } from "../../src/assets/assimp-model";
 import { normalizeModelImporterPlatformOverrides, resolveModelImporterPlatformSettings, serializeModelImporterPlatformOverrides } from "../../src/assets/model-platform-overrides";
 
 function createModel(): { scene: Scene; root: Mesh; mesh: Mesh; material: StandardMaterial; texture: RawTexture; group: AnimationGroup } {
@@ -676,6 +676,13 @@ describe("executed model importer semantics", () => {
 		});
 		expect(gltf).toMatchObject({ supported: true, pluginExtension: ".gltf", embeddedResourceCount: 2, errors: [] });
 		expect(gltf.dataUrl).toContain("data:model/gltf+json;base64,");
+		const blenderRelative = await prepareModelImporterSource(
+			"assets/model.gltf",
+			new TextEncoder().encode(JSON.stringify({ asset: { version: "2.0" }, images: [{ uri: "//albedo.png" }] })),
+			async (reference) => (reference === "//albedo.png" ? new Uint8Array([137, 80, 78, 71]) : null),
+			{ sourceRelativeDoubleSlash: true }
+		);
+		expect(blenderRelative).toMatchObject({ supported: true, embeddedResourceCount: 1, errors: [] });
 
 		const json = new TextEncoder().encode(JSON.stringify({ asset: { version: "2.0" }, buffers: [{ byteLength: 4 }] }));
 		const jsonLength = Math.ceil(json.length / 4) * 4;
@@ -881,5 +888,17 @@ describe("executed model importer semantics", () => {
 			outputBytes: 20,
 		});
 		expect(() => convertAssimpModelToGlb(runtime, [{ name: "../outside.fbx", content: new Uint8Array() }])).toThrow("not contained");
+		expect(() =>
+			convertAssimpModelToGlb(runtime, [
+				{ name: "binary.dxf", content: new Uint8Array([65, 117, 116, 111, 67, 65, 68, 32, 66, 105, 110, 97, 114, 121, 32, 68, 88, 70, 13, 10, 26, 0]) },
+			])
+		).toThrow("save or export the drawing as ASCII DXF");
+		const blender279 = Buffer.from("BLENDER-v279", "ascii");
+		const blender300 = Buffer.from("BLENDER-v300", "ascii");
+		const blenderZstd = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+		expect(blendRequiresExternalConverter("legacy.blend", blender279)).toBe(false);
+		expect(blendRequiresExternalConverter("modern.blend", blender300)).toBe(true);
+		expect(blendRequiresExternalConverter("compressed.blend", blenderZstd)).toBe(true);
+		expect(() => convertAssimpModelToGlb(runtime, [{ name: "modern.blend", content: blender300 }])).toThrow("BJS_EDITOR_BLENDER_EXECUTABLE");
 	});
 });

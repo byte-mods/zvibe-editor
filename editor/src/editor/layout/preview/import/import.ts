@@ -20,6 +20,7 @@ import {
 	Sprite,
 	IParticleSystem,
 	HDRCubeTexture,
+	EXRCubeTexture,
 } from "babylonjs";
 
 import { UniqueNumber } from "../../../../tools/tools";
@@ -33,6 +34,7 @@ import { onNodesAddedObservable, onTextureAddedObservable } from "../../../../to
 
 import { projectConfiguration } from "../../../../project/configuration";
 import {
+	blendRequiresExternalConverter,
 	executeModelImporterEntries,
 	getDefaultAssetImporterConfiguration,
 	IAssetImporterConfiguration,
@@ -42,11 +44,12 @@ import {
 	configureGeneratedModelLodDeformations,
 	remapOptimizedModelRigExposureSkeletonId,
 } from "babylonjs-editor-tools";
+import { convertBlendFileToGlb } from "babylonjs-editor-cli";
 
 export async function tryConvertSceneFile(absolutePath: string, progress?: (percent: number) => void) {
 	const toolsUrl = process.env.EDITOR_TOOLS_URL ?? "https://editor.babylonjs.com";
-	const buffer = (await readFile(absolutePath)) as Buffer<ArrayBuffer>;
-	const blob = new Blob([buffer], { type: "application/octet-stream" });
+	const buffer = await readFile(absolutePath);
+	const blob = new Blob([new Uint8Array(buffer)], { type: "application/octet-stream" });
 	const file = new File([blob], basename(absolutePath), { type: "application/octet-stream" });
 
 	const form = new FormData();
@@ -70,6 +73,18 @@ export async function tryConvertSceneFile(absolutePath: string, progress?: (perc
 		console.error(e);
 		return "";
 	}
+}
+
+/** Uses the bundled legacy loader when possible and an installed Blender executable for modern `.blend` streams. */
+export async function tryConvertBlendFileLocally(absolutePath: string): Promise<string> {
+	const source = await readFile(absolutePath);
+	if (!blendRequiresExternalConverter(absolutePath, source)) {
+		return absolutePath;
+	}
+	const converted = await convertBlendFileToGlb(absolutePath);
+	const destination = join(dirname(absolutePath), `editor-generated_${basename(absolutePath)}.glb`);
+	await writeFile(destination, converted.content);
+	return destination;
 }
 
 export async function loadImportedSceneFile(scene: Scene, absolutePath: string, options?: { processedModel?: boolean; importer?: IAssetImporterConfiguration }) {
@@ -234,7 +249,33 @@ export async function loadImportedSceneFile(scene: Scene, absolutePath: string, 
 		});
 	});
 
-	onNodesAddedObservable.notifyObservers();
+	const importedObjects = new Set<object>([
+		...result.meshes,
+		...result.transformNodes,
+		...result.lights,
+		...result.animationGroups,
+		...result.skeletons,
+		...result.particleSystems,
+	]);
+	result.meshes.forEach((mesh) => {
+		if (mesh.geometry) {
+			importedObjects.add(mesh.geometry);
+		}
+		if (mesh.skeleton) {
+			importedObjects.add(mesh.skeleton);
+		}
+		if (mesh.morphTargetManager) {
+			importedObjects.add(mesh.morphTargetManager);
+		}
+		if (mesh.material) {
+			importedObjects.add(mesh.material);
+			mesh.material.getActiveTextures().forEach((texture) => importedObjects.add(texture));
+			if (isMultiMaterial(mesh.material)) {
+				mesh.material.subMaterials.filter(Boolean).forEach((material) => importedObjects.add(material!));
+			}
+		}
+	});
+	onNodesAddedObservable.notifyObservers([...importedObjects]);
 
 	return result;
 }
@@ -252,7 +293,7 @@ export function configureImportedMaterial(material: Material) {
 	material.uniqueId = UniqueNumber.Get();
 }
 
-export function configureImportedTexture<T extends Texture | CubeTexture | ColorGradingTexture | HDRCubeTexture>(texture: T, noCheckInvertY?: boolean): T {
+export function configureImportedTexture<T extends Texture | CubeTexture | ColorGradingTexture | HDRCubeTexture | EXRCubeTexture>(texture: T, noCheckInvertY?: boolean): T {
 	if (isAbsolute(texture.name)) {
 		if (!noCheckInvertY && isTexture(texture) && !texture.invertY && !texture._buffer) {
 			texture._invertY = true;

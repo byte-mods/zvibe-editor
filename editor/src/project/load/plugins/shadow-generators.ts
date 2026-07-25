@@ -6,6 +6,7 @@ import { Scene, ShadowGenerator, CascadedShadowGenerator, RenderTargetTexture } 
 import { Editor } from "../../../editor/main";
 
 import { ISceneLoaderPluginOptions } from "../scene";
+import { createSceneLoadLookupScope } from "../result";
 
 export async function loadShadowGenerators(editor: Editor, shadowGeneratorFiles: string[], scene: Scene, options: ISceneLoaderPluginOptions) {
 	await Promise.all(
@@ -17,18 +18,20 @@ export async function loadShadowGenerators(editor: Editor, shadowGeneratorFiles:
 			try {
 				const data = await readJSON(join(options.scenePath, "shadowGenerators", file), "utf-8");
 
-				const light = scene.lights.find((light) => light.id === data.lightId);
+				const light = options.loadResult.lights.find((light) => light.id === data.lightId);
 				if (!light) {
 					return;
 				}
+				const scopedScene = createSceneLoadLookupScope(scene, options.loadResult);
 
 				let shadowGenerator: ShadowGenerator;
 
 				if (data.className === CascadedShadowGenerator.CLASSNAME) {
-					shadowGenerator = CascadedShadowGenerator.Parse(data, scene);
+					shadowGenerator = CascadedShadowGenerator.Parse(data, scopedScene);
 				} else {
-					shadowGenerator = ShadowGenerator.Parse(data, scene);
+					shadowGenerator = ShadowGenerator.Parse(data, scopedScene);
 				}
+				options.loadResult.shadowGenerators.push(shadowGenerator);
 
 				const shadowMap = shadowGenerator.getShadowMap();
 				if (shadowMap) {

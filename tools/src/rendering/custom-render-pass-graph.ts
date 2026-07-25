@@ -1733,10 +1733,10 @@ export async function readCustomRenderPassComputeStorageBuffer(
 	const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 	const data =
 		value.definition.dataType === "float32"
-			? Array.from(new Float32Array(copy))
+			? Array.from(new Float32Array(copy), (entry) => Number(entry))
 			: value.definition.dataType === "int32"
-				? Array.from(new Int32Array(copy))
-				: Array.from(new Uint32Array(copy));
+				? Array.from(new Int32Array(copy), (entry) => Number(entry))
+				: Array.from(new Uint32Array(copy), (entry) => Number(entry));
 	return { passId: runtime.id, bufferName, dataType: value.definition.dataType, elementOffset, elementCount: count, data };
 }
 

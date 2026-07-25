@@ -16,7 +16,9 @@ export async function loadSkeletons(editor: Editor, skeletonFiles: string[], sce
 
 			try {
 				const data = await readJSON(join(options.scenePath, "skeletons", file), "utf-8");
-				return Skeleton.Parse(data, scene);
+				const skeleton = Skeleton.Parse(data, scene);
+				options.loadResult.skeletons.push(skeleton);
+				return skeleton;
 			} catch (e) {
 				editor.layout.console.error(`Failed to load skeleton file "${file}": ${e.message}`);
 			}

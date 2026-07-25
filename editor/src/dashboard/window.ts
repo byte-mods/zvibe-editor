@@ -5,6 +5,7 @@ import { shouldAutoOpenDevTools } from "../tools/devtools";
 
 export async function createDashboardWindow(): Promise<BrowserWindow> {
 	const window = new BrowserWindow({
+		title: "Zvibe Editor",
 		show: false,
 		frame: false,
 		closable: true,

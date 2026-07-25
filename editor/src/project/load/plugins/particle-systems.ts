@@ -6,8 +6,10 @@ import { Scene, ParticleSystem, GPUParticleSystem } from "babylonjs";
 import { Editor } from "../../../editor/main";
 
 import { isGPUParticleSystem } from "../../../tools/guards/particles";
+import { isAbstractMesh } from "../../../tools/guards/nodes";
 
 import { ISceneLoaderPluginOptions } from "../scene";
+import { findSceneLoadResultNodeById } from "../result";
 
 export async function loadParticleSystems(editor: Editor, particleSystemFiles: string[], scene: Scene, options: ISceneLoaderPluginOptions) {
 	const loadedParticleSystems = await Promise.all(
@@ -29,6 +31,10 @@ export async function loadParticleSystems(editor: Editor, particleSystemFiles: s
 					default:
 						particleSystem = ParticleSystem.Parse(data, scene, join(options.projectPath, "/"));
 						break;
+				}
+				if ((data.emitterId ?? null) !== null) {
+					const emitter = findSceneLoadResultNodeById(options.loadResult, data.emitterId);
+					particleSystem.emitter = emitter && isAbstractMesh(emitter) ? emitter : null;
 				}
 
 				if (!particleSystem.emitter) {

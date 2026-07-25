@@ -1,11 +1,22 @@
 import { createHash, randomUUID } from "crypto";
-import { dirname, extname, join, normalize, relative } from "path/posix";
+import { dirname, extname, join, normalize, relative, resolve } from "path/posix";
 import { mkdir, move, pathExists, readFile, remove, rename, stat, writeFile } from "fs-extra";
 
 import { projectConfiguration } from "../../project/configuration";
 import { AssetArchiveFormat, readRewritableArchive, writeRewritableArchive } from "./archive-rewrite";
-import { IBinaryModelReferenceRewriteResult, isBinaryFbx, rewrite3dsReferences, rewriteBinaryFbxReferences } from "./binary-model-rewrite";
-import { getIndexedAssetMoveReferencers, readAssetMetadata, resolveAssetDependencyCandidate } from "./registry";
+import {
+	IBinaryModelReferenceRewriteResult,
+	isBinaryFbx,
+	rewrite3dsReferences,
+	rewriteB3dReferences,
+	rewriteBinaryFbxReferences,
+	rewriteBlendReferences,
+	rewriteDxfReferences,
+	rewriteLwoReferences,
+	rewriteMs3dReferences,
+	rewriteXReferences,
+} from "./binary-model-rewrite";
+import { getIndexedAssetMoveReferencers, readAssetMetadata, resolveAssetDependencyCandidate, resolveBlendDependencyCandidate } from "./registry";
 
 const MAX_MOVE_REFERENCE_FILES = 1000;
 const MAX_MOVE_REFERENCE_BYTES = 64 * 1024 * 1024;
@@ -17,7 +28,7 @@ const GLB_JSON_CHUNK = 0x4e4f534a;
 export interface IAssetMoveRewrite {
 	path: string;
 	outputPath: string;
-	kind: "text" | "glb" | "fbx" | "3ds" | "archive";
+	kind: "text" | "glb" | "fbx" | "3ds" | "ms3d" | "b3d" | "x" | "lwo" | "dxf" | "blend" | "archive";
 	replacementCount: number;
 	beforeHash: string;
 	afterHash: string;
@@ -89,7 +100,7 @@ function projectDirectory(): string {
 	if (!projectConfiguration.path) {
 		throw new Error("No project is currently open.");
 	}
-	return dirname(projectConfiguration.path);
+	return resolve(dirname(projectConfiguration.path));
 }
 
 function resolveProjectPath(path: string): string {
@@ -160,6 +171,33 @@ function rewriteReferenceValue(
 		rewritten = rewritten.replace(/\//g, "\\");
 	}
 	return `${rewritten}${suffix}`;
+}
+
+function rewriteBlendReferenceValue(
+	value: string,
+	inputReferencerPath: string,
+	outputReferencerPath: string,
+	sourcePath: string,
+	destinationPath: string,
+	sourceIsDirectory: boolean
+): string | null {
+	if (!value.trim().startsWith("//")) {
+		return rewriteReferenceValue(value, inputReferencerPath, outputReferencerPath, sourcePath, destinationPath, sourceIsDirectory);
+	}
+	const resolved = resolveBlendDependencyCandidate(inputReferencerPath, value);
+	if (!resolved || (resolved !== sourcePath && !(sourceIsDirectory && resolved.startsWith(`${sourcePath}/`)))) {
+		return null;
+	}
+	const targetPath = sourceIsDirectory ? `${destinationPath}${resolved.slice(sourcePath.length)}` : destinationPath;
+	const suffixIndex = value.search(/[?#]/);
+	const suffix = suffixIndex >= 0 ? value.slice(suffixIndex) : "";
+	const rawPath = (suffixIndex >= 0 ? value.slice(0, suffixIndex) : value).trim().slice(2);
+	const usesBackslashes = rawPath.includes("\\");
+	let rewritten = relative(dirname(outputReferencerPath), targetPath).replace(/\\/g, "/") || targetPath.split("/").pop()!;
+	if (usesBackslashes) {
+		rewritten = rewritten.replace(/\//g, "\\");
+	}
+	return `//${rewritten}${suffix}`;
 }
 
 function encodeQuotedValue(value: string, quote: string): string {
@@ -431,7 +469,18 @@ async function rewriteArchiveReferences(context: IArchiveReferenceRewriteContext
 			return rewriteReferenceValue(value, member.semanticPath, member.semanticPath, sourcePath, destinationPath, sourceIsDirectory);
 		};
 		const extension = extname(member.semanticPath).toLowerCase();
-		const memberLimit = extension === ".fbx" || extension === ".3ds" || extension === ".glb" ? MAX_MOVE_REFERENCE_BYTES : MAX_TEXT_MOVE_REFERENCE_BYTES;
+		const memberLimit =
+			extension === ".fbx" ||
+			extension === ".3ds" ||
+			extension === ".ms3d" ||
+			extension === ".b3d" ||
+			extension === ".x" ||
+			extension === ".lwo" ||
+			extension === ".dxf" ||
+			extension === ".blend" ||
+			extension === ".glb"
+				? MAX_MOVE_REFERENCE_BYTES
+				: MAX_TEXT_MOVE_REFERENCE_BYTES;
 		if (member.data.length > memberLimit || scannedBytes + member.data.length > MAX_ARCHIVE_MEMBER_REWRITE_BYTES) {
 			blockers.push({
 				path: `${referencerPath}!/${member.semanticPath}`,
@@ -472,6 +521,69 @@ async function rewriteArchiveReferences(context: IArchiveReferenceRewriteContext
 			memberReplacementCount = result.replacementCount;
 			memberSemanticMatchCount = result.semanticMatchCount;
 			error = result.error;
+		} else if (extension === ".ms3d") {
+			const result = rewriteMs3dReferences(member.data, rewriteExternalReference);
+			after = result.buffer;
+			memberReplacementCount = result.replacementCount;
+			memberSemanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+		} else if (extension === ".b3d") {
+			const result = rewriteB3dReferences(member.data, rewriteExternalReference);
+			after = result.buffer;
+			memberReplacementCount = result.replacementCount;
+			memberSemanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+		} else if (extension === ".x") {
+			const result = rewriteXReferences(member.data, rewriteExternalReference);
+			after = result.buffer;
+			memberReplacementCount = result.replacementCount;
+			memberSemanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+		} else if (extension === ".lwo") {
+			const result = rewriteLwoReferences(member.data, rewriteExternalReference);
+			after = result.buffer;
+			memberReplacementCount = result.replacementCount;
+			memberSemanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+			if (error) {
+				blockers.push({
+					path: `${referencerPath}!/${member.semanticPath}`,
+					kind: "archive/lwo",
+					reason: result.errorKind ?? "malformed",
+					message: error,
+				});
+				continue;
+			}
+		} else if (extension === ".dxf") {
+			const result = rewriteDxfReferences(member.data, rewriteExternalReference);
+			after = result.buffer;
+			memberReplacementCount = result.replacementCount;
+			memberSemanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+			if (error) {
+				blockers.push({
+					path: `${referencerPath}!/${member.semanticPath}`,
+					kind: "archive/dxf",
+					reason: "malformed",
+					message: error,
+				});
+				continue;
+			}
+		} else if (extension === ".blend") {
+			const result = rewriteBlendReferences(member.data, rewriteExternalReference);
+			after = result.buffer;
+			memberReplacementCount = result.replacementCount;
+			memberSemanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+			if (error) {
+				blockers.push({
+					path: `${referencerPath}!/${member.semanticPath}`,
+					kind: "archive/blend",
+					reason: result.errorKind ?? "malformed",
+					message: error,
+				});
+				continue;
+			}
 		} else if (extension === ".glb") {
 			const result = rewriteGlbReferenceValues(member.data, rewriteExternalReference);
 			after = result.buffer;
@@ -602,6 +714,12 @@ async function prepareAssetMove(source: string, destination: string): Promise<IP
 			referencer.dependencyScanKind !== "glb" &&
 			referencer.dependencyScanKind !== "fbx" &&
 			referencer.dependencyScanKind !== "3ds" &&
+			referencer.dependencyScanKind !== "ms3d" &&
+			referencer.dependencyScanKind !== "b3d" &&
+			referencer.dependencyScanKind !== "x" &&
+			referencer.dependencyScanKind !== "lwo" &&
+			referencer.dependencyScanKind !== "dxf" &&
+			referencer.dependencyScanKind !== "blend" &&
 			referencer.dependencyScanKind !== "archive"
 		) {
 			continue;
@@ -624,6 +742,7 @@ async function prepareAssetMove(source: string, destination: string): Promise<IP
 		let replacementCount: number;
 		let semanticMatchCount: number;
 		let error: string | undefined;
+		let errorReason: IAssetMoveBlocker["reason"] = "malformed";
 		let archiveFormat: AssetArchiveFormat | undefined;
 		let archiveMemberCount: number | undefined;
 		let archiveBlockerCount = 0;
@@ -663,6 +782,46 @@ async function prepareAssetMove(source: string, destination: string): Promise<IP
 			replacementCount = result.replacementCount;
 			semanticMatchCount = result.semanticMatchCount;
 			error = result.error;
+		} else if (referencer.dependencyScanKind === "ms3d") {
+			const result = rewriteMs3dReferences(before, (value) => rewriteReferenceValue(value, referencer.path, outputPath, sourcePath, destinationPath, sourceIsDirectory));
+			after = result.buffer;
+			replacementCount = result.replacementCount;
+			semanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+		} else if (referencer.dependencyScanKind === "b3d") {
+			const result = rewriteB3dReferences(before, (value) => rewriteReferenceValue(value, referencer.path, outputPath, sourcePath, destinationPath, sourceIsDirectory));
+			after = result.buffer;
+			replacementCount = result.replacementCount;
+			semanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+		} else if (referencer.dependencyScanKind === "x") {
+			const result = rewriteXReferences(before, (value) => rewriteReferenceValue(value, referencer.path, outputPath, sourcePath, destinationPath, sourceIsDirectory));
+			after = result.buffer;
+			replacementCount = result.replacementCount;
+			semanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+		} else if (referencer.dependencyScanKind === "lwo") {
+			const result = rewriteLwoReferences(before, (value) => rewriteReferenceValue(value, referencer.path, outputPath, sourcePath, destinationPath, sourceIsDirectory));
+			after = result.buffer;
+			replacementCount = result.replacementCount;
+			semanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+			errorReason = result.errorKind ?? "malformed";
+		} else if (referencer.dependencyScanKind === "dxf") {
+			const result = rewriteDxfReferences(before, (value) => rewriteReferenceValue(value, referencer.path, outputPath, sourcePath, destinationPath, sourceIsDirectory));
+			after = result.buffer;
+			replacementCount = result.replacementCount;
+			semanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+		} else if (referencer.dependencyScanKind === "blend") {
+			const result = rewriteBlendReferences(before, (value) =>
+				rewriteBlendReferenceValue(value, referencer.path, outputPath, sourcePath, destinationPath, sourceIsDirectory)
+			);
+			after = result.buffer;
+			replacementCount = result.replacementCount;
+			semanticMatchCount = result.semanticMatchCount;
+			error = result.error;
+			errorReason = result.errorKind ?? "malformed";
 		} else if (referencer.dependencyScanKind === "glb") {
 			const result = rewriteGlbReferences(before, referencer.path, outputPath, sourcePath, destinationPath, sourceIsDirectory);
 			after = result.buffer;
@@ -683,7 +842,7 @@ async function prepareAssetMove(source: string, destination: string): Promise<IP
 			semanticMatchCount = result.semanticMatchCount;
 		}
 		if (error) {
-			blockers.push({ path: referencer.path, kind: referencer.dependencyScanKind, reason: "malformed", message: error });
+			blockers.push({ path: referencer.path, kind: referencer.dependencyScanKind, reason: errorReason, message: error });
 			continue;
 		}
 		if (after.length > limit) {

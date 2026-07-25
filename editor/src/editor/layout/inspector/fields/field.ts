@@ -8,6 +8,9 @@ export interface IEditorInspectorFieldProps<T = any> {
 	tooltip?: ReactNode;
 
 	noUndoRedo?: boolean;
+
+	/** Overrides the automatic live-prefab object/property mapping, or disables it for composite child controls. */
+	prefabOverride?: false | { object?: any; property?: string; category?: "transform" | "component"; kind?: string };
 }
 
 // TODO: remove export

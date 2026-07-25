@@ -12,16 +12,35 @@ import { isDomTextInputFocused } from "../tools/dom";
 import { onRedoObservable, onUndoObservable, redo, undo } from "../tools/undoredo";
 import { tryGetExperimentalFeaturesEnabledFromLocalStorage } from "../tools/local-storage";
 import { checkNodeJSAvailable, checkVisualStudioCodeAvailable, nodeJSAvailable, visualStudioCodeAvailable } from "../tools/process";
+import { isSpriteManagerNode } from "../tools/guards/sprites";
 
 import { saveProject } from "../project/save/save";
 import { onProjectConfigurationChangedObservable, projectConfiguration } from "../project/configuration";
+import { EditorSceneWorkspace } from "../project/scene-workspace-runtime";
+import {
+	onNodeModifiedObservable,
+	onNodesAddedObservable,
+	onParticleSystemAddedObservable,
+	onParticleSystemModifiedObservable,
+	onSkeletonModifiedObservable,
+	onSpriteModifiedObservable,
+	onTextureAddedObservable,
+	onTextureModifiedObservable,
+} from "../tools/observables";
 
 import { initializeMcpServer } from "../mcp/mcp";
 
 import { loadProject } from "../project/load/load";
 import { startProjectDevProcess } from "../project/run";
 import { exportProject } from "../project/export/export";
-import { EditorProjectCompressedTextureQuality, EditorProjectCompressedTextureSoftware, EditorProjectPackageManager } from "../project/typings";
+import {
+	EditorProjectCompressedTextureQuality,
+	EditorProjectCompressedTextureSoftware,
+	EditorProjectPackageManager,
+	IEditorPrefabStageSettings,
+	IEditorSceneBuildSettings,
+} from "../project/typings";
+import { defaultPrefabStageSettings } from "../project/prefab-stage";
 
 import { disposeVLSPostProcess } from "./rendering/vls";
 import { disposeSSRRenderingPipeline } from "./rendering/ssr";
@@ -33,6 +52,7 @@ import { CommandPalette } from "./dialogs/command-palette/command-palette";
 import { EditorGenerateProjectComponent } from "./dialogs/generate/generate-project";
 import { EditorEditProjectComponent } from "./dialogs/edit-project/edit-project";
 import { EditorEditPreferencesComponent } from "./dialogs/edit-preferences/edit-preferences";
+import { EditorSceneManager } from "./dialogs/scene-manager/scene-manager";
 
 import { Toaster } from "../ui/shadcn/ui/sonner";
 
@@ -83,6 +103,10 @@ export interface IEditorState {
 	 * The path of the last opened scene.
 	 */
 	lastOpenedScenePath: string | null;
+	/** Ordered scenes included in generated builds. */
+	sceneBuildSettings: IEditorSceneBuildSettings;
+	/** Project-wide Unity-style Prefab Stage defaults. */
+	prefabStage: IEditorPrefabStageSettings;
 	/**
 	 * Defines the list of all plugins to load.
 	 */
@@ -144,6 +168,8 @@ export interface IEditorState {
 	 * Defines if the project generator dialog is opened.
 	 */
 	generateProject: boolean;
+	/** Defines if the scene manager is opened. */
+	sceneManager: boolean;
 
 	/**
 	 * Defines wether or not NodeJS is available.
@@ -156,6 +182,10 @@ export interface IEditorState {
 }
 
 export class Editor extends Component<IEditorProps, IEditorState> {
+	/** Runtime authority for loaded scene ownership and per-scene dirty state. */
+	public readonly sceneWorkspace = new EditorSceneWorkspace();
+	private _sceneWorkspaceObserverCleanups: (() => void)[] = [];
+
 	/**
 	 * The layout of the editor.
 	 */
@@ -177,6 +207,8 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 		this.state = {
 			plugins: [],
 			lastOpenedScenePath: null,
+			sceneBuildSettings: { version: 1, scenes: [] },
+			prefabStage: defaultPrefabStageSettings,
 			projectPath: props.projectPath,
 
 			compressedTextureSoftware: "PVRTexTool",
@@ -194,12 +226,39 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 			editProject: false,
 			editPreferences: false,
 			generateProject: false,
+			sceneManager: false,
 
 			nodeJSAvailable: false,
 			visualStudioCodeAvailable: false,
 		};
 
 		webFrame.setZoomFactor(0.8);
+
+		const nodeObserver = onNodeModifiedObservable.add((object) => this.sceneWorkspace.markObjectDirty(object));
+		const addedNodesObserver = onNodesAddedObservable.add((objects) => {
+			if (objects) {
+				this.sceneWorkspace.claimNewObjectsForActiveScene(objects);
+			}
+		});
+		const addedParticleObserver = onParticleSystemAddedObservable.add((object) => this.sceneWorkspace.markObjectDirty(object));
+		const particleObserver = onParticleSystemModifiedObservable.add((object) => this.sceneWorkspace.markObjectDirty(object));
+		const skeletonObserver = onSkeletonModifiedObservable.add((object) => this.sceneWorkspace.markObjectDirty(object));
+		const spriteObserver = onSpriteModifiedObservable.add((object) => {
+			const managerNode = this.layout?.preview?.scene.transformNodes.find((node) => isSpriteManagerNode(node) && node.spriteManager === object.manager);
+			this.sceneWorkspace.markObjectDirty(managerNode ?? object);
+		});
+		const textureObserver = onTextureModifiedObservable.add((object) => this.sceneWorkspace.markObjectDirty(object));
+		const addedTextureObserver = onTextureAddedObservable.add((object) => this.sceneWorkspace.markObjectDirty(object));
+		this._sceneWorkspaceObserverCleanups.push(
+			() => onNodeModifiedObservable.remove(nodeObserver),
+			() => onNodesAddedObservable.remove(addedNodesObserver),
+			() => onParticleSystemAddedObservable.remove(addedParticleObserver),
+			() => onParticleSystemModifiedObservable.remove(particleObserver),
+			() => onSkeletonModifiedObservable.remove(skeletonObserver),
+			() => onSpriteModifiedObservable.remove(spriteObserver),
+			() => onTextureModifiedObservable.remove(textureObserver),
+			() => onTextureAddedObservable.remove(addedTextureObserver)
+		);
 	}
 
 	public render(): ReactNode {
@@ -236,6 +295,7 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 				<EditorEditProjectComponent editor={this} open={this.state.editProject} onClose={() => this.setState({ editProject: false })} />
 				<EditorEditPreferencesComponent editor={this} open={this.state.editPreferences} onClose={() => this.setState({ editPreferences: false })} />
 				<EditorGenerateProjectComponent editor={this} open={this.state.generateProject} onClose={() => this.setState({ generateProject: false })} />
+				<EditorSceneManager editor={this} open={this.state.sceneManager} onClose={() => this.setState({ sceneManager: false })} />
 
 				<CommandPalette ref={(r) => (this.commandPalette = r!)} editor={this} />
 				<Toaster />
@@ -250,6 +310,7 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 		ipcRenderer.on("editor:edit-project", () => this.setState({ editProject: true }));
 		ipcRenderer.on("editor:edit-preferences", () => this.setState({ editPreferences: true }));
 		ipcRenderer.on("editor:generate-project", () => this.setState({ generateProject: true }));
+		ipcRenderer.on("editor:scene-manager", () => this.setState({ sceneManager: true }));
 
 		ipcRenderer.on("editor:open", (_, path) => this.openProject(join(path)));
 
@@ -295,6 +356,10 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 
 		// Initialize the MCP server to allow communication between the editor and AI agents
 		initializeMcpServer(this);
+	}
+
+	public componentWillUnmount(): void {
+		this._sceneWorkspaceObserverCleanups.splice(0).forEach((cleanup) => cleanup());
 	}
 
 	/**

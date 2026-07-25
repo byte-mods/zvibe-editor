@@ -104,7 +104,7 @@ import { applyTextureAssetToObject } from "./preview/import/texture";
 import { applyMaterialAssetToObject } from "./preview/import/material";
 import { EditorPreviewConvertProgress } from "./preview/import/progress";
 import { loadImportedParticleSystemFile } from "./preview/import/particles";
-import { loadImportedSceneFile, tryConvertSceneFile } from "./preview/import/import";
+import { loadImportedSceneFile, tryConvertBlendFileLocally, tryConvertSceneFile } from "./preview/import/import";
 
 export interface IEditorPreviewProps {
 	/**
@@ -260,7 +260,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 							onDoubleClick={(ev) => this._handleDoubleClick(ev)}
 							onMouseLeave={() => this._handleMouseLeave()}
 							onDragLeave={() => this._handleMouseLeave()}
-							onMouseMove={() => this._handleMouseMove(this.scene.pointerX, this.scene.pointerY)}
+							onMouseMove={() => this.scene && this._handleMouseMove(this.scene.pointerX, this.scene.pointerY)}
 							className={`
                                 select-none outline-none w-full h-full object-contain
                                 ${this.state.fixedDimensions !== "fit" ? "bg-black" : "bg-background"}
@@ -430,7 +430,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			return;
 		}
 		this.setState({ fixedDimensions: "device", deviceSimulation: simulation });
-		if (!this.engine || !this._mainView || !this.canvas) return;
+		if (!this.engine || !this._mainView || !this.canvas) {
+			return;
+		}
 		this.canvas.width = simulation.width;
 		this.canvas.height = simulation.height;
 		this._mainView.customResize = () => this.engine.setSize(simulation.width, simulation.height);
@@ -776,15 +778,21 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	private _handleSimulatedTouchPointer(event: ReactPointerEvent<HTMLDivElement>, pressed: boolean): void {
 		event.preventDefault();
 		event.stopPropagation();
-		if (pressed) event.currentTarget.setPointerCapture?.(event.pointerId);
+		if (pressed) {
+			event.currentTarget.setPointerCapture?.(event.pointerId);
+		}
 		const [x, y] = toNormalizedTouchPosition(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY);
 		try {
 			const result = simulateInputTouch(this.scene, { pressed, x, y });
-			if (!result.simulated) throw new Error("The active Input Actions runtime did not accept the simulated touch.");
+			if (!result.simulated) {
+				throw new Error("The active Input Actions runtime did not accept the simulated touch.");
+			}
 			this.setState({ touchSimulation: { pressed, x: result.x, y: result.y } });
 		} catch (error) {
 			this.setState({ touchSimulation: { pressed: false, x, y } });
-			if (pressed) toast.error(error instanceof Error ? error.message : "Could not simulate touch input.");
+			if (pressed) {
+				toast.error(error instanceof Error ? error.message : "Could not simulate touch input.");
+			}
 		}
 	}
 
@@ -833,8 +841,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			this._applyViewportTerrainBrush(pickedMesh, pickingInfo.pickedPoint, event.ctrlKey || event.metaKey ? "lower" : "raise");
 			return;
 		}
-		if ((event.ctrlKey || event.metaKey) && isMesh(pickedMesh) && pickingInfo.faceId !== undefined && pickingInfo.faceId >= 0)
+		if ((event.ctrlKey || event.metaKey) && isMesh(pickedMesh) && pickingInfo.faceId !== undefined && pickingInfo.faceId >= 0) {
 			this._toggleViewportMeshComponent(pickedMesh, pickingInfo, event);
+		}
 
 		let effectivePickedObject = (pickingInfo.pickedSprite ?? pickingInfo.pickedMesh?._masterMesh ?? pickingInfo.pickedMesh) as Node;
 		if (effectivePickedObject && isNode(effectivePickedObject) && !isNodeLocked(effectivePickedObject)) {
@@ -869,7 +878,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		const settings = mesh.metadata?.terrainBrush ?? {};
 		const radius = settings.radius ?? 100;
 		const strength = settings.strength ?? 10;
-		if (!(radius > 0) || !(strength >= 0)) return;
+		if (!(radius > 0) || !(strength >= 0)) {
+			return;
+		}
 		const before = getMeshVertexData(this.scene, { nodeId: mesh.id });
 		let after: any = null;
 		registerUndoRedo({
@@ -884,12 +895,13 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 				if (!after) {
 					sculptTerrain(this.scene, { nodeId: mesh.id, center: [localPoint.x, localPoint.z], radius, strength, mode }, { editor: this.props.editor });
 					after = getMeshVertexData(this.scene, { nodeId: mesh.id });
-				} else
+				} else {
 					setMeshVertexData(
 						this.scene,
 						{ nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices },
 						{ editor: this.props.editor }
 					);
+				}
 			},
 		});
 		this.setState({ informationMessage: `Terrain ${mode}: Shift-click to raise; Ctrl/Cmd+Shift-click to lower.` });
@@ -899,12 +911,17 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		const faceId = pickingInfo.faceId!;
 		const data = getMeshVertexData(this.scene, { nodeId: mesh.id });
 		const triangle = data.indices.slice(faceId * 3, faceId * 3 + 3) as number[];
-		if (triangle.length !== 3) return;
+		if (triangle.length !== 3) {
+			return;
+		}
 		let mode: "vertex" | "edge" | "face" = "face";
 		let component = faceId;
 		const point = pickingInfo.pickedPoint;
-		if (event.altKey) mode = "edge";
-		else if (event.shiftKey) mode = "vertex";
+		if (event.altKey) {
+			mode = "edge";
+		} else if (event.shiftKey) {
+			mode = "vertex";
+		}
 		if (mode === "vertex" && point) {
 			component = triangle.reduce((nearest, vertex) => {
 				const nearestPoint = Vector3.TransformCoordinates(Vector3.FromArray(data.positions, nearest * 3), mesh.getWorldMatrix());
@@ -925,13 +942,18 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			);
 			const normalized: [number, number] = closest[0] < closest[1] ? closest : [closest[1], closest[0]];
 			component = topology.edges.findIndex((edge: [number, number]) => edge[0] === normalized[0] && edge[1] === normalized[1]);
-			if (component < 0) return;
+			if (component < 0) {
+				return;
+			}
 		}
 		const selection = getMeshSelection(this.scene, { nodeId: mesh.id });
 		const indices = selection.mode === mode ? [...selection.indices] : [];
 		const index = indices.indexOf(component);
-		if (index === -1) indices.push(component);
-		else indices.splice(index, 1);
+		if (index === -1) {
+			indices.push(component);
+		} else {
+			indices.splice(index, 1);
+		}
 		setMeshSelection(this.scene, { nodeId: mesh.id, mode, indices }, { editor: this.props.editor });
 	}
 
@@ -1372,9 +1394,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	public async importSceneFile(absolutePath: string, useCloudConverter: boolean): Promise<ISceneLoaderAsyncResult | null> {
+		const sourceExtension = extname(absolutePath).toLowerCase();
 		if (useCloudConverter) {
-			const extension = extname(absolutePath).toLowerCase();
-			switch (extension) {
+			switch (sourceExtension) {
 				case ".fbx":
 				case ".blend":
 					let progressRef: EditorPreviewConvertProgress;
@@ -1395,6 +1417,16 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 						});
 					}
 					break;
+			}
+		}
+		if (sourceExtension === ".blend" && extname(absolutePath).toLowerCase() === ".blend") {
+			try {
+				absolutePath = await tryConvertBlendFileLocally(absolutePath);
+			} catch (error) {
+				console.error(error);
+				toast.error(error instanceof Error ? error.message : String(error));
+				this.setState({ informationMessage: null });
+				return null;
 			}
 		}
 

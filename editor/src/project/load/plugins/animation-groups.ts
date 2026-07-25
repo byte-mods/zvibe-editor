@@ -6,6 +6,7 @@ import { Scene, AnimationGroup } from "babylonjs";
 import { Editor } from "../../../editor/main";
 
 import { ISceneLoaderPluginOptions } from "../scene";
+import { findSceneLoadResultNodeById } from "../result";
 
 export async function loadAnimationGroups(editor: Editor, animationGroupFiles: string[], scene: Scene, options: ISceneLoaderPluginOptions) {
 	const loadedAnimationGroups = await Promise.all(
@@ -17,7 +18,20 @@ export async function loadAnimationGroups(editor: Editor, animationGroupFiles: s
 			try {
 				const data = await readJSON(join(options.scenePath, "animationGroups", file), "utf-8");
 
-				const animationGroup = AnimationGroup.Parse(data, scene);
+				const animationGroup = AnimationGroup.Parse(data, scene, (targetedAnimation) => {
+					if (targetedAnimation.animation.property === "influence") {
+						for (const manager of options.loadResult.morphTargetManagers) {
+							for (let index = 0; index < manager.numTargets; index++) {
+								const target = manager.getTarget(index);
+								if (target.id === targetedAnimation.targetId) {
+									return target;
+								}
+							}
+						}
+						return null;
+					}
+					return findSceneLoadResultNodeById(options.loadResult, targetedAnimation.targetId);
+				});
 				animationGroup.uniqueId = data.uniqueId;
 
 				if (animationGroup.targetedAnimations.length === 0) {

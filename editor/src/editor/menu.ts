@@ -51,6 +51,13 @@ export function setupEditorMenu(options: { enableExperimentalFeatures: boolean; 
 						type: "separator",
 					},
 					{
+						label: "Scene Manager...",
+						click: () => BrowserWindow.getFocusedWindow()?.webContents.send("editor:scene-manager"),
+					},
+					{
+						type: "separator",
+					},
+					{
 						label: "Generate Current Scene",
 						accelerator: "CommandOrControl+G",
 						click: () => BrowserWindow.getFocusedWindow()?.webContents.send("generate"),

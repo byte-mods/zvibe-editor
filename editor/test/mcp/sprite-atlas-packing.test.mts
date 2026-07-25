@@ -72,6 +72,32 @@ describe("mcp/sprite-atlas-packing", () => {
 		});
 	});
 
+	test("packs deterministic clockwise-rotated frames and preserves exact source pixels", async () => {
+		const result = await packSpriteAtlas(
+			scene,
+			{ sourcePaths: ["hero.png", "enemy.png"], outputPath: "assets/rotated-atlas.png", padding: 1, maxSize: 64, allowRotation: true },
+			options
+		);
+		expect(result).toMatchObject({ allowRotation: true, rotatedFrames: ["enemy.png"], frames: ["enemy.png", "hero.png"] });
+		const atlas = await readJSON(join(directory, "assets/rotated-atlas.json"));
+		expect(atlas.frames["hero.png"]).toMatchObject({ rotated: false, frame: { w: 3, h: 5 } });
+		expect(atlas.frames["enemy.png"]).toMatchObject({
+			rotated: true,
+			frame: { w: 2, h: 7 },
+			spriteSourceSize: { x: 0, y: 0, w: 7, h: 2 },
+			sourceSize: { w: 7, h: 2 },
+		});
+		const frame = atlas.frames["enemy.png"].frame;
+		const restored = await sharp(join(directory, "assets/rotated-atlas.png"))
+			.extract({ left: frame.x, top: frame.y, width: frame.w, height: frame.h })
+			.rotate(-90)
+			.ensureAlpha()
+			.raw()
+			.toBuffer();
+		const source = await sharp(join(directory, "enemy.png")).ensureAlpha().raw().toBuffer();
+		expect(restored).toEqual(source);
+	});
+
 	test("writes validated named irregular source-image frames", async () => {
 		const result = await sliceSpriteSheet(
 			scene,

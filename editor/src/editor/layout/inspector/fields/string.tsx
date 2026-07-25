@@ -8,6 +8,7 @@ import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
 import { IEditorInspectorFieldProps } from "./field";
+import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorStringFieldProps extends IEditorInspectorFieldProps {
 	multiline?: boolean;
@@ -15,19 +16,21 @@ export interface IEditorInspectorStringFieldProps extends IEditorInspectorFieldP
 }
 
 export function EditorInspectorStringField(props: IEditorInspectorStringFieldProps) {
+	const prefab = usePrefabFieldOverride(props);
 	const [value, setValue] = useState<string>(getInspectorPropertyValue(props.object, props.property) ?? "");
 	const [oldValue, setOldValue] = useState<string>(getInspectorPropertyValue(props.object, props.property) ?? "");
 
 	useEffect(() => {
 		setValue(getInspectorPropertyValue(props.object, props.property) ?? "");
 		setOldValue(getInspectorPropertyValue(props.object, props.property) ?? "");
-	}, [props.object, props.property]);
+	}, [props.object, props.property, prefab.refreshVersion]);
 
 	function handleChange(newValue: string) {
 		setValue(newValue);
 		setInspectorEffectivePropertyValue(props.object, props.property, newValue);
 
 		props.onChange?.(newValue);
+		prefab.notifyChanged();
 	}
 
 	function handleBlur(newValue: string) {
@@ -45,9 +48,9 @@ export function EditorInspectorStringField(props: IEditorInspectorStringFieldPro
 	}
 
 	return (
-		<div className="flex gap-2 items-center px-2">
+		<div className={`flex gap-2 items-center px-2 ${prefab.entry ? "border-l-2 border-blue-500 bg-blue-500/5" : ""}`}>
 			<div className="flex items-center gap-2 w-1/3 text-ellipsis overflow-hidden whitespace-nowrap">
-				{props.label}
+				<div className={prefab.entry ? "font-semibold text-blue-300" : ""}>{props.label}</div>
 
 				{props.tooltip && (
 					<TooltipProvider delayDuration={0}>
@@ -60,6 +63,7 @@ export function EditorInspectorStringField(props: IEditorInspectorStringFieldPro
 					</TooltipProvider>
 				)}
 			</div>
+			<PrefabFieldOverrideActions {...prefab} />
 
 			{!props.multiline && (
 				<input

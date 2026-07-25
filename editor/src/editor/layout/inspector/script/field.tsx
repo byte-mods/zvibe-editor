@@ -28,6 +28,7 @@ import { execNodePty } from "../../../../tools/node-pty";
 import { registerUndoRedo } from "../../../../tools/undoredo";
 import { executeSimpleWorker } from "../../../../tools/worker";
 import { cloneJSObject, UniqueNumber } from "../../../../tools/tools";
+import { onNodeModifiedObservable } from "../../../../tools/observables";
 import { ensureTemporaryDirectoryExists } from "../../../../tools/project";
 
 import { configureImportedTexture } from "../../preview/import/import";
@@ -258,6 +259,7 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 					});
 
 					setUpdateId(updateId + 1);
+					onNodeModifiedObservable.notifyObservers(props.object);
 				}}
 			/>
 		);
@@ -420,6 +422,7 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 										label={value.label ?? value.propertyKey}
 										onChange={(v) => {
 											props.script[scriptValues][value.propertyKey].value = v;
+											onNodeModifiedObservable.notifyObservers(props.object);
 										}}
 									/>
 								);

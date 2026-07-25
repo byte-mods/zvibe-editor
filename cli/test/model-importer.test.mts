@@ -1,4 +1,4 @@
-import { ensureDir, mkdtemp, pathExists, readFile, readJSON, remove, writeFile, writeJSON } from "fs-extra";
+import { chmod, ensureDir, mkdtemp, pathExists, readFile, readJSON, remove, writeFile, writeJSON } from "fs-extra";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path/posix";
@@ -28,7 +28,7 @@ import {
 import { afterEach, describe, expect, test } from "vitest";
 
 import { processExportedModel } from "../src/pack/assets/model.mjs";
-import { processAssetFile } from "../src/pack/assets/process.mjs";
+import { processAssetFile, supportedModelExtensions } from "../src/pack/assets/process.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -55,6 +55,27 @@ function triangleGltf(): Record<string, unknown> {
 		scenes: [{ nodes: [0] }],
 		scene: 0,
 	};
+}
+
+function triangleGlb(): Buffer {
+	const sourceDocument = triangleGltf() as { buffers: Array<{ byteLength: number; uri: string }> } & Record<string, unknown>;
+	const binary = Buffer.from(sourceDocument.buffers[0].uri.split(",")[1], "base64");
+	const document = { ...sourceDocument, buffers: [{ byteLength: binary.length }] };
+	const json = Buffer.from(JSON.stringify(document), "utf-8");
+	const paddedJson = Buffer.concat([json, Buffer.alloc((4 - (json.length & 3)) & 3, 0x20)]);
+	const paddedBinary = Buffer.concat([binary, Buffer.alloc((4 - (binary.length & 3)) & 3)]);
+	const totalLength = 12 + 8 + paddedJson.length + 8 + paddedBinary.length;
+	const header = Buffer.alloc(12);
+	header.writeUInt32LE(0x46546c67, 0);
+	header.writeUInt32LE(2, 4);
+	header.writeUInt32LE(totalLength, 8);
+	const jsonHeader = Buffer.alloc(8);
+	jsonHeader.writeUInt32LE(paddedJson.length, 0);
+	jsonHeader.writeUInt32LE(0x4e4f534a, 4);
+	const binaryHeader = Buffer.alloc(8);
+	binaryHeader.writeUInt32LE(paddedBinary.length, 0);
+	binaryHeader.writeUInt32LE(0x004e4942, 4);
+	return Buffer.concat([header, jsonHeader, paddedJson, binaryHeader, paddedBinary]);
 }
 
 function triangleDae(): string {
@@ -101,6 +122,184 @@ Objects: {
 	Model: 2, "Model::Triangle", "Mesh" { Version: 232 Shading: T Culling: "CullingOff" }
 }
 Connections: { C: "OO",1,2 C: "OO",2,0 }`;
+}
+
+function triangleMs3d(): Buffer {
+	const parts: Buffer[] = [];
+	const header = Buffer.alloc(14);
+	header.write("MS3D000000", 0, "ascii");
+	header.writeInt32LE(4, 10);
+	parts.push(header);
+	const vertexCount = Buffer.alloc(2);
+	vertexCount.writeUInt16LE(3);
+	parts.push(vertexCount);
+	for (const [x, y, z] of [
+		[0, 0, 0],
+		[1, 0, 0],
+		[0, 1, 0],
+	]) {
+		const vertex = Buffer.alloc(15);
+		vertex.writeFloatLE(x, 1);
+		vertex.writeFloatLE(y, 5);
+		vertex.writeFloatLE(z, 9);
+		vertex.writeInt8(-1, 13);
+		vertex.writeUInt8(1, 14);
+		parts.push(vertex);
+	}
+	const triangleCount = Buffer.alloc(2);
+	triangleCount.writeUInt16LE(1);
+	parts.push(triangleCount);
+	const triangle = Buffer.alloc(70);
+	triangle.writeUInt16LE(0, 2);
+	triangle.writeUInt16LE(1, 4);
+	triangle.writeUInt16LE(2, 6);
+	for (let index = 0; index < 3; index++) {
+		triangle.writeFloatLE(1, 8 + index * 12 + 8);
+	}
+	triangle.writeFloatLE(1, 44 + 4);
+	triangle.writeFloatLE(1, 56 + 8);
+	triangle.writeUInt8(1, 68);
+	parts.push(triangle);
+	const group = Buffer.alloc(39);
+	group.writeUInt16LE(1, 0);
+	group.write("Triangle", 3, 32, "ascii");
+	group.writeUInt16LE(1, 35);
+	group.writeUInt16LE(0, 37);
+	parts.push(group, Buffer.from([0xff]));
+	const tail = Buffer.alloc(16);
+	tail.writeUInt16LE(0, 0);
+	tail.writeFloatLE(24, 2);
+	tail.writeInt32LE(1, 10);
+	tail.writeUInt16LE(0, 14);
+	parts.push(tail);
+	return Buffer.concat(parts);
+}
+
+function triangleB3d(): Buffer {
+	const chunk = (tag: string, payload: Buffer): Buffer => {
+		const header = Buffer.alloc(8);
+		header.write(tag, 0, 4, "ascii");
+		header.writeUInt32LE(payload.length, 4);
+		return Buffer.concat([header, payload]);
+	};
+	const vertices = Buffer.alloc(12 + 3 * 24);
+	vertices.writeInt32LE(1, 0);
+	vertices.writeInt32LE(0, 4);
+	vertices.writeInt32LE(0, 8);
+	const points = [
+		[0, 0, 0],
+		[1, 0, 0],
+		[0, 1, 0],
+	];
+	for (let index = 0; index < points.length; index++) {
+		const offset = 12 + index * 24;
+		points[index].forEach((value, axis) => vertices.writeFloatLE(value, offset + axis * 4));
+		vertices.writeFloatLE(1, offset + 20);
+	}
+	const triangles = Buffer.alloc(16);
+	triangles.writeInt32LE(-1, 0);
+	triangles.writeInt32LE(0, 4);
+	triangles.writeInt32LE(1, 8);
+	triangles.writeInt32LE(2, 12);
+	const mesh = Buffer.alloc(4);
+	mesh.writeInt32LE(-1);
+	const transform = Buffer.alloc(40);
+	transform.writeFloatLE(1, 12);
+	transform.writeFloatLE(1, 16);
+	transform.writeFloatLE(1, 20);
+	transform.writeFloatLE(1, 24);
+	const node = Buffer.concat([Buffer.from("Triangle\0"), transform, chunk("MESH", Buffer.concat([mesh, chunk("VRTS", vertices), chunk("TRIS", triangles)]))]);
+	const version = Buffer.alloc(4);
+	version.writeInt32LE(1);
+	return chunk("BB3D", Buffer.concat([version, chunk("NODE", node)]));
+}
+
+function triangleX(): string {
+	return `xof 0303txt 0032
+Mesh Triangle {
+	3;
+	0.0;0.0;0.0;,
+	1.0;0.0;0.0;,
+	0.0;1.0;0.0;;
+	1;
+	3;0,1,2;;
+}
+`;
+}
+
+function triangleLwo(): Buffer {
+	const string = (value: string): Buffer => {
+		const terminated = Buffer.from(`${value}\0`, "utf-8");
+		return terminated.length & 1 ? Buffer.concat([terminated, Buffer.from([0])]) : terminated;
+	};
+	const chunk = (tag: string, payload: Buffer): Buffer => {
+		const header = Buffer.alloc(8);
+		header.write(tag, 0, 4, "ascii");
+		header.writeUInt32BE(payload.length, 4);
+		return payload.length & 1 ? Buffer.concat([header, payload, Buffer.from([0])]) : Buffer.concat([header, payload]);
+	};
+	const points = Buffer.alloc(36);
+	[0, 0, 0, 1, 0, 0, 0, 1, 0].forEach((value, index) => points.writeFloatBE(value, index * 4));
+	const polygons = Buffer.alloc(12);
+	polygons.write("FACE", 0, 4, "ascii");
+	polygons.writeUInt16BE(3, 4);
+	polygons.writeUInt16BE(0, 6);
+	polygons.writeUInt16BE(1, 8);
+	polygons.writeUInt16BE(2, 10);
+	const polygonTag = Buffer.alloc(8);
+	polygonTag.write("SURF", 0, 4, "ascii");
+	const body = Buffer.concat([
+		Buffer.from("LWO2", "ascii"),
+		chunk("TAGS", string("Default")),
+		chunk("PNTS", points),
+		chunk("POLS", polygons),
+		chunk("PTAG", polygonTag),
+		chunk("SURF", Buffer.concat([string("Default"), string("")])),
+	]);
+	const header = Buffer.alloc(8);
+	header.write("FORM", 0, 4, "ascii");
+	header.writeUInt32BE(body.length, 4);
+	return Buffer.concat([header, body]);
+}
+
+function triangleDxf(): string {
+	return `0
+SECTION
+2
+ENTITIES
+0
+3DFACE
+8
+0
+10
+0
+20
+0
+30
+0
+11
+1
+21
+0
+31
+0
+12
+0
+22
+1
+32
+0
+13
+0
+23
+1
+33
+0
+0
+ENDSEC
+0
+EOF
+`;
 }
 
 async function animatedBabylonDocument(): Promise<Record<string, unknown>> {
@@ -348,6 +547,66 @@ describe("CLI executed model importer", () => {
 			legacyConversion: { engine: "assimp", inputFileCount: 1, outputBytes: expect.any(Number) },
 		});
 		expect(threeDs.meshCount).toBeGreaterThan(0);
+
+		expect(supportedModelExtensions).toEqual(expect.arrayContaining([".ms3d", ".b3d", ".x", ".lwo", ".dxf", ".blend"]));
+		for (const fixture of [
+			{ extension: "ms3d", data: triangleMs3d() },
+			{ extension: "b3d", data: triangleB3d() },
+			{ extension: "x", data: triangleX() },
+			{ extension: "lwo", data: triangleLwo() },
+			{ extension: "dxf", data: triangleDxf() },
+		]) {
+			const fixtureSource = join(project, "assets", `triangle.${fixture.extension}`);
+			await writeFile(fixtureSource, fixture.data);
+			const converted = await processExportedModel(
+				fixtureSource,
+				join(project, "public", `triangle-${fixture.extension}.babylon`),
+				normalizeModelImporterSettings({}),
+				project
+			);
+			expect(converted, fixture.extension).toMatchObject({
+				supported: true,
+				valid: true,
+				sourceFormat: fixture.extension,
+				meshCount: 1,
+				triangleCount: 1,
+				legacyConversion: { engine: "assimp", inputFileCount: 1, outputBytes: expect.any(Number) },
+			});
+		}
+	});
+
+	test("converts modern Blender sources through a configured exact-argv Blender executable", async () => {
+		const project = await mkdtemp(join(tmpdir(), "babylon-cli-blender-"));
+		directories.push(project);
+		await ensureDir(join(project, "assets"));
+		const source = join(project, "assets", "modern.blend");
+		const executable = join(project, "fake blender");
+		await writeFile(source, "BLENDER-v300");
+		await writeFile(
+			executable,
+			`#!/usr/bin/env node
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[process.argv.length - 1], Buffer.from("${triangleGlb().toString("base64")}", "base64"));
+`,
+			"utf-8"
+		);
+		await chmod(executable, 0o755);
+		const previous = process.env.BJS_EDITOR_BLENDER_EXECUTABLE;
+		process.env.BJS_EDITOR_BLENDER_EXECUTABLE = executable;
+		try {
+			const result = await processExportedModel(source, join(project, "public", "modern.babylon"), normalizeModelImporterSettings({}), project);
+			expect(result).toMatchObject({
+				supported: true,
+				valid: true,
+				sourceFormat: "blend",
+				meshCount: 1,
+				triangleCount: 1,
+				legacyConversion: { engine: "blender", inputFileCount: 1, outputBytes: expect.any(Number) },
+			});
+		} finally {
+			if (previous === undefined) delete process.env.BJS_EDITOR_BLENDER_EXECUTABLE;
+			else process.env.BJS_EDITOR_BLENDER_EXECUTABLE = previous;
+		}
 	});
 
 	test("invalidates the CLI build cache when a recorded external model dependency changes", async () => {

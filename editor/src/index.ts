@@ -25,8 +25,13 @@ import "./electron/events/export";
 import "./electron/protocol";
 import "./electron/oauth";
 
+app.setName("Zvibe Editor");
+process.title = "Zvibe Editor";
+
+const isDevelopment = !app.isPackaged || process.env.ZVIBE_DEVELOPMENT === "true";
+
 try {
-	if (!app.isPackaged) {
+	if (isDevelopment) {
 		process.env.DEBUG ??= "true";
 	}
 
@@ -100,7 +105,9 @@ app.addListener("ready", async () => {
 		await openDashboard();
 	}
 
-	autoUpdater.checkForUpdatesAndNotify();
+	if (!isDevelopment) {
+		autoUpdater.checkForUpdatesAndNotify();
+	}
 
 	try {
 		fetch("https://editor.babylonjs.com/api/hooks/launch", {
@@ -166,7 +173,7 @@ async function openDashboard(): Promise<void> {
 		setupDashboardMenu();
 
 		dashboardWindow = await createDashboardWindow();
-		dashboardWindow.setTitle("Dashboard");
+		dashboardWindow.setTitle("Zvibe Editor");
 
 		dashboardWindow.on("focus", () => setupDashboardMenu());
 		dashboardWindow.on("closed", () => (dashboardWindow = null));
@@ -210,7 +217,7 @@ async function openProject(filePath: string): Promise<void> {
 	setupEditorMenu(menuOptions);
 
 	const window = await createEditorWindow();
-	window.setTitle(basename(dirname(filePath)));
+	window.setTitle(`Zvibe Editor — ${basename(dirname(filePath))}`);
 
 	window.on("focus", () => setupEditorMenu(menuOptions));
 	window.once("closed", () => {

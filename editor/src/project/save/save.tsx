@@ -1,4 +1,4 @@
-import { dirname } from "path/posix";
+import { dirname, join, relative } from "path/posix";
 import { writeJSON } from "fs-extra";
 import { ipcRenderer } from "electron";
 
@@ -9,6 +9,8 @@ import packageJson from "../../../package.json";
 import { Editor } from "../../editor/main";
 
 import { IEditorProject } from "../typings";
+import { discoverProjectScenes, normalizeSceneBuildSettings } from "../scenes";
+import { activateSceneInWorkspaceSettings } from "../scene-workspace";
 
 // import { exportProject } from "../export/export";
 
@@ -19,6 +21,7 @@ import { tryGetProjectsFromLocalStorage } from "../../tools/local-storage";
 
 import { saveScene } from "./scene";
 import { EditorSaveProjectProgressComponent } from "./progress";
+import { getScenePathsToSave } from "./ownership";
 
 let saving = false;
 
@@ -42,14 +45,34 @@ export async function saveProject(editor: Editor): Promise<void> {
 	}
 }
 
-export async function saveProjectConfiguration(editor: Editor) {
+export async function saveProjectConfiguration(editor: Editor): Promise<Partial<IEditorProject>> {
+	const projectDirectory = dirname(editor.state.projectPath!);
+	const relativeActiveScene = editor.state.lastOpenedScenePath ? relative(projectDirectory, editor.state.lastOpenedScenePath) : null;
+	const discoveredScenes = await discoverProjectScenes(projectDirectory);
+	const sceneBuildSettings = normalizeSceneBuildSettings(editor.state.sceneBuildSettings, relativeActiveScene, discoveredScenes);
+	const sceneWorkspace = activateSceneInWorkspaceSettings(editor.sceneWorkspace.getSettings(), relativeActiveScene, discoveredScenes);
+	if (JSON.stringify(sceneWorkspace) !== JSON.stringify(editor.sceneWorkspace.getSettings())) {
+		editor.sceneWorkspace.applySettings(sceneWorkspace);
+	}
+	if (
+		sceneBuildSettings.scenes.length !== editor.state.sceneBuildSettings.scenes.length ||
+		sceneBuildSettings.scenes.some(
+			(entry, index) => entry.path !== editor.state.sceneBuildSettings.scenes[index]?.path || entry.enabled !== editor.state.sceneBuildSettings.scenes[index]?.enabled
+		)
+	) {
+		editor.setState({ sceneBuildSettings });
+	}
+
 	const project: Partial<IEditorProject> = {
 		plugins: editor.state.plugins.map((plugin) => ({
 			nameOrPath: plugin,
 		})),
 		version: packageJson.version,
 		packageManager: editor.state.packageManager,
-		lastOpenedScene: editor.state.lastOpenedScenePath?.replace(dirname(editor.state.projectPath!), ""),
+		lastOpenedScene: sceneWorkspace.activeScene ? `/${sceneWorkspace.activeScene}` : null,
+		sceneBuildSettings,
+		sceneWorkspace,
+		prefabStage: editor.state.prefabStage,
 
 		compressedTextureSoftware: editor.state.compressedTextureSoftware,
 		compressedTexturesEnabled: editor.state.compressedTexturesEnabled,
@@ -83,12 +106,14 @@ async function _saveProject(editor: Editor) {
 	});
 
 	const directory = dirname(editor.state.projectPath);
-	const project = await saveProjectConfiguration(editor);
+	await saveProjectConfiguration(editor);
 
-	if (editor.state.lastOpenedScenePath) {
-		editor.layout.console.log(`Saving project "${project.lastOpenedScene}"`);
-		await saveScene(editor, directory, editor.state.lastOpenedScenePath);
-		editor.layout.console.log(`Project "${project.lastOpenedScene}" saved.`);
+	const loadedScenes = editor.sceneWorkspace.getLoadedSceneStates();
+	for (const scenePath of getScenePathsToSave(loadedScenes)) {
+		editor.layout.console.log(`Saving scene "${scenePath}"`);
+		await saveScene(editor, directory, join(directory, scenePath), { ownerScenePath: scenePath });
+		editor.sceneWorkspace.setDirty(scenePath, false);
+		editor.layout.console.log(`Scene "${scenePath}" saved.`);
 	}
 
 	toast.dismiss(toastId);

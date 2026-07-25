@@ -3,13 +3,12 @@ import { extname, join, dirname } from "path/posix";
 import { toast } from "sonner";
 import { Component, DragEvent, ReactNode } from "react";
 
-import { Tools } from "babylonjs";
-
 import { Editor } from "../../../main";
 
-import { registerUndoRedo } from "../../../../tools/undoredo";
+import { addGameObjectComponent, inspectGameObjectComponents, removeGameObjectComponent } from "../../../../mcp/components/components";
 
 import { EditorInspectorSectionField } from "../fields/section";
+import { PrefabFieldOverrideDecorator } from "../prefab-property-overrides";
 
 import { InspectorScriptField } from "./field";
 
@@ -36,36 +35,48 @@ export class ScriptInspectorComponent extends Component<IScriptInspectorComponen
 	public render(): ReactNode {
 		return (
 			<EditorInspectorSectionField title="Scripts">
-				{this.props.object.metadata?.scripts?.map((script: any, index: number) => {
-					script._id ??= Tools.RandomId();
+				<PrefabFieldOverrideDecorator object={this.props.object} property="metadata.scripts">
+					{this.props.object.metadata?.scripts?.map((script: any, index: number) => {
+						const scriptId = script._id ?? `${script.key}:${index}`;
 
-					return (
-						<InspectorScriptField
-							key={script._id}
-							script={script}
-							scriptIndex={index}
-							editor={this.props.editor}
-							object={this.props.object}
-							onRemove={() => this._handleRemoveScript(index)}
-						/>
-					);
-				})}
+						return (
+							<InspectorScriptField
+								key={scriptId}
+								script={script}
+								scriptIndex={index}
+								editor={this.props.editor}
+								object={this.props.object}
+								onRemove={() => this._handleRemoveScript(index)}
+							/>
+						);
+					})}
 
-				{this._getEmptyComponent()}
+					{this._getEmptyComponent()}
+				</PrefabFieldOverrideDecorator>
 			</EditorInspectorSectionField>
 		);
 	}
 
 	private _handleRemoveScript(index: number): void {
 		const script = this.props.object.metadata?.scripts?.[index];
-
-		registerUndoRedo({
-			executeRedo: true,
-			undo: () => this.props.object.metadata?.scripts?.splice(index, 0, script),
-			redo: () => this.props.object.metadata?.scripts?.splice(index, 1),
-		});
-
-		this.forceUpdate();
+		if (!script) {
+			return;
+		}
+		try {
+			const inspection = inspectGameObjectComponents(this.props.object.getScene(), { nodeId: this.props.object.id });
+			const component = inspection.components.find((candidate: any) => candidate.type === "script" && candidate.data?.path === `src/${script.key}`);
+			if (!component) {
+				throw new Error(`The component row for script "${script.key}" was not found.`);
+			}
+			removeGameObjectComponent(
+				this.props.object.getScene(),
+				{ nodeId: this.props.object.id, expectedFingerprint: inspection.fingerprint, componentId: component.id },
+				{ editor: this.props.editor }
+			);
+			this.forceUpdate();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
 	}
 
 	private _getEmptyComponent(): ReactNode {
@@ -114,29 +125,26 @@ export class ScriptInspectorComponent extends Component<IScriptInspectorComponen
 
 		const projectDir = dirname(this.props.editor.state.projectPath!);
 
-		this.props.object.metadata ??= {};
-		this.props.object.metadata.scripts ??= [];
-
 		files.forEach((file) => {
 			const relativePath = file.replace(join(projectDir, "/src/"), "").replace(/\\/g, "/");
 			if (relativePath === file) {
 				return;
 			}
 
-			if (this.props.object.metadata.scripts.find((script) => script.key === relativePath)) {
+			if (this.props.object.metadata?.scripts?.find((script) => script.key === relativePath)) {
 				return toast.warning(`Script '${relativePath}' is already attached to the object.`);
 			}
 
-			registerUndoRedo({
-				executeRedo: true,
-				undo: () => this.props.object.metadata.scripts.pop(),
-				redo: () => {
-					this.props.object.metadata.scripts.push({
-						enabled: true,
-						key: relativePath,
-					});
-				},
-			});
+			try {
+				const inspection = inspectGameObjectComponents(this.props.object.getScene(), { nodeId: this.props.object.id });
+				addGameObjectComponent(
+					this.props.object.getScene(),
+					{ nodeId: this.props.object.id, expectedFingerprint: inspection.fingerprint, type: "script", path: `src/${relativePath}` },
+					{ editor: this.props.editor }
+				);
+			} catch (error: any) {
+				toast.error(error.message);
+			}
 		});
 
 		this.forceUpdate();

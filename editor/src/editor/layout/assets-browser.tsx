@@ -1,6 +1,6 @@
 import { clipboard, webUtils } from "electron";
 import { FSWatcher, watch } from "chokidar";
-import { dirname, join, extname, basename, relative } from "path/posix";
+import { dirname, join, extname, basename, relative, resolve } from "path/posix";
 import { copyFile, copy, mkdir, pathExists, readdir, stat, writeFile, writeJSON } from "fs-extra";
 
 import filenamify from "filenamify";
@@ -41,6 +41,7 @@ import { sortAlphabetically, UniqueNumber } from "../../tools/tools";
 import { findAvailableFilename, normalizedGlob } from "../../tools/fs";
 import { loadSavedThumbnailsCache } from "../../tools/assets/thumbnail";
 import { assetsCache, saveAssetsCache } from "../../tools/assets/cache";
+import { getProjectAssetWatchPaths } from "../../tools/assets/watch";
 import { assetsAllSupportedExtensions } from "../../tools/assets/extensions";
 import { checkProjectCachedCompressedTextures, processingCompressedTextures } from "../../tools/assets/ktx";
 import { applyAssetImporterPreset, getAssetDetails, listAssetImporterPresets, setAssetImporterPreset } from "../../mcp/assets/assets";
@@ -58,13 +59,15 @@ import {
 	writeAssetMetadata,
 } from "../../mcp/assets/registry";
 import { applySemanticAssetMove, inspectSemanticAssetMove } from "../../mcp/assets/move";
+import { getAutoReimportOriginPaths, getAutoReimportStatus, IAutoReimportJob, processAutoReimportChanges, processAutoReimportOriginChanges } from "../../mcp/assets/auto-reimport";
 
 import { ICommandPaletteType } from "../dialogs/command-palette/command-palette";
 import { getMaterialCommands, getMaterialsLibraryCommands } from "../dialogs/command-palette/material";
 
-import { loadScene } from "../../project/load/scene";
+import { replaceWithSingleSceneWorkspace } from "../../project/load/workspace";
 import { saveProject, saveProjectConfiguration } from "../../project/save/save";
 import { getProjectAssetsRootUrl, onProjectConfigurationChangedObservable, projectConfiguration } from "../../project/configuration";
+import { addSceneToBuildSettings, renameSceneInBuildSettings } from "../../project/scenes";
 
 import { Button } from "../../ui/shadcn/ui/button";
 import { showAlert, showConfirm, showPrompt } from "../../ui/dialog";
@@ -164,6 +167,9 @@ export interface IEditorAssetsBrowserState {
 	watchingAssets: boolean;
 	assetChangeCount: number;
 	lastAssetChange: { event: string; path: string; at: string } | null;
+	autoReimportEnabled: boolean;
+	autoReimportExternalSourceCount: number;
+	autoReimportLastJob: IAutoReimportJob | null;
 	assetRegistryEntries: number;
 	assetRegistryConflicts: number;
 	assetRegistryMissingReferences: number;
@@ -183,9 +189,15 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 	private _isMouseOver: boolean = false;
 	private _selectedFiles: string[] = [];
 	private _projectWatcher: FSWatcher | null = null;
+	private _importSourceWatcher: FSWatcher | null = null;
 	private _assetWatchRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
+	private _importSourceRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
 	private _assetIndexingStatusTimeout: ReturnType<typeof setTimeout> | null = null;
 	private _pendingRegistryPaths = new Set<string>();
+	private _pendingImportSourcePaths = new Set<string>();
+	private _importSourceWatchSignature = "";
+	private _autoReimportWatchRefresh: Promise<void> = Promise.resolve();
+	private _autoReimportSuppressedProjectPaths = new Map<string, number>();
 
 	public constructor(props: IEditorAssetsBrowserProps) {
 		super(props);
@@ -206,6 +218,9 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			watchingAssets: false,
 			assetChangeCount: 0,
 			lastAssetChange: null,
+			autoReimportEnabled: true,
+			autoReimportExternalSourceCount: 0,
+			autoReimportLastJob: null,
 			assetRegistryEntries: 0,
 			assetRegistryConflicts: 0,
 			assetRegistryMissingReferences: 0,
@@ -313,13 +328,32 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		if (this._assetIndexingStatusTimeout) {
 			clearTimeout(this._assetIndexingStatusTimeout);
 		}
+		if (this._importSourceRefreshTimeout) {
+			clearTimeout(this._importSourceRefreshTimeout);
+		}
 		void this._projectWatcher?.close();
+		void this._importSourceWatcher?.close();
 		this._projectWatcher = null;
+		this._importSourceWatcher = null;
 	}
 
 	/** Returns the current local project asset watcher status for MCP and the editor UI. */
-	public getAssetWatchStatus(): { watching: boolean; changeCount: number; lastChange: { event: string; path: string; at: string } | null } {
-		return { watching: this.state.watchingAssets, changeCount: this.state.assetChangeCount, lastChange: this.state.lastAssetChange };
+	public getAssetWatchStatus(): {
+		watching: boolean;
+		changeCount: number;
+		lastChange: { event: string; path: string; at: string } | null;
+		autoReimport: { enabled: boolean; externalSourceCount: number; lastJob: IAutoReimportJob | null };
+	} {
+		return {
+			watching: this.state.watchingAssets,
+			changeCount: this.state.assetChangeCount,
+			lastChange: this.state.lastAssetChange,
+			autoReimport: {
+				enabled: this.state.autoReimportEnabled,
+				externalSourceCount: this.state.autoReimportExternalSourceCount,
+				lastJob: this.state.autoReimportLastJob,
+			},
+		};
 	}
 
 	/** Rebuilds the browser's filesystem tree/items immediately. */
@@ -327,12 +361,42 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		this.refresh();
 	}
 
+	/** Rebuilds optional external-origin watches and refreshes the displayed Auto Reimport status. */
+	public refreshAutoReimportWatchers(): Promise<void> {
+		const result = this._autoReimportWatchRefresh.then(() => this._refreshAutoReimportWatchers());
+		this._autoReimportWatchRefresh = result.catch(() => undefined);
+		return result;
+	}
+
+	private async _refreshAutoReimportWatchers(): Promise<void> {
+		const [paths, status] = await Promise.all([getAutoReimportOriginPaths(), getAutoReimportStatus()]);
+		const signature = paths.join("\0");
+		if (signature !== this._importSourceWatchSignature) {
+			await this._importSourceWatcher?.close();
+			this._importSourceWatcher = paths.length
+				? watch(paths, { ignoreInitial: true, persistent: true, awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 } })
+				: null;
+			this._importSourceWatcher?.on("all", (event, changedPath) => this._onImportedSourceChanged(event, changedPath));
+			this._importSourceWatchSignature = signature;
+		}
+		await new Promise<void>((resolveState) => {
+			this.setState(
+				{
+					autoReimportEnabled: status.settings.enabled,
+					autoReimportExternalSourceCount: paths.length,
+					autoReimportLastJob: status.activeJob ?? status.lastJob,
+				},
+				resolveState
+			);
+		});
+	}
+
 	private _watchProjectAssets(projectDirectory: string): void {
 		void this._projectWatcher?.close();
 		if (this._assetWatchRefreshTimeout) {
 			clearTimeout(this._assetWatchRefreshTimeout);
 		}
-		const watchedPaths = [join(projectDirectory, "assets"), join(projectDirectory, "src")];
+		const watchedPaths = getProjectAssetWatchPaths(projectDirectory);
 		this._projectWatcher = watch(watchedPaths, {
 			ignoreInitial: true,
 			persistent: true,
@@ -340,6 +404,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		});
 		this._projectWatcher.on("all", (event, changedPath) => this._onProjectAssetChanged(event, changedPath));
 		this.setState({ watchingAssets: true, assetChangeCount: 0, lastAssetChange: null });
+		void this.refreshAutoReimportWatchers();
 	}
 
 	private _onProjectAssetChanged(event: string, changedPath: string): void {
@@ -353,14 +418,74 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		if (this._assetWatchRefreshTimeout) {
 			clearTimeout(this._assetWatchRefreshTimeout);
 		}
-		this._assetWatchRefreshTimeout = setTimeout(async () => {
+		this._assetWatchRefreshTimeout = setTimeout(() => {
 			this._assetWatchRefreshTimeout = null;
 			const paths = [...this._pendingRegistryPaths];
 			this._pendingRegistryPaths.clear();
-			await refreshAssetRegistryPaths(paths);
-			await this._refreshAssetRegistryStatus();
-			this.refresh();
+			void (async () => {
+				try {
+					await refreshAssetRegistryPaths(paths);
+					const now = Date.now();
+					const autoReimportPaths = paths.filter((path) => {
+						const expiresAt = this._autoReimportSuppressedProjectPaths.get(path) ?? 0;
+						if (expiresAt < now) {
+							this._autoReimportSuppressedProjectPaths.delete(path);
+						}
+						return expiresAt < now;
+					});
+					const job = autoReimportPaths.length ? await processAutoReimportChanges(autoReimportPaths, this.props.editor) : null;
+					if (job?.appliedCount) {
+						toast.success(`Auto Reimport rebuilt ${job.appliedCount} asset${job.appliedCount === 1 ? "" : "s"}.`);
+					}
+					if (job?.failedCount) {
+						toast.error(`Auto Reimport completed with ${job.failedCount} failure${job.failedCount === 1 ? "" : "s"}.`);
+					}
+					await this._refreshAssetRegistryStatus();
+					await this.refreshAutoReimportWatchers();
+					this.refresh();
+				} catch (error) {
+					console.error("Failed to refresh the asset registry after a watched project change.", error);
+					toast.error(`Asset watcher refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			})();
 		}, 200);
+	}
+
+	private _onImportedSourceChanged(event: string, changedPath: string): void {
+		if (event !== "add" && event !== "change") {
+			return;
+		}
+		this._pendingImportSourcePaths.add(changedPath.replace(/\\/g, "/"));
+		if (this._importSourceRefreshTimeout) {
+			clearTimeout(this._importSourceRefreshTimeout);
+		}
+		this._importSourceRefreshTimeout = setTimeout(() => {
+			this._importSourceRefreshTimeout = null;
+			const paths = [...this._pendingImportSourcePaths];
+			this._pendingImportSourcePaths.clear();
+			void (async () => {
+				try {
+					const job = await processAutoReimportOriginChanges(paths, this.props.editor);
+					for (const copyResult of job?.sourceCopies ?? []) {
+						if (copyResult.status === "copied") {
+							this._autoReimportSuppressedProjectPaths.set(resolve(dirname(projectConfiguration.path!), copyResult.assetPath), Date.now() + 5_000);
+						}
+					}
+					if (job?.appliedCount) {
+						toast.success(`Auto Reimport synchronized ${job.sourceCopies.length} source file${job.sourceCopies.length === 1 ? "" : "s"}.`);
+					}
+					if (job?.failedCount) {
+						toast.error(`External-source Auto Reimport completed with ${job.failedCount} failure${job.failedCount === 1 ? "" : "s"}.`);
+					}
+					await this._refreshAssetRegistryStatus();
+					await this.refreshAutoReimportWatchers();
+					this.refresh();
+				} catch (error) {
+					console.error("Failed to automatically reimport a watched external source.", error);
+					toast.error(`Auto Reimport failed: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			})();
+		}, 300);
 	}
 
 	private async _refreshAssetRegistryStatus(): Promise<void> {
@@ -595,8 +720,9 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			await renameScene(oldAbsolutePath, newAbsolutePath);
 
 			this._handleFileRenamed(oldRelativePath, newRelativePath);
+			const sceneBuildSettings = renameSceneInBuildSettings(this.props.editor.state.sceneBuildSettings, oldRelativePath, newRelativePath);
 
-			return this.props.editor.setState({ lastOpenedScenePath: newAbsolutePath }, () => {
+			return this.props.editor.setState({ lastOpenedScenePath: newAbsolutePath, sceneBuildSettings }, () => {
 				saveProjectConfiguration(this.props.editor);
 			});
 		}
@@ -624,9 +750,22 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 					await renameScene(oldSceneAbsolutePath, file);
 
 					if (oldSceneAbsolutePath === this.props.editor.state.lastOpenedScenePath) {
-						this.props.editor.setState({ lastOpenedScenePath: file }, () => {
+						const sceneBuildSettings = renameSceneInBuildSettings(
+							this.props.editor.state.sceneBuildSettings,
+							oldSceneAbsolutePath.replace(rootUrl, ""),
+							newFileRelativePath
+						);
+						this.props.editor.setState({ lastOpenedScenePath: file, sceneBuildSettings }, () => {
 							saveProjectConfiguration(this.props.editor);
 						});
+					} else {
+						await new Promise<void>((resolve) =>
+							this.props.editor.setState(
+								(state) => ({ sceneBuildSettings: renameSceneInBuildSettings(state.sceneBuildSettings, oldFileRelativePath, newFileRelativePath) }),
+								resolve
+							)
+						);
+						await saveProjectConfiguration(this.props.editor);
 					}
 				}
 
@@ -1283,6 +1422,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			case ".lwo":
 			case ".gltf":
 			case ".ms3d":
+			case ".blend":
 			case ".babylon":
 				return <MeshSelectable {...props} />;
 
@@ -1295,10 +1435,18 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			case ".png":
 			case ".jpg":
 			case ".jpeg":
+			case ".bmp":
 			case ".webp":
+			case ".gif":
+			case ".tif":
+			case ".tiff":
+			case ".tga":
+			case ".psd":
+			case ".psb":
 				return <ImageSelectable {...props} />;
 
 			case ".hdr":
+			case ".exr":
 				return <HDRSelectable {...props} />;
 
 			case ".json":
@@ -1547,6 +1695,13 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 
 		const previewContent = await fetch("assets/new-scene-preview.png").then((r) => r.arrayBuffer());
 		await writeFile(join(absolutePath, "preview.png"), Buffer.from(previewContent));
+
+		if (this.props.editor.state.projectPath) {
+			const scenePath = relative(dirname(this.props.editor.state.projectPath), absolutePath);
+			const sceneBuildSettings = addSceneToBuildSettings(this.props.editor.state.sceneBuildSettings, scenePath);
+			await new Promise<void>((resolve) => this.props.editor.setState({ sceneBuildSettings }, resolve));
+			await saveProjectConfiguration(this.props.editor);
+		}
 
 		this._refreshItems(this.state.browsedPath!);
 
@@ -1857,6 +2012,14 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			case ".jpg":
 			case ".bmp":
 			case ".jpeg":
+			case ".gif":
+			case ".tif":
+			case ".tiff":
+			case ".tga":
+			case ".psd":
+			case ".psb":
+			case ".hdr":
+			case ".exr":
 			case ".mp3":
 			case ".wav":
 			case ".wave":
@@ -1869,7 +2032,6 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 				return openModelViewer(this.props.editor, item.props.absolutePath);
 
 			case ".env":
-			case ".hdr":
 				return openEnvViewer(item.props.absolutePath);
 
 			case ".prefab":
@@ -1912,14 +2074,13 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 
 		clearUndoRedo();
 
-		await this.props.editor.layout.preview.reset();
 		this.props.editor.setState({
 			lastOpenedScenePath: absolutePath,
 		});
 
 		const directory = dirname(this.props.editor.state.projectPath);
 
-		await loadScene(this.props.editor, directory, absolutePath);
+		await replaceWithSingleSceneWorkspace(this.props.editor, directory, absolutePath);
 
 		await this.props.editor.layout.graph.refresh();
 
@@ -1928,6 +2089,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		this.props.editor.layout.inspector.setEditedObject(scene);
 		this.props.editor.layout.animations.setEditedObject(scene);
 		this.props.editor.layout.preview.gizmo.setAttachedObject(null);
+		await saveProjectConfiguration(this.props.editor);
 	}
 
 	private _handleNodeClicked(node: TreeNodeInfo): void {

@@ -5,8 +5,9 @@ import { WebRequest } from "@babylonjs/core/Misc/webRequest";
 import { AssetContainer } from "@babylonjs/core/assetContainer";
 import { SpriteManager } from "@babylonjs/core/Sprites/spriteManager";
 import { AddParser } from "@babylonjs/core/Loading/Plugins/babylonFileParser.function";
+import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 
-import { SpriteManagerNode } from "../tools/sprite";
+import { configureRotatedPackedSpriteManager, installRotatedPackedSpriteShaders, SpriteManagerNode } from "../tools/sprite";
 import { addExcludedCompressedTexture } from "../tools/texture";
 
 function parseSerializedSpriteManager(spriteManager: SpriteManager, parsedSpriteManager: any) {
@@ -79,7 +80,9 @@ export function registerSpriteManagerParser() {
 					// Temporarily excluded sprites from compressed textures support
 					addExcludedCompressedTexture(engine, imagePath);
 
+					installRotatedPackedSpriteShaders(ShaderStore);
 					const spriteManager = new SpriteManager(instance.name, imagePath, 1000, 64, scene, undefined, undefined, true, atlasJson);
+					configureRotatedPackedSpriteManager(spriteManager, atlasJson);
 					instance.spriteManager = spriteManager;
 
 					if (transformNode.spriteManager) {

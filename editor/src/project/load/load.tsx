@@ -12,10 +12,15 @@ import { defaultGizmoSnapPreferences, roundGizmoSnapSteps } from "../../tools/sc
 
 import { projectConfiguration } from "../configuration";
 import { EditorProjectPackageManager, IEditorProject } from "../typings";
+import { readSceneBuildSettings } from "../scenes";
+import { readSceneWorkspaceSettings } from "../scene-workspace";
+import { normalizePrefabStageSettings } from "../prefab-stage";
 
-import { loadScene } from "./scene";
+import { loadSceneWorkspace } from "./workspace";
 import { LoadScenePrepareComponent } from "./prepare";
 import { installBabylonJSEditorCLI, installBabylonJSEditorTools, installDependencies } from "./install";
+
+const runtimeDependenciesVersion = packageJson.runtimeDependenciesVersion;
 
 /**
  * Loads an editor project located at the given path. Typically called at startup when opening
@@ -26,6 +31,8 @@ import { installBabylonJSEditorCLI, installBabylonJSEditorTools, installDependen
 export async function loadProject(editor: Editor, path: string) {
 	const directory = dirname(path);
 	const project = (await readJSON(path, "utf-8")) as IEditorProject;
+	const [sceneBuildSettings, sceneWorkspace] = await Promise.all([readSceneBuildSettings(path, project), readSceneWorkspaceSettings(path, project)]);
+	const activeScenePath = sceneWorkspace.activeScene ? join(directory, sceneWorkspace.activeScene) : null;
 	const packageManager = project.packageManager ?? "yarn";
 	const gizmoSnap = roundGizmoSnapSteps({ ...defaultGizmoSnapPreferences, ...(project.gizmoSnap ?? {}) });
 
@@ -33,7 +40,9 @@ export async function loadProject(editor: Editor, path: string) {
 		packageManager,
 		projectPath: path,
 		plugins: project.plugins.map((plugin) => plugin.nameOrPath),
-		lastOpenedScenePath: project.lastOpenedScene ? join(directory, project.lastOpenedScene) : null,
+		lastOpenedScenePath: activeScenePath,
+		sceneBuildSettings,
+		prefabStage: normalizePrefabStageSettings(project.prefabStage),
 
 		compressedTextureSoftware: project.compressedTextureSoftware ?? "PVRTexTool",
 		compressedTexturesEnabled: project.compressedTexturesEnabled ?? false,
@@ -44,6 +53,7 @@ export async function loadProject(editor: Editor, path: string) {
 		externalEditorCommand: project.externalEditorCommand ?? "code",
 		scriptExecutionOrders: project.scriptExecutionOrders ?? {},
 	});
+	editor.sceneWorkspace.configure(sceneWorkspace);
 
 	editor.layout.forceUpdate();
 	editor.layout.preview?.updateGizmoSnapPreferences(gizmoSnap);
@@ -58,17 +68,16 @@ export async function loadProject(editor: Editor, path: string) {
 		packageManager,
 	});
 
-	// Load scene?
-	if (project.lastOpenedScene) {
-		const absolutePath = join(directory, project.lastOpenedScene);
-
-		if (!(await pathExists(absolutePath))) {
-			toast(`Scene "${project.lastOpenedScene}" does not exist.`);
-
-			return editor.layout.console.error(`Scene "${project.lastOpenedScene}" does not exist.`);
+	// Load every persisted authored scene; the active scene only controls authoring focus.
+	if (sceneWorkspace.loadedScenes.length) {
+		const sceneExists = await Promise.all(sceneWorkspace.loadedScenes.map((scenePath) => pathExists(join(directory, scenePath))));
+		const missingScene = sceneWorkspace.loadedScenes.find((_, index) => !sceneExists[index]);
+		if (missingScene) {
+			toast(`Scene "${missingScene}" does not exist.`);
+			return editor.layout.console.error(`Scene "${missingScene}" does not exist.`);
 		}
 
-		await loadScene(editor, directory, absolutePath);
+		await loadSceneWorkspace(editor, directory, sceneWorkspace);
 
 		editor.layout.preview.scene.onBeforeRenderObservable.addOnce(() => {
 			editor.layout.graph.refresh();
@@ -115,7 +124,7 @@ export async function checkDependencies(
 			const path = join(toolsPathSplit.join("/"), toolsPackageJsonPath);
 			const toolsPackageJson = await readJSON(path, "utf-8");
 
-			matchesToolsVersion = toolsPackageJson.version === packageJson.version;
+			matchesToolsVersion = toolsPackageJson.version === runtimeDependenciesVersion;
 			break;
 		} catch (e) {
 			// Catch silently
@@ -130,7 +139,7 @@ export async function checkDependencies(
 			const path = join(cliPathSplit.join("/"), cliPackageJsonPath);
 			const cliPackageJson = await readJSON(path, "utf-8");
 
-			matchesCliVersion = cliPackageJson.version === packageJson.version;
+			matchesCliVersion = cliPackageJson.version === runtimeDependenciesVersion;
 			break;
 		} catch (e) {
 			// Catch silently
@@ -141,14 +150,14 @@ export async function checkDependencies(
 
 	let toolsCode = 0;
 	if (!matchesToolsVersion) {
-		toolsCode = await installBabylonJSEditorTools(packageManager, directory, packageJson.version);
+		toolsCode = await installBabylonJSEditorTools(packageManager, directory, runtimeDependenciesVersion);
 		if (toolsCode !== 0) {
 			toast.warning(`Package manager "${packageManager}" is not available on your system. Can't install "babylonjs-editor-tools" package dependency.`);
 		}
 	}
 
 	if (!matchesCliVersion) {
-		installBabylonJSEditorCLI(packageManager, directory, packageJson.version).then((code) => {
+		installBabylonJSEditorCLI(packageManager, directory, runtimeDependenciesVersion).then((code) => {
 			if (code !== 0) {
 				toast.warning(`Package manager "${packageManager}" is not available on your system. Can't install "babylonjs-editor-cli" package dependency.`);
 			}

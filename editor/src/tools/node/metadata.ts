@@ -1,6 +1,9 @@
 import { Node } from "babylonjs";
+import type { ISerializedGameObjectComponentStack } from "babylonjs-editor-tools";
 
 export interface INodeMetadata {
+	/** Versioned first-class GameObject component ordering and custom-data model. */
+	babylonEditorComponentStack?: ISerializedGameObjectComponentStack;
 	/**
 	 * Defines wether or not the object is locked.
 	 */

@@ -4,8 +4,10 @@ import { readJSON, readFile } from "fs-extra";
 import { Scene, MorphTargetManager } from "babylonjs";
 
 import { Editor } from "../../../editor/main";
+import { isMesh } from "../../../tools/guards/nodes";
 
 import { ISceneLoaderPluginOptions } from "../scene";
+import { findSceneLoadResultNodeById } from "../result";
 
 export async function loadMorphTargetManagers(editor: Editor, morphTargetManagerFiles: string[], scene: Scene, options: ISceneLoaderPluginOptions) {
 	const loadedMorphTargetManagers = await Promise.all(
@@ -44,8 +46,8 @@ export async function loadMorphTargetManagers(editor: Editor, morphTargetManager
 					})
 				);
 
-				const mesh = scene.getMeshById(data.meshId);
-				if (mesh) {
+				const mesh = findSceneLoadResultNodeById(options.loadResult, data.meshId);
+				if (mesh && isMesh(mesh)) {
 					const morphTargetManager = MorphTargetManager.Parse(data, scene);
 					morphTargetManager["_uniqueId"] = data.uniqueId;
 
@@ -55,6 +57,7 @@ export async function loadMorphTargetManagers(editor: Editor, morphTargetManager
 					}
 
 					mesh.morphTargetManager = morphTargetManager;
+					options.loadResult.morphTargetManagers.push(morphTargetManager);
 
 					return morphTargetManager;
 				}

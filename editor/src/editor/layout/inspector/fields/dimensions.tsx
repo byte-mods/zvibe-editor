@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../
 
 import { IEditorInspectorFieldProps } from "./field";
 import { EditorInspectorNumberField } from "./number";
+import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorDimensionsFieldProps extends IEditorInspectorFieldProps {
 	step?: number;
@@ -19,10 +20,15 @@ export interface IEditorInspectorDimensionsFieldProps extends IEditorInspectorFi
 }
 
 export function EditorInspectorDimensionsField(props: IEditorInspectorDimensionsFieldProps) {
+	const prefab = usePrefabFieldOverride(props);
 	const [pointerOver, setPointerOver] = useState(false);
 
 	return (
-		<div className="flex gap-2 items-center px-2" onMouseOver={() => setPointerOver(true)} onMouseLeave={() => setPointerOver(false)}>
+		<div
+			className={`flex gap-2 items-center px-2 ${prefab.entry ? "border-l-2 border-blue-500 bg-blue-500/5" : ""}`}
+			onMouseOver={() => setPointerOver(true)}
+			onMouseLeave={() => setPointerOver(false)}
+		>
 			<div
 				className={`
                     w-32
@@ -31,7 +37,7 @@ export function EditorInspectorDimensionsField(props: IEditorInspectorDimensions
                 `}
 			>
 				<div className="flex gap-2 items-center">
-					{props.label}
+					<div className={prefab.entry ? "font-semibold text-blue-300" : ""}>{props.label}</div>
 
 					{props.tooltip && (
 						<TooltipProvider delayDuration={0}>
@@ -45,27 +51,36 @@ export function EditorInspectorDimensionsField(props: IEditorInspectorDimensions
 					)}
 				</div>
 			</div>
+			<PrefabFieldOverrideActions {...prefab} />
 
 			<div className="flex">
 				<EditorInspectorNumberField
 					object={props.object}
 					property={`${props.property}.width`}
+					prefabOverride={false}
 					noUndoRedo={props.noUndoRedo}
 					step={props.step}
 					min={props.min?.[0] ?? props.min}
 					max={props.max?.[0] ?? props.max}
-					onChange={() => props.onChange?.()}
+					onChange={() => {
+						props.onChange?.();
+						prefab.notifyChanged();
+					}}
 					onFinishChange={() => props.onFinishChange?.()}
 				/>
 
 				<EditorInspectorNumberField
 					object={props.object}
 					property={`${props.property}.height`}
+					prefabOverride={false}
 					noUndoRedo={props.noUndoRedo}
 					step={props.step}
 					min={props.min?.[1] ?? props.min}
 					max={props.max?.[1] ?? props.max}
-					onChange={() => props.onChange?.()}
+					onChange={() => {
+						props.onChange?.();
+						prefab.notifyChanged();
+					}}
 					onFinishChange={() => props.onFinishChange?.()}
 				/>
 			</div>

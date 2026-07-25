@@ -32,6 +32,7 @@ import { applyMaterialImporterArtifact, getMaterialImporterArtifactStatus, IMate
 import { applyModelImporterArtifact, getModelImporterArtifactStatus, IModelImporterArtifactStatus } from "../../../mcp/assets/model-importer";
 import { applyAnimationImporterArtifact, getAnimationImporterArtifactStatus, IAnimationImporterArtifactStatus } from "../../../mcp/assets/animation-importer";
 import { applyTextureImporterArtifact, getTextureImporterArtifactStatus, ITextureImporterArtifactStatus } from "../../../mcp/assets/texture-importer";
+import { getAutoReimportStatus, inspectAutoReimport, runAutoReimport, setAutoReimportSettings } from "../../../mcp/assets/auto-reimport";
 
 export class FileInspectorObject {
 	public readonly isFileInspectorObject = true;
@@ -73,6 +74,7 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 		materialArtifact: IMaterialImporterArtifactStatus | null;
 		modelArtifact: IModelImporterArtifactStatus | null;
 		animationArtifact: IAnimationImporterArtifactStatus | null;
+		autoReimportStatus: Awaited<ReturnType<typeof getAutoReimportStatus>> | null;
 		error: string | null;
 		loading: boolean;
 	} = {
@@ -87,6 +89,7 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 		materialArtifact: null,
 		modelArtifact: null,
 		animationArtifact: null,
+		autoReimportStatus: null,
 		error: null,
 		loading: true,
 	};
@@ -135,7 +138,14 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 					Version {importer.version} · {definition.extensions.length ? `.${definition.extensions.join(", .")}` : "custom extensions"}
 				</div>
 				{definition.fields
-					.filter((field) => field.key !== "animationClips" && field.key !== "materialRemaps" && field.key !== "generatedLods")
+					.filter(
+						(field) =>
+							field.key !== "animationClips" &&
+							field.key !== "materialRemaps" &&
+							field.key !== "authoredLods" &&
+							field.key !== "generatedLods" &&
+							field.key !== "platformOverrides"
+					)
 					.map((field) => (
 						<label key={field.key} className="grid grid-cols-[1fr_140px] gap-2 items-center" title={field.description}>
 							<span>{field.label}</span>
@@ -206,6 +216,36 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 						</div>
 						{data.importState.checkedAt && <div className="text-xs text-muted-foreground">Checked: {data.importState.checkedAt}</div>}
 						{data.importState.error && <div className="text-xs text-red-400 break-all">{data.importState.error.message}</div>}
+						{this.state.autoReimportStatus && (
+							<div className="flex flex-col gap-1 border-y border-border py-2">
+								<div className="flex items-center justify-between gap-2">
+									<span>
+										Auto Reimport:{" "}
+										<span className={this.state.autoReimportStatus.settings.enabled ? "text-green-400" : "text-muted-foreground"}>
+											{this.state.autoReimportStatus.settings.enabled ? "On" : "Off"}
+										</span>
+									</span>
+									<Button variant="outline" className="h-7 px-2" disabled={this.state.loading} onClick={() => void this._toggleAutoReimport()}>
+										{this.state.autoReimportStatus.settings.enabled ? "Disable" : "Enable"}
+									</Button>
+								</div>
+								<label className="flex items-center gap-2 text-xs">
+									<input
+										type="checkbox"
+										checked={this.state.autoReimportStatus.settings.watchImportedSources}
+										disabled={this.state.loading}
+										onChange={(event) => void this._setWatchImportedSources(event.target.checked)}
+									/>
+									Watch recorded external import sources
+								</label>
+								<div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+									<span>Last job: {(this.state.autoReimportStatus.activeJob ?? this.state.autoReimportStatus.lastJob)?.status ?? "none"}</span>
+									<Button variant="outline" className="h-7 px-2" disabled={this.state.loading} onClick={() => void this._runAutoReimportNow()}>
+										Reimport Now
+									</Button>
+								</div>
+							</div>
+						)}
 						<div className="text-xs break-all">Tags: {data.tags.length ? data.tags.join(", ") : "None"}</div>
 						<div className="flex gap-2 flex-wrap">
 							<Button variant="outline" className="h-7 px-2" onClick={() => void this._toggleFavorite()}>
@@ -231,13 +271,24 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 			case ".gif":
 			case ".tif":
 			case ".tiff":
+			case ".tga":
+			case ".psd":
+			case ".psb":
 			case ".svg":
+			case ".hdr":
+			case ".exr":
 				return (
 					<EditorInspectorImageComponent
 						object={this.props.object}
-						importedPath={this.state.textureArtifact?.artifactPath}
+						importedPath={this.state.textureArtifact?.result?.previewPath ?? this.state.textureArtifact?.artifactPath}
 						importedCurrent={this.state.textureArtifact?.current}
 						result={this.state.textureArtifact?.result}
+						settings={this.state.importerDraft}
+						onPlatformOverridesChange={(value) => this._setImporterDraftValue("platformOverrides", value)}
+						onAssetsChanged={() => {
+							this.props.editor.layout.assets.refresh();
+							void this._loadDependencies();
+						}}
 					/>
 				);
 
@@ -484,12 +535,14 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 	private async _loadDependencies(): Promise<void> {
 		this.setState({ loading: true, error: null });
 		try {
-			const [dependencyData, assetData] = await Promise.all([
+			const [dependencyData, assetData, autoReimportStatus] = await Promise.all([
 				getIndexedAssetDependencies(this.props.object.absolutePath),
 				getIndexedAssetRecord(this.props.object.absolutePath),
+				getAutoReimportStatus(),
 			]);
 			const textureArtifact =
-				assetData.importer.kind === "texture" && [".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff", ".svg"].includes(this._extension)
+				assetData.importer.kind === "texture" &&
+				[".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff", ".tga", ".psd", ".psb", ".svg", ".hdr", ".exr"].includes(this._extension)
 					? await getTextureImporterArtifactStatus(this.props.object.absolutePath)
 					: null;
 			const audioArtifact = assetData.importer.kind === "audio" ? await getAudioImporterArtifactStatus(this.props.object.absolutePath) : null;
@@ -510,6 +563,7 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 				materialArtifact,
 				modelArtifact,
 				animationArtifact,
+				autoReimportStatus,
 				loading: false,
 			});
 		} catch (error) {
@@ -524,6 +578,7 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 				materialArtifact: null,
 				modelArtifact: null,
 				animationArtifact: null,
+				autoReimportStatus: null,
 				error: error instanceof Error ? error.message : String(error),
 				loading: false,
 			});
@@ -546,7 +601,10 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 			await writeAssetMetadata(this.props.object.absolutePath, metadata);
 			await refreshAssetRegistryPaths([this.props.object.absolutePath]);
 			let importerMessage = "Importer settings saved. Build cache will refresh for this asset.";
-			if (metadata.importer.kind === "texture" && [".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff", ".svg"].includes(this._extension)) {
+			if (
+				metadata.importer.kind === "texture" &&
+				[".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff", ".tga", ".psd", ".psb", ".svg", ".hdr", ".exr"].includes(this._extension)
+			) {
 				const planned = await getTextureImporterArtifactStatus(this.props.object.absolutePath);
 				const applied = await applyTextureImporterArtifact(this.props.object.absolutePath, planned.fingerprint);
 				importerMessage = `Texture importer applied: ${applied.result?.output.width ?? "?"}×${applied.result?.output.height ?? "?"} ${applied.result?.output.format ?? "unknown"}, ${applied.result?.effectiveColorSpace ?? "unknown"}, ${applied.result?.mipmaps.length ?? 0} mip level(s).`;
@@ -607,6 +665,46 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 		await refreshAssetRegistryPaths([this.props.object.absolutePath]);
 		await this._loadDependencies();
 		this.props.editor.layout.assets.refresh();
+	}
+
+	private async _toggleAutoReimport(): Promise<void> {
+		const status = this.state.autoReimportStatus ?? (await getAutoReimportStatus());
+		this.setState({ loading: true, error: null });
+		try {
+			await setAutoReimportSettings(status.settingsFingerprint, { ...status.settings, enabled: !status.settings.enabled });
+			await this.props.editor.layout.assets.refreshAutoReimportWatchers();
+			await this._loadDependencies();
+		} catch (error) {
+			this.setState({ error: error instanceof Error ? error.message : String(error), loading: false });
+		}
+	}
+
+	private async _setWatchImportedSources(enabled: boolean): Promise<void> {
+		const status = this.state.autoReimportStatus ?? (await getAutoReimportStatus());
+		this.setState({ loading: true, error: null });
+		try {
+			await setAutoReimportSettings(status.settingsFingerprint, { ...status.settings, watchImportedSources: enabled });
+			await this.props.editor.layout.assets.refreshAutoReimportWatchers();
+			await this._loadDependencies();
+		} catch (error) {
+			this.setState({ error: error instanceof Error ? error.message : String(error), loading: false });
+		}
+	}
+
+	private async _runAutoReimportNow(): Promise<void> {
+		this.setState({ loading: true, error: null });
+		try {
+			const paths = [relative(dirname(projectConfiguration.path!), this.props.object.absolutePath).replace(/\\/g, "/")];
+			const plan = await inspectAutoReimport({ paths });
+			const job = await runAutoReimport(plan.fingerprint, { paths }, this.props.editor);
+			const importerMessage = `Auto Reimport ${job.status}: ${job.appliedCount} applied, ${job.currentCount} current, ${job.failedCount} failed.`;
+			await this.props.editor.layout.assets.refreshAutoReimportWatchers();
+			await this._loadDependencies();
+			this.setState({ importerMessage });
+			this.props.editor.layout.assets.refresh();
+		} catch (error) {
+			this.setState({ error: error instanceof Error ? error.message : String(error), loading: false });
+		}
 	}
 
 	private async _refreshImportState(): Promise<void> {

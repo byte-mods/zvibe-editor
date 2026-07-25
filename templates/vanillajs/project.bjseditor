@@ -1,8 +1,54 @@
 {
     "plugins": [],
-    "version": "5.0.0",
+    "version": "1.0.0",
     "packageManager": "yarn",
     "lastOpenedScene": "/assets/example.scene",
+    "sceneBuildSettings": {
+        "version": 1,
+        "scenes": [
+            {
+                "path": "assets/example.scene",
+                "enabled": true
+            }
+        ]
+    },
+    "sceneWorkspace": {
+        "version": 1,
+        "loadedScenes": [
+            "assets/example.scene"
+        ],
+        "activeScene": "assets/example.scene",
+        "lightingScene": "assets/example.scene"
+    },
+    "prefabStage": {
+        "version": 1,
+        "mode": "isolation",
+        "contextAppearance": "gray",
+        "showOverrides": true,
+        "autoSave": false,
+        "environment": "neutral",
+        "backgroundColor": [
+            0.025,
+            0.03,
+            0.04,
+            1
+        ],
+        "lightIntensity": 1.2
+    },
+    "compressedTextureSoftware": "PVRTexTool",
     "compressedTexturesEnabled": false,
-    "compressedTexturesEnabledInPreview": false
+    "compressedTexturesEnabledInPreview": false,
+    "compressedEtc2Enabled": false,
+    "compressedPvrtcEnabled": false,
+    "compressedTextureQuality": "very-fast",
+    "externalEditorCommand": "code",
+    "scriptExecutionOrders": {},
+    "gizmoSnap": {
+        "translationEnabled": false,
+        "translationStep": 1,
+        "rotationEnabled": false,
+        "rotationStepDegrees": 15,
+        "scaleEnabled": false,
+        "scaleStep": 0.25
+    }
 }

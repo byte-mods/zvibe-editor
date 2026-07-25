@@ -14,6 +14,7 @@ export interface ISavedMergedDecalsOptions {
 	scenePath: string;
 	savedFiles: string[];
 	relativeScenePath: string;
+	belongsToScene?: (object: object) => boolean;
 }
 
 export async function saveMergedDecals(editor: Editor, options: ISavedMergedDecalsOptions) {
@@ -29,6 +30,9 @@ export async function saveMergedDecals(editor: Editor, options: ISavedMergedDeca
 	}
 
 	scene.meshes.forEach((mesh) => {
+		if (options.belongsToScene && !options.belongsToScene(mesh)) {
+			return;
+		}
 		if (mesh.metadata.scripts?.length || !isNodeFromStaticGroup(mesh)) {
 			return;
 		}
@@ -45,7 +49,7 @@ export async function saveMergedDecals(editor: Editor, options: ISavedMergedDeca
 	});
 
 	const meshData = await Promise.all(
-		decalsMap.entries().map(async ([materialId, array]) => {
+		Array.from(decalsMap.entries()).map(async ([materialId, array]) => {
 			if (array.length < 2) {
 				return null;
 			}

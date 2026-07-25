@@ -60,6 +60,8 @@ function hasEmbeddedMaterial(data: any, materialId: string): boolean {
 }
 
 export async function loadMeshes(meshesFiles: string[], scene: Scene, options: ISceneLoaderPluginOptions) {
+	const existingMaterials = new Set([...scene.materials, ...scene.multiMaterials]);
+	const existingGeometries = new Set(scene.geometries);
 	const expectedExternalGeometryWarnings = new Set<string>();
 	const expectedDefaultMaterialWarnings = new Set<string>();
 	const unregisterWarningFilter = registerBabylonWarningFilter((message) => {
@@ -209,7 +211,7 @@ export async function loadMeshes(meshesFiles: string[], scene: Scene, options: I
 											configureSimultaneousLightsForMaterial(subMaterial);
 
 											const existingMaterial = scene.materials.find((material) => {
-												return material !== m.material && material.uniqueId === m.material!.uniqueId;
+												return !existingMaterials.has(material) && material !== m.material && material.uniqueId === m.material!.uniqueId;
 											});
 
 											if (existingMaterial) {
@@ -221,7 +223,7 @@ export async function loadMeshes(meshesFiles: string[], scene: Scene, options: I
 										configureSimultaneousLightsForMaterial(m.material);
 
 										const existingMaterial = scene.materials.find((material) => {
-											return material !== m.material && material.uniqueId === m.material!.uniqueId;
+											return !existingMaterials.has(material) && material !== m.material && material.uniqueId === m.material!.uniqueId;
 										});
 
 										if (existingMaterial) {
@@ -267,15 +269,17 @@ export async function loadMeshes(meshesFiles: string[], scene: Scene, options: I
 		}
 	})();
 
-	// Make geometries unique for those one that are shared
+	// Deduplicate only geometries introduced by this scene; equal local IDs in another authored scene are independent.
 	const mappedGeometries = new Map<string, Geometry[]>();
-	scene.geometries.forEach((geometry) => {
-		if (!mappedGeometries.has(geometry.id)) {
-			mappedGeometries.set(geometry.id, [geometry]);
-		} else {
-			mappedGeometries.get(geometry.id)!.push(geometry);
-		}
-	});
+	scene.geometries
+		.filter((geometry) => !existingGeometries.has(geometry))
+		.forEach((geometry) => {
+			if (!mappedGeometries.has(geometry.id)) {
+				mappedGeometries.set(geometry.id, [geometry]);
+			} else {
+				mappedGeometries.get(geometry.id)!.push(geometry);
+			}
+		});
 
 	mappedGeometries.forEach((geometries) => {
 		if (geometries.length <= 1) {

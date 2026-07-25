@@ -124,6 +124,9 @@ import { MeshGeometryInspector } from "./geometry";
 import { EditorSkeletonInspector } from "./skeleton";
 import { EditorMeshPhysicsInspector } from "./physics";
 import { EditorMeshCollisionInspector } from "./collision";
+import { openPrefabBulkOverrides } from "./prefab-bulk-overrides";
+import { openPrefabOverrides } from "./prefab-overrides";
+import { openPrefabMode } from "../../assets-browser/viewers/prefab-mode";
 
 export interface IEditorMeshInspectorState {
 	dragOver: boolean;
@@ -134,7 +137,7 @@ export interface IEditorMeshInspectorState {
 	navMeshPath: string;
 	polygonColliderImagePath: string;
 	prefabLinks: any[];
-	prefabTargetPath: string;
+	prefabTargetIndex: number;
 	prefabBusy: boolean;
 	prefabStructure: any | null;
 	prefabComparison: any | null;
@@ -167,7 +170,7 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 			navMeshPath: "",
 			polygonColliderImagePath: "",
 			prefabLinks: [],
-			prefabTargetPath: "",
+			prefabTargetIndex: 0,
 			prefabBusy: false,
 			prefabStructure: null,
 			prefabComparison: null,
@@ -305,12 +308,12 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 			this.setState(
 				(state) => ({
 					prefabLinks: inspection.links,
-					prefabTargetPath: inspection.links.some((link: any) => link.path === state.prefabTargetPath) ? state.prefabTargetPath : (inspection.links[0]?.path ?? ""),
+					prefabTargetIndex: state.prefabTargetIndex < inspection.links.length ? state.prefabTargetIndex : 0,
 				}),
 				() => void this._loadPrefabStructure()
 			);
 		} catch (error: any) {
-			this.setState({ prefabLinks: [], prefabTargetPath: "", prefabStructure: null, prefabComparison: null });
+			this.setState({ prefabLinks: [], prefabTargetIndex: 0, prefabStructure: null, prefabComparison: null });
 			toast.error(error.message);
 		}
 	}
@@ -319,8 +322,8 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 		if (!this.props.object.metadata?.prefab) {
 			return null;
 		}
-		const selected = this.state.prefabLinks.find((link) => link.path === this.state.prefabTargetPath);
-		const selectedIndex = this.state.prefabLinks.indexOf(selected);
+		const selectedIndex = this.state.prefabTargetIndex;
+		const selected = this.state.prefabLinks[selectedIndex];
 		return (
 			<EditorInspectorSectionField
 				title="Prefab Instance"
@@ -329,12 +332,12 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 				<div className="flex flex-col gap-2 px-2 pb-2">
 					<select
 						className="h-8 rounded border border-white/15 bg-secondary px-2 text-xs"
-						value={this.state.prefabTargetPath}
+						value={this.state.prefabTargetIndex}
 						disabled={this.state.prefabBusy || !this.state.prefabLinks.length}
-						onChange={(event) => this.setState({ prefabTargetPath: event.target.value }, () => void this._loadPrefabStructure())}
+						onChange={(event) => this.setState({ prefabTargetIndex: Number(event.target.value) }, () => void this._loadPrefabStructure())}
 					>
 						{this.state.prefabLinks.map((link) => (
-							<option key={`${link.index}:${link.path}`} value={link.path}>
+							<option key={`${link.index}:${link.path}`} value={link.index}>
 								{link.index === 0 ? "Outer" : `Nested ${link.index}`} · {link.path} · {link.sourceNodeName}
 							</option>
 						))}
@@ -344,6 +347,33 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 							Revision {selected.revision.slice(0, 12)} · {selected.variant ? "variant" : "base"} {selected.stale ? "· stale" : ""}
 						</div>
 					)}
+					<Button
+						variant="default"
+						disabled={!selected || this.state.prefabBusy}
+						onClick={() => openPrefabOverrides(this.props.editor, this.props.object, selectedIndex)}
+					>
+						Open Prefab Overrides
+					</Button>
+					<Button variant="secondary" disabled={this.state.prefabBusy} onClick={() => openPrefabBulkOverrides(this.props.editor, { all: true })}>
+						Open All Prefab Overrides
+					</Button>
+					{selected && (
+						<Button variant="secondary" disabled={this.state.prefabBusy} onClick={() => openPrefabBulkOverrides(this.props.editor, { path: selected.path })}>
+							Open Matching Prefab Overrides
+						</Button>
+					)}
+					<Button
+						variant="secondary"
+						disabled={!selected || this.state.prefabBusy}
+						onClick={() =>
+							openPrefabMode(this.props.editor, selected.path, {
+								instance: { nodeId: this.props.object.id, targetIndex: selectedIndex },
+								mode: "context",
+							})
+						}
+					>
+						Open Prefab Stage
+					</Button>
 					<div className="grid grid-cols-2 gap-2">
 						<Button variant="secondary" disabled={!selected || this.state.prefabBusy} onClick={() => this._applyPrefabBoundary()}>
 							Apply Transform
@@ -439,13 +469,15 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 	}
 
 	private async _loadPrefabStructure(): Promise<void> {
-		if (!this.props.object.metadata?.prefab || !this.state.prefabTargetPath || this.state.prefabBusy) {
+		const selected = this.state.prefabLinks[this.state.prefabTargetIndex];
+		if (!this.props.object.metadata?.prefab || !selected || this.state.prefabBusy) {
 			return;
 		}
 		try {
 			const prefabStructure = await inspectPrefabInstanceStructure(this.props.object.getScene(), {
 				nodeId: this.props.object.id,
-				targetPath: this.state.prefabTargetPath,
+				targetPath: selected.path,
+				targetIndex: this.state.prefabTargetIndex,
 			});
 			this.setState({ prefabStructure });
 		} catch (error: any) {
@@ -473,6 +505,7 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 				{
 					nodeId: this.props.object.id,
 					targetPath: structure.targetPath,
+					targetIndex: structure.targetIndex,
 					expectedRevision: structure.revision,
 					confirm: true,
 				},
@@ -507,7 +540,8 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 	}
 
 	private async _applyPrefabBoundary(): Promise<void> {
-		const link = this.state.prefabLinks.find((entry) => entry.path === this.state.prefabTargetPath);
+		const targetIndex = this.state.prefabTargetIndex;
+		const link = this.state.prefabLinks[targetIndex];
 		if (!link) {
 			return;
 		}
@@ -515,7 +549,15 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 		try {
 			await applyPrefabInstanceBoundary(
 				this.props.object.getScene(),
-				{ nodeId: this.props.object.id, targetPath: link.path, expectedRevision: link.revision, transformVisibility: true, componentChanges: [], confirm: true },
+				{
+					nodeId: this.props.object.id,
+					targetPath: link.path,
+					targetIndex,
+					expectedRevision: link.revision,
+					transformVisibility: true,
+					componentChanges: [],
+					confirm: true,
+				},
 				{ editor: this.props.editor }
 			);
 			toast.success(`Applied transform to ${link.path}`);
@@ -528,7 +570,8 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 	}
 
 	private async _revertPrefabBoundary(): Promise<void> {
-		const link = this.state.prefabLinks.find((entry) => entry.path === this.state.prefabTargetPath);
+		const targetIndex = this.state.prefabTargetIndex;
+		const link = this.state.prefabLinks[targetIndex];
 		if (!link) {
 			return;
 		}
@@ -536,7 +579,7 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 		try {
 			await revertPrefabInstanceBoundary(
 				this.props.object.getScene(),
-				{ nodeId: this.props.object.id, targetPath: link.path, expectedRevision: link.revision, transformVisibility: true, componentKeys: [], confirm: true },
+				{ nodeId: this.props.object.id, targetPath: link.path, targetIndex, expectedRevision: link.revision, transformVisibility: true, componentKeys: [], confirm: true },
 				{ editor: this.props.editor }
 			);
 			toast.success(`Reverted transform from ${link.path}`);
@@ -548,7 +591,7 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 	}
 
 	private async _promotePrefabBoundary(): Promise<void> {
-		const targetIndex = this.state.prefabLinks.findIndex((entry) => entry.path === this.state.prefabTargetPath);
+		const targetIndex = this.state.prefabTargetIndex;
 		const target = this.state.prefabLinks[targetIndex];
 		const container = this.state.prefabLinks[targetIndex - 1];
 		if (!target || !container) {
@@ -568,6 +611,7 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 				{
 					nodeId: this.props.object.id,
 					targetPath: target.path,
+					targetIndex,
 					expectedContainerRevision: container.revision,
 					expectedTargetRevision: target.revision,
 					categories: ["transforms", "properties", "components", "structure"],
@@ -585,7 +629,8 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 	}
 
 	private async _unpackPrefab(mode: "outermost" | "completely"): Promise<void> {
-		const link = this.state.prefabLinks.find((entry) => entry.path === this.state.prefabTargetPath);
+		const targetIndex = this.state.prefabTargetIndex;
+		const link = this.state.prefabLinks[targetIndex];
 		if (!link) {
 			return;
 		}
@@ -600,12 +645,16 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 		}
 		this.setState({ prefabBusy: true });
 		try {
-			await unpackPrefabInstance(this.props.object.getScene(), { nodeId: this.props.object.id, targetPath: link.path, mode, confirm: true }, { editor: this.props.editor });
+			await unpackPrefabInstance(
+				this.props.object.getScene(),
+				{ nodeId: this.props.object.id, targetPath: link.path, targetIndex, mode, confirm: true },
+				{ editor: this.props.editor }
+			);
 			toast.success(mode === "completely" ? "Prefab instance unpacked completely" : "Prefab boundary unpacked");
 			if (this.props.object.metadata?.prefab) {
 				await this._loadPrefabLinks();
 			} else {
-				this.setState({ prefabLinks: [], prefabTargetPath: "" });
+				this.setState({ prefabLinks: [], prefabTargetIndex: 0 });
 			}
 			this.forceUpdate();
 		} catch (error: any) {
@@ -617,7 +666,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _getVfxTrailComponent(): ReactNode {
 		const trail = this.props.object;
-		if (!(trail instanceof TrailMesh)) return null;
+		if (!(trail instanceof TrailMesh)) {
+			return null;
+		}
 		const configuration = getVfxTrail(trail.getScene(), { nodeId: trail.id });
 		return (
 			<EditorInspectorSectionField
@@ -786,7 +837,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _setNavAgentNumber(agent: any, property: "radius" | "height" | "maxSpeed" | "maxAcceleration" | "avoidanceRadius" | "avoidanceWeight", value: string): void {
 		const number = Number(value);
-		if (!Number.isFinite(number) || (property === "avoidanceWeight" ? number < 0 : number <= 0)) return;
+		if (!Number.isFinite(number) || (property === "avoidanceWeight" ? number < 0 : number <= 0)) {
+			return;
+		}
 		try {
 			setNavAgent(this.props.object.getScene(), { id: agent.id, [property]: number }, { editor: this.props.editor });
 			this.forceUpdate();
@@ -806,7 +859,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _setNavAgentDestination(agent: any, value: string): void {
 		const destination = value.split(",").map((part) => Number(part.trim()));
-		if (destination.length !== 3 || destination.some((coordinate) => !Number.isFinite(coordinate))) return;
+		if (destination.length !== 3 || destination.some((coordinate) => !Number.isFinite(coordinate))) {
+			return;
+		}
 		setNavAgentDestination(this.props.object.getScene(), { id: agent.id, destination }, { editor: this.props.editor })
 			.then(() => this.forceUpdate())
 			.catch((error: any) => toast.error(error.message));
@@ -841,8 +896,12 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _setVfxTrail(data: any): void {
 		const trail = this.props.object;
-		if (!(trail instanceof TrailMesh)) return;
-		if (Object.values(data).some((value) => typeof value === "number" && !Number.isFinite(value))) return;
+		if (!(trail instanceof TrailMesh)) {
+			return;
+		}
+		if (Object.values(data).some((value) => typeof value === "number" && !Number.isFinite(value))) {
+			return;
+		}
 		setVfxTrail(trail.getScene(), { nodeId: trail.id, ...data }, { editor: this.props.editor });
 	}
 
@@ -1009,7 +1068,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _subdivideMesh(): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		const scene = mesh.getScene();
 		const options = { editor: this.props.editor };
 		const before = getMeshVertexData(scene, { nodeId: mesh.id });
@@ -1018,8 +1079,11 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 			executeRedo: true,
 			undo: () => setMeshVertexData(scene, { nodeId: mesh.id, positions: before.positions, uvs: before.uvs, indices: before.indices }, options),
 			redo: () => {
-				if (!after) after = subdivideMesh(scene, { nodeId: mesh.id }, options);
-				else setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, uvs: after.uvs, indices: after.indices }, options);
+				if (!after) {
+					after = subdivideMesh(scene, { nodeId: mesh.id }, options);
+				} else {
+					setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, uvs: after.uvs, indices: after.indices }, options);
+				}
 			},
 			action: () => this.props.editor.layout.inspector.forceUpdate(),
 		});
@@ -1027,7 +1091,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _getMeshComponentSelection(): ReactNode {
 		const mesh = this.props.object;
-		if (!isMesh(mesh) || !mesh.geometry || !mesh.getVerticesData("position")?.length) return null;
+		if (!isMesh(mesh) || !mesh.geometry || !mesh.getVerticesData("position")?.length) {
+			return null;
+		}
 		const scene = mesh.getScene();
 		const selection = getMeshSelection(scene, { nodeId: mesh.id });
 		const topology = getMeshTopology(scene, { nodeId: mesh.id });
@@ -1135,7 +1201,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _setMeshComponentSelection(mode: string, indices: number[]): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh) || (mode !== "vertex" && mode !== "edge" && mode !== "face")) return;
+		if (!isMesh(mesh) || (mode !== "vertex" && mode !== "edge" && mode !== "face")) {
+			return;
+		}
 		setMeshSelection(mesh.getScene(), { nodeId: mesh.id, mode, indices }, { editor: this.props.editor });
 		this.setState({ selectionIndices: null });
 	}
@@ -1148,12 +1216,18 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _applySelectedFaceOperation(operation: "extrude" | "inset"): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		const amount = Number(this.state.faceOperationAmount);
-		if (!Number.isFinite(amount) || amount <= 0) return;
+		if (!Number.isFinite(amount) || amount <= 0) {
+			return;
+		}
 		const scene = mesh.getScene();
 		const selection = getMeshSelection(scene, { nodeId: mesh.id });
-		if (selection.mode !== "face" || !selection.indices.length) return;
+		if (selection.mode !== "face" || !selection.indices.length) {
+			return;
+		}
 		const options = { editor: this.props.editor };
 		const before = getMeshVertexData(scene, { nodeId: mesh.id });
 		let after: ReturnType<typeof getMeshVertexData> | null = null;
@@ -1161,12 +1235,14 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 			executeRedo: true,
 			undo: () => setMeshVertexData(scene, { nodeId: mesh.id, positions: before.positions, normals: before.normals, uvs: before.uvs, indices: before.indices }, options),
 			redo: () => {
-				if (!after)
+				if (!after) {
 					after =
 						operation === "extrude"
 							? extrudeMeshFaces(scene, { nodeId: mesh.id, faceIndices: selection.indices, distance: amount }, options)
 							: insetMeshFaces(scene, { nodeId: mesh.id, faceIndices: selection.indices, amount: Math.min(amount, 0.999999) }, options);
-				else setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+				} else {
+					setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+				}
 			},
 			action: () => this.props.editor.layout.inspector.forceUpdate(),
 		});
@@ -1174,14 +1250,20 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _bridgeSelectedEdges(): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		const scene = mesh.getScene();
 		const selection = getMeshSelection(scene, { nodeId: mesh.id });
 		const topology = getMeshTopology(scene, { nodeId: mesh.id });
-		if (selection.mode !== "edge" || selection.indices.length !== 2) return;
+		if (selection.mode !== "edge" || selection.indices.length !== 2) {
+			return;
+		}
 		const firstEdge = topology.edges[selection.indices[0]];
 		const secondEdge = topology.edges[selection.indices[1]];
-		if (!firstEdge || !secondEdge) return;
+		if (!firstEdge || !secondEdge) {
+			return;
+		}
 		const options = { editor: this.props.editor };
 		const before = getMeshVertexData(scene, { nodeId: mesh.id });
 		let after: ReturnType<typeof getMeshVertexData> | null = null;
@@ -1189,8 +1271,11 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 			executeRedo: true,
 			undo: () => setMeshVertexData(scene, { nodeId: mesh.id, positions: before.positions, normals: before.normals, uvs: before.uvs, indices: before.indices }, options),
 			redo: () => {
-				if (!after) after = bridgeMeshEdges(scene, { nodeId: mesh.id, firstEdge, secondEdge }, options);
-				else setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+				if (!after) {
+					after = bridgeMeshEdges(scene, { nodeId: mesh.id, firstEdge, secondEdge }, options);
+				} else {
+					setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+				}
 			},
 			action: () => this.props.editor.layout.inspector.forceUpdate(),
 		});
@@ -1198,12 +1283,18 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _bevelSelectedEdge(): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		const amount = Number(this.state.faceOperationAmount);
-		if (!(amount > 0 && amount < 1)) return;
+		if (!(amount > 0 && amount < 1)) {
+			return;
+		}
 		const scene = mesh.getScene();
 		const selection = getMeshSelection(scene, { nodeId: mesh.id });
-		if (selection.mode !== "edge" || !selection.indices.length) return;
+		if (selection.mode !== "edge" || !selection.indices.length) {
+			return;
+		}
 		const options = { editor: this.props.editor };
 		const before = getMeshVertexData(scene, { nodeId: mesh.id });
 		let after: any = null;
@@ -1211,21 +1302,27 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 			executeRedo: true,
 			undo: () => setMeshVertexData(scene, { nodeId: mesh.id, positions: before.positions, normals: before.normals, uvs: before.uvs, indices: before.indices }, options),
 			redo: () => {
-				if (!after)
+				if (!after) {
 					after =
 						selection.indices.length === 1
 							? bevelMeshEdge(scene, { nodeId: mesh.id, edgeIndex: selection.indices[0], amount }, options)
 							: bevelMeshEdges(scene, { nodeId: mesh.id, edgeIndices: selection.indices, amount }, options);
-				else setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+				} else {
+					setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+				}
 			},
 		});
 	}
 
 	private _applyUVProjection(): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		const scale = Number(this.state.uvProjectionScale);
-		if (!Number.isFinite(scale) || scale <= 0) return;
+		if (!Number.isFinite(scale) || scale <= 0) {
+			return;
+		}
 		const scene = mesh.getScene();
 		const options = { editor: this.props.editor };
 		const before = getMeshVertexData(scene, { nodeId: mesh.id });
@@ -1234,8 +1331,11 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 			executeRedo: true,
 			undo: () => setMeshVertexData(scene, { nodeId: mesh.id, positions: before.positions, normals: before.normals, uvs: before.uvs, indices: before.indices }, options),
 			redo: () => {
-				if (!after) after = setMeshUVProjection(scene, { nodeId: mesh.id, plane: this.state.uvProjectionPlane, scale }, options);
-				else setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+				if (!after) {
+					after = setMeshUVProjection(scene, { nodeId: mesh.id, plane: this.state.uvProjectionPlane, scale }, options);
+				} else {
+					setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+				}
 			},
 			action: () => this.props.editor.layout.inspector.forceUpdate(),
 		});
@@ -1243,7 +1343,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _unwrapMeshUVs(): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		const scene = mesh.getScene();
 		const options = { editor: this.props.editor };
 		const before = getMeshVertexData(scene, { nodeId: mesh.id });
@@ -1252,8 +1354,11 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 			executeRedo: true,
 			undo: () => setMeshVertexData(scene, { nodeId: mesh.id, positions: before.positions, normals: before.normals, uvs: before.uvs, indices: before.indices }, options),
 			redo: () => {
-				if (!after) after = unwrapMeshUVs(scene, { nodeId: mesh.id }, options);
-				else setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+				if (!after) {
+					after = unwrapMeshUVs(scene, { nodeId: mesh.id }, options);
+				} else {
+					setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+				}
 			},
 			action: () => this.props.editor.layout.inspector.forceUpdate(),
 		});
@@ -1261,7 +1366,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _getPhysics2DComponent(): ReactNode {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return null;
+		if (!isMesh(mesh)) {
+			return null;
+		}
 		const body = listPhysics2D(mesh.getScene()).bodies.find((candidate: any) => candidate.nodeId === mesh.id);
 		const physicsMaterials = listPhysics2DMaterials(mesh.getScene()).materials;
 		return (
@@ -1401,7 +1508,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _setPhysics2DBody(update: any = {}): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		const current = listPhysics2D(mesh.getScene()).bodies.find((candidate: any) => candidate.nodeId === mesh.id);
 		setPhysics2DBody(
 			mesh.getScene(),
@@ -1418,7 +1527,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _setPhysics2DColliderShape(shape: string): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		const body = listPhysics2D(mesh.getScene()).bodies.find((candidate: any) => candidate.nodeId === mesh.id);
 		const collider =
 			shape === "circle"
@@ -1442,13 +1553,17 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 			.split(";")
 			.map((pair) => pair.split(",").map(Number))
 			.filter((point) => point.length === 2 && point.every(Number.isFinite));
-		if (points.length < 3) return;
+		if (points.length < 3) {
+			return;
+		}
 		this._setPhysics2DBody({ collider: { shape: "polygon", points } });
 	}
 
 	private async _generatePhysics2DPolygonCollider(outline: "convex" | "concave"): Promise<void> {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		try {
 			await generatePhysics2DPolygonCollider(
 				mesh.getScene(),
@@ -1463,25 +1578,33 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _setPhysics2DCircleRadius(value: string): void {
 		const radius = Number(value);
-		if (radius > 0) this._setPhysics2DBody({ collider: { shape: "circle", radius } });
+		if (radius > 0) {
+			this._setPhysics2DBody({ collider: { shape: "circle", radius } });
+		}
 	}
 
 	private _setPhysics2DBoxSize(widthValue: string | number, heightValue: string | number): void {
 		const width = Number(widthValue);
 		const height = Number(heightValue);
-		if (width > 0 && height > 0) this._setPhysics2DBody({ collider: { shape: "box", size: [width, height] } });
+		if (width > 0 && height > 0) {
+			this._setPhysics2DBody({ collider: { shape: "box", size: [width, height] } });
+		}
 	}
 
 	private _removePhysics2DBody(): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		removePhysics2DBody(mesh.getScene(), { nodeId: mesh.id }, { editor: this.props.editor });
 		this.forceUpdate();
 	}
 
 	private _getPhysics2DEffectorComponent(): ReactNode {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return null;
+		if (!isMesh(mesh)) {
+			return null;
+		}
 		const effector = listPhysics2DEffectors(mesh.getScene()).effectors.find((candidate: any) => candidate.nodeId === mesh.id);
 		return (
 			<EditorInspectorSectionField title="2D Effector" tooltip="Point, Area, Surface, or one-way Platform behavior in the local X/Y plane.">
@@ -1581,7 +1704,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _createPhysics2DEffector(): void {
 		const mesh = this.props.object;
-		if (!isMesh(mesh)) return;
+		if (!isMesh(mesh)) {
+			return;
+		}
 		createPhysics2DEffector(mesh.getScene(), { nodeId: mesh.id }, { editor: this.props.editor });
 		this.forceUpdate();
 	}
@@ -1655,7 +1780,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	private _getSplineFollowerComponent(): ReactNode {
 		const follower = this.props.object.metadata?.babylonEditorSplineFollower;
-		if (!follower) return null;
+		if (!follower) {
+			return null;
+		}
 		return (
 			<EditorInspectorSectionField title="Spline Follower">
 				<EditorInspectorListField

@@ -1,3 +1,5 @@
+import { ITextureImporterPlatformOverrides, normalizeTextureImporterPlatformOverrides, TextureImporterPlatform } from "./texture-platform-overrides";
+
 export type TextureImporterTextureType = "default" | "normalMap" | "sprite" | "lightmap" | "cursor";
 export type TextureImporterColorSpace = "sRGB" | "linear";
 export type TextureImporterAlphaSource = "input" | "none";
@@ -13,6 +15,7 @@ export interface ITextureImporterSettings {
 	resizeAlgorithm: TextureImporterResizeAlgorithm;
 	compression: TextureImporterCompression;
 	readable: boolean;
+	platformOverrides: ITextureImporterPlatformOverrides;
 }
 
 export interface ITextureImportProbe {
@@ -23,6 +26,11 @@ export interface ITextureImportProbe {
 	hasAlpha: boolean;
 	space: string;
 	bytes: number;
+	pixelFormat?: string;
+	minimum?: [number, number, number, number];
+	maximum?: [number, number, number, number];
+	average?: [number, number, number, number];
+	nonFiniteCount?: number;
 }
 
 export interface ITextureImportMipmap {
@@ -32,10 +40,32 @@ export interface ITextureImportMipmap {
 	bytes: number;
 }
 
+export interface ITextureImportCubeFace {
+	face: "px" | "nx" | "py" | "ny" | "pz" | "nz";
+	path: string;
+	width: number;
+	height: number;
+}
+
+export interface ITextureImportHighDynamicRange {
+	linear: true;
+	compression: string;
+	pixelFormat: string;
+	toneMapper: "aces";
+	exposure: number;
+	equirectangular: boolean;
+	cubeFaceSize: number | null;
+	cubeFaces: ITextureImportCubeFace[];
+	environmentPath: string | null;
+}
+
 export interface ITextureImportResult {
 	sourcePath: string;
 	outputPath: string;
 	settings: ITextureImporterSettings;
+	baseSettings: ITextureImporterSettings;
+	platform: TextureImporterPlatform;
+	platformOverrideApplied: boolean;
 	effectiveColorSpace: TextureImporterColorSpace;
 	converted: boolean;
 	resized: boolean;
@@ -45,6 +75,9 @@ export interface ITextureImportResult {
 	mipmaps: ITextureImportMipmap[];
 	readableBitmapPath: string | null;
 	readableDescriptorPath: string | null;
+	readablePixelFormat?: "rgba8" | "rgba32f" | null;
+	previewPath?: string | null;
+	highDynamicRange?: ITextureImportHighDynamicRange | null;
 	warnings: string[];
 }
 
@@ -57,7 +90,11 @@ export interface ITextureRuntimeManifest {
 	generateMipmaps: boolean;
 	readableBitmapPath: string | null;
 	readableDescriptorPath: string | null;
+	previewPath?: string | null;
+	cubeFaces?: ITextureImportCubeFace[];
+	environmentPath?: string | null;
 	mipmaps: Array<{ path: string; width: number; height: number }>;
+	result?: ITextureImportResult;
 }
 
 export interface ITextureImporterEncodingOptions {
@@ -76,12 +113,14 @@ export function normalizeTextureImporterSettings(settings: Record<string, unknow
 		resizeAlgorithm: settings.resizeAlgorithm as TextureImporterResizeAlgorithm,
 		compression: settings.compression as TextureImporterCompression,
 		readable: Boolean(settings.readable),
+		platformOverrides: normalizeTextureImporterPlatformOverrides(settings.platformOverrides),
 	};
 }
 
 /** Normal maps and lightmaps always contain linear data even when legacy metadata requested sRGB sampling. */
-export function textureImporterEffectiveColorSpace(settings: ITextureImporterSettings): TextureImporterColorSpace {
-	return settings.textureType === "normalMap" || settings.textureType === "lightmap" ? "linear" : settings.colorSpace;
+export function textureImporterEffectiveColorSpace(settings: ITextureImporterSettings, sourcePath?: string): TextureImporterColorSpace {
+	const extension = sourcePath?.replace(/\\/g, "/").split("/").pop()?.split(".").pop()?.toLowerCase();
+	return settings.textureType === "normalMap" || settings.textureType === "lightmap" || extension === "hdr" || extension === "exr" ? "linear" : settings.colorSpace;
 }
 
 /** Returns the portable build/preview extension produced for a supported LDR texture source. */
@@ -93,6 +132,9 @@ export function textureImporterOutputExtension(sourcePath: string): string {
 	}
 	if (extension === ".webp") {
 		return ".webp";
+	}
+	if (extension === ".hdr" || extension === ".exr") {
+		return extension;
 	}
 	return ".png";
 }

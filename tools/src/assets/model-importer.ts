@@ -142,7 +142,7 @@ export interface IModelImporterResult extends IExecutedModelImport {
 	embeddedResourceCount: number;
 	dependencyPaths: string[];
 	legacyConversion: {
-		engine: "assimp";
+		engine: "assimp" | "blender";
 		inputFileCount: number;
 		inputBytes: number;
 		outputBytes: number;

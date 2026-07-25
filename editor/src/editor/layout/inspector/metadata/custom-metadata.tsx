@@ -8,9 +8,11 @@ import { Button } from "../../../../ui/shadcn/ui/button";
 import { showAlert, showPrompt } from "../../../../ui/dialog";
 
 import { registerUndoRedo } from "../../../../tools/undoredo";
+import { onNodeModifiedObservable } from "../../../../tools/observables";
 
 import { EditorInspectorStringField } from "../fields/string";
 import { EditorInspectorSectionField } from "../fields/section";
+import { PrefabFieldOverrideDecorator } from "../prefab-property-overrides";
 
 export interface ICustomMetadataInspectorProps {
 	object: Node;
@@ -26,23 +28,30 @@ export class CustomMetadataInspector extends Component<ICustomMetadataInspectorP
 
 		return (
 			<EditorInspectorSectionField title="Metadata">
-				{!keys.length && <div className="text-center text-white/50 py-2">No metadata found. Click "Add" to create a new key-value pair.</div>}
+				<PrefabFieldOverrideDecorator object={this.props.object} property="metadata.customMetadata">
+					{!keys.length && <div className="text-center text-white/50 py-2">No metadata found. Click "Add" to create a new key-value pair.</div>}
 
-				{keys.map((key, index) => (
-					<div key={index} className="flex items-center">
-						<div className="w-full">
-							<EditorInspectorStringField label={key} object={this.props.object.metadata?.customMetadata ?? {}} property={key} onChange={() => this.forceUpdate()} />
+					{keys.map((key, index) => (
+						<div key={index} className="flex items-center">
+							<div className="w-full">
+								<EditorInspectorStringField
+									label={key}
+									object={this.props.object.metadata?.customMetadata ?? {}}
+									property={key}
+									onChange={() => this.forceUpdate()}
+								/>
+							</div>
+
+							<Button variant="ghost" className="p-2" onClick={() => this._handleRemoveKey(key)}>
+								<IoCloseOutline className="w-4 h-4" />
+							</Button>
 						</div>
+					))}
 
-						<Button variant="ghost" className="p-2" onClick={() => this._handleRemoveKey(key)}>
-							<IoCloseOutline className="w-4 h-4" />
-						</Button>
-					</div>
-				))}
-
-				<Button variant="secondary" className="flex items-center gap-2 w-full" onClick={() => this._handleAddKey()}>
-					<IoAddSharp className="w-6 h-6" /> Add
-				</Button>
+					<Button variant="secondary" className="flex items-center gap-2 w-full" onClick={() => this._handleAddKey()}>
+						<IoAddSharp className="w-6 h-6" /> Add
+					</Button>
+				</PrefabFieldOverrideDecorator>
 			</EditorInspectorSectionField>
 		);
 	}
@@ -75,6 +84,7 @@ export class CustomMetadataInspector extends Component<ICustomMetadataInspectorP
 		});
 
 		this.forceUpdate();
+		onNodeModifiedObservable.notifyObservers(this.props.object);
 	}
 
 	private _handleRemoveKey(key: string): void {
@@ -99,5 +109,6 @@ export class CustomMetadataInspector extends Component<ICustomMetadataInspectorP
 		});
 
 		this.forceUpdate();
+		onNodeModifiedObservable.notifyObservers(this.props.object);
 	}
 }

@@ -1,8 +1,6 @@
-import { dirname, join, isAbsolute, basename, relative, extname, normalize } from "path/posix";
+import { dirname, join, isAbsolute, basename, relative, extname, normalize, resolve } from "path/posix";
 import { randomUUID } from "crypto";
 import { copy, ensureDir, mkdir, move, pathExists, readFile, readJSON, readdir, remove, stat, writeFile, writeJSON } from "fs-extra";
-
-import sharp from "sharp";
 
 import { Scene } from "babylonjs";
 import {
@@ -18,18 +16,22 @@ import {
 	normalizeModelMaterialRemaps,
 	normalizeModelImporterSettings,
 	normalizeModelImporterPlatformOverrides,
+	normalizeTextureImporterPlatformOverrides,
 	resolveModelImporterPlatformSettings,
+	resolveTextureImporterPlatformSettings,
 	serializeModelAnimationClipDefinitions,
 	serializeModelAuthoredLodGroups,
 	serializeModelLodDefinitions,
 	serializeModelMaterialRemaps,
 	serializeModelImporterPlatformOverrides,
+	serializeTextureImporterPlatformOverrides,
+	normalizeTextureImporterSettings,
 	validateAssetImporterConfiguration,
 	isImportedAnimatorControllerDocument,
 	suggestModelAuthoredLodGroups,
 } from "babylonjs-editor-tools";
 
-import { loadImportedSceneFile } from "../../editor/layout/preview/import/import";
+import { loadImportedSceneFile, tryConvertBlendFileLocally } from "../../editor/layout/preview/import/import";
 
 import { projectConfiguration } from "../../project/configuration";
 
@@ -63,15 +65,19 @@ import { applyFontImporterArtifact, getFontImporterArtifactStatus } from "./font
 import { applyMaterialImporterArtifact, getMaterialImporterArtifactStatus } from "./material-importer";
 import { applyAnimationImporterArtifact, getAnimationImporterArtifactStatus } from "./animation-importer";
 import { applyTextureImporterArtifact, getTextureImporterArtifactStatus } from "./texture-importer";
+import { applyPsdLayerExtraction, getPsdLayerExtractionStatus, IPsdLayerExtractionOptions } from "./psd-layers";
+import { applyPsdSmartObjectPayloadReplacement, getPsdSmartObjectPayloadReplacementStatus, IPsdSmartObjectPayloadReplacementOptions } from "./psd-smart-object-replacement";
 import { applyModelImporterArtifact, getModelImporterArtifactStatus, getModelMaterialExtractionStatus, prepareModelMaterialExtraction } from "./model-importer";
 import { getModelTextureExtractionStatus, prepareModelTextureExtraction } from "./model-texture-extraction";
 import { FileInspectorObject } from "../../editor/layout/inspector/file";
 import { createAnimatorController, setAnimatorController } from "../animator/animator";
+import { openProjectImage } from "../../tools/assets/image";
+import { getAutoReimportStatus, inspectAutoReimport, runAutoReimport, setAutoReimportSettings } from "./auto-reimport";
 
 /**
  * Maps asset types to their associated file extensions (without dot).
  */
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff", ".svg"]);
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff", ".tga", ".psd", ".psb", ".svg", ".hdr", ".exr"]);
 const IMPORTER_PRESETS_PATH = ".bjseditor/importer-presets.json";
 
 function metadataPath(assetPath: string): string {
@@ -131,7 +137,7 @@ function getProjectDirectory(): string {
 		throw new Error("No project is currently open.");
 	}
 
-	return dirname(projectConfiguration.path);
+	return resolve(dirname(projectConfiguration.path));
 }
 
 /**
@@ -163,6 +169,30 @@ export function getAssetWatchStatus(_scene: Scene, _data: any, options: IMCPActi
 export function refreshWatchedAssets(_scene: Scene, _data: any, options: IMCPActionOptions): any {
 	options.editor.layout.assets.refreshWatchedAssets();
 	return options.editor.layout.assets.getAssetWatchStatus();
+}
+
+/** Returns Auto Reimport settings, persisted/current job evidence, and an exact bounded execution plan. */
+export async function inspectAutoReimportAction(_scene: Scene, data: any): Promise<any> {
+	const [status, plan] = await Promise.all([getAutoReimportStatus(), inspectAutoReimport({ paths: data.paths, force: data.force })]);
+	return { ...status, plan };
+}
+
+/** Replaces the complete project Auto Reimport configuration under its exact settings lease. */
+export async function setAutoReimportSettingsAction(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const result = await setAutoReimportSettings(data.expectedSettingsFingerprint, data.settings);
+	await options.editor.layout.assets.refreshAutoReimportWatchers();
+	return { updated: true, ...result, watcher: options.editor.layout.assets.getAssetWatchStatus() };
+}
+
+/** Executes one exact Auto Reimport plan and refreshes editor/browser evidence. */
+export async function runAutoReimportAction(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	if (data.confirm !== true) {
+		throw new Error("Running Auto Reimport requires confirm=true.");
+	}
+	const job = await runAutoReimport(data.expectedFingerprint, { paths: data.paths, force: data.force }, options.editor);
+	await options.editor.layout.assets.refreshAutoReimportWatchers();
+	refreshAssetsBrowser(options);
+	return { executed: true, job, status: await getAutoReimportStatus() };
 }
 
 /**
@@ -337,15 +367,15 @@ export async function getAssetDependencies(_scene: Scene, data: any): Promise<an
 				? indexed.dependencyScanKind === "text"
 					? 1
 					: 0
-				: references.filter((path: string) => ![".glb", ".fbx", ".3ds"].includes(extname(path).toLowerCase())).length,
+				: references.filter((path: string) => ![".glb", ".fbx", ".3ds", ".ms3d", ".b3d", ".x", ".lwo", ".dxf", ".blend"].includes(extname(path).toLowerCase())).length,
 		scannedBinaryGlbFiles:
 			direction === "dependencies" ? (indexed.dependencyScanKind === "glb" ? 1 : 0) : references.filter((path: string) => extname(path).toLowerCase() === ".glb").length,
 		scannedBinaryModelFiles:
 			direction === "dependencies"
-				? ["fbx", "3ds"].includes(indexed.dependencyScanKind)
+				? ["fbx", "3ds", "ms3d", "b3d", "x", "lwo", "dxf", "blend"].includes(indexed.dependencyScanKind)
 					? 1
 					: 0
-				: references.filter((path: string) => [".fbx", ".3ds"].includes(extname(path).toLowerCase())).length,
+				: references.filter((path: string) => [".fbx", ".3ds", ".ms3d", ".b3d", ".x", ".lwo", ".dxf", ".blend"].includes(extname(path).toLowerCase())).length,
 		scannedArchiveFiles:
 			direction === "dependencies"
 				? indexed.dependencyScanKind === "archive"
@@ -1115,6 +1145,14 @@ function portableTextureImporterStatus(status: Awaited<ReturnType<typeof getText
 				mipmaps: status.result.mipmaps.map((mipmap) => ({ ...mipmap, path: portable(mipmap.path) })),
 				readableBitmapPath: portable(status.result.readableBitmapPath),
 				readableDescriptorPath: portable(status.result.readableDescriptorPath),
+				previewPath: portable(status.result.previewPath ?? null),
+				highDynamicRange: status.result.highDynamicRange
+					? {
+							...status.result.highDynamicRange,
+							environmentPath: portable(status.result.highDynamicRange.environmentPath),
+							cubeFaces: status.result.highDynamicRange.cubeFaces.map((face) => ({ ...face, path: portable(face.path) })),
+						}
+					: null,
 			}
 		: null;
 	return {
@@ -1133,6 +1171,72 @@ export async function getTextureImporterResult(_scene: Scene, data: any): Promis
 		throw new Error("Texture importer results are available only for existing file assets.");
 	}
 	return portableTextureImporterStatus(await getTextureImporterArtifactStatus(absolutePath), absolutePath);
+}
+
+/** Reads the complete Web/Desktop texture override map and both effective target plans under one exact lease. */
+export async function getTexturePlatformOverrides(_scene: Scene, data: any): Promise<any> {
+	const absolutePath = resolveProjectPath(data.path);
+	if (!(await pathExists(absolutePath)) || (await stat(absolutePath)).isDirectory()) {
+		throw new Error("Texture platform overrides are available only for existing texture file assets.");
+	}
+	const metadata = await readAssetMetadata(absolutePath);
+	if (metadata.importer.kind !== "texture") {
+		throw new Error("Texture platform overrides require a texture asset.");
+	}
+	const settings = normalizeTextureImporterSettings(metadata.importer.settings);
+	const status = await getTextureImporterArtifactStatus(absolutePath);
+	const web = resolveTextureImporterPlatformSettings(settings, "web");
+	const desktop = resolveTextureImporterPlatformSettings(settings, "desktop");
+	return {
+		path: relative(getProjectDirectory(), absolutePath).replace(/\\/g, "/"),
+		fingerprint: status.fingerprint,
+		current: status.current,
+		overrides: settings.platformOverrides,
+		effective: {
+			web: { overrideApplied: web.overrideApplied, settings: web.settings },
+			desktop: { overrideApplied: desktop.overrideApplied, settings: desktop.settings },
+		},
+		next: "Replace the complete map with set_texture_platform_overrides, then run a Web or Electron build profile to execute that target's effective settings.",
+	};
+}
+
+/** Atomically replaces the complete closed Web/Desktop texture override map under the exact importer lease. */
+export async function setTexturePlatformOverrides(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const absolutePath = resolveProjectPath(data.path);
+	if (!(await pathExists(absolutePath)) || (await stat(absolutePath)).isDirectory()) {
+		throw new Error("Texture platform overrides can only be configured for existing texture file assets.");
+	}
+	const metadata = await readAssetMetadata(absolutePath);
+	if (metadata.importer.kind !== "texture") {
+		throw new Error("Texture platform overrides require a texture asset.");
+	}
+	const before = await getTextureImporterArtifactStatus(absolutePath);
+	if (before.fingerprint !== data.expectedFingerprint) {
+		throw new Error(`Texture platform override plan changed. Inspect again and use current fingerprint ${before.fingerprint}.`);
+	}
+	const overrides = normalizeTextureImporterPlatformOverrides(data.overrides);
+	const importer = validateAssetImporterConfiguration(absolutePath, {
+		...metadata.importer,
+		settings: { ...metadata.importer.settings, platformOverrides: serializeTextureImporterPlatformOverrides(overrides) },
+	}).configuration;
+	await writeAssetMetadata(absolutePath, { ...metadata, importer });
+	await refreshAssetRegistryPaths([absolutePath]);
+	refreshAssetsBrowser(options);
+	const after = await getTextureImporterArtifactStatus(absolutePath);
+	const settings = normalizeTextureImporterSettings(importer.settings);
+	return {
+		updated: true,
+		path: relative(getProjectDirectory(), absolutePath).replace(/\\/g, "/"),
+		previousFingerprint: before.fingerprint,
+		fingerprint: after.fingerprint,
+		current: after.current,
+		overrides,
+		effective: {
+			web: resolveTextureImporterPlatformSettings(settings, "web"),
+			desktop: resolveTextureImporterPlatformSettings(settings, "desktop"),
+		},
+		next: "Run the matching Web or Electron build profile; the target participates in editor/CLI cache identity and build evidence.",
+	};
 }
 
 /** Applies one leased LDR Texture Importer configuration and publishes its deterministic preview artifacts. */
@@ -1156,6 +1260,108 @@ export async function applyTextureImporter(scene: Scene, data: any, options: IMC
 	}
 	refreshAssetsBrowser(options);
 	return { applied: true, ...portableTextureImporterStatus(status, absolutePath) };
+}
+
+function psdLayerExtractionOptions(data: any): IPsdLayerExtractionOptions {
+	return {
+		destinationFolder: data.destinationFolder,
+		includeHidden: data.includeHidden,
+		applyOpacity: data.applyOpacity,
+		applyLayerEffects: data.applyLayerEffects,
+		applyAdjustments: data.applyAdjustments,
+		compositeClippingGroups: data.compositeClippingGroups,
+		compositeGroups: data.compositeGroups,
+		layerIndices: data.layerIndices,
+		textRenders: data.textRenders,
+		extractSmartObjectPayloads: data.extractSmartObjectPayloads,
+		smartObjectResourceIds: data.smartObjectResourceIds,
+		smartObjectExternalBindings: data.smartObjectExternalBindings,
+		shapeBlurKernelBindings: data.shapeBlurKernelBindings,
+		inspectNestedSmartObjects: data.inspectNestedSmartObjects,
+		nestedSmartObjectMaximumDepth: data.nestedSmartObjectMaximumDepth,
+		renderEmbeddedSmartObjects: data.renderEmbeddedSmartObjects,
+		renderExternalSmartObjects: data.renderExternalSmartObjects,
+		smartObjectRenderLayerIndices: data.smartObjectRenderLayerIndices,
+	};
+}
+
+/** Inspects bounded layered-PSD records and a complete exact no-overwrite PNG extraction plan. */
+export async function inspectPsdLayerExtraction(_scene: Scene, data: any): Promise<any> {
+	const absolutePath = resolveProjectPath(data.path);
+	const status = await getPsdLayerExtractionStatus(absolutePath, psdLayerExtractionOptions(data));
+	const offset = data.offset ?? 0;
+	const limit = data.limit ?? 50;
+	const layers = status.document.layers.slice(offset, offset + limit);
+	const items = status.items.filter((item) => item.layerIndex >= offset && item.layerIndex < offset + limit);
+	return {
+		...status,
+		document: { ...status.document, layers: undefined },
+		layers,
+		items,
+		offset,
+		limit,
+		returnedLayerCount: layers.length,
+		hasMore: offset + layers.length < status.document.layerCount,
+		nextOffset: offset + layers.length < status.document.layerCount ? offset + layers.length : null,
+		next:
+			status.conflictCount + status.smartObjectPayloadConflictCount > 0
+				? "Choose another destinationFolder; extraction never overwrites different existing assets."
+				: "Call extract_psd_layers with the same options, this exact fingerprint, and confirm=true.",
+	};
+}
+
+/** Applies one exact layered-PSD extraction plan and publishes normal project PNG assets without overwriting files. */
+export async function extractPsdLayers(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	if (data.confirm !== true) {
+		throw new Error("Extracting PSD layers requires confirm=true.");
+	}
+	const absolutePath = resolveProjectPath(data.path);
+	const status = await applyPsdLayerExtraction(absolutePath, psdLayerExtractionOptions(data), data.expectedFingerprint);
+	await refreshAssetRegistryPaths([...status.items, ...status.smartObjectPayloads].map((item) => resolveProjectPath(item.path)));
+	refreshAssetsBrowser(options);
+	return {
+		extracted: true,
+		...status,
+		document: { ...status.document, layers: undefined },
+		layers: status.document.layers,
+		next: "The extracted PNGs are ordinary texture assets. Embedded smart-object payloads are ordinary contained project assets under the plan's smart-objects folder; external and alias records remain evidence-only.",
+	};
+}
+
+function psdSmartObjectPayloadReplacementOptions(data: any): IPsdSmartObjectPayloadReplacementOptions {
+	return {
+		destinationPath: data.destinationPath,
+		replacements: data.replacements,
+	};
+}
+
+/** Inspects one exact top-level embedded liFD payload replacement plan without writing files. */
+export async function inspectPsdSmartObjectPayloadReplacement(_scene: Scene, data: any): Promise<any> {
+	const absolutePath = resolveProjectPath(data.path);
+	const status = await getPsdSmartObjectPayloadReplacementStatus(absolutePath, psdSmartObjectPayloadReplacementOptions(data));
+	return {
+		...status,
+		next:
+			status.action === "conflict"
+				? "Choose another destinationPath; replacement never overwrites different existing bytes."
+				: "Call replace_psd_smart_object_payloads with the same path, destinationPath, replacements, this exact fingerprint, and confirm=true.",
+	};
+}
+
+/** Publishes one exact replacement PSD copy; the source PSD is never rewritten in place. */
+export async function replacePsdSmartObjectPayloads(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	if (data.confirm !== true) {
+		throw new Error("Replacing PSD smart-object payloads requires confirm=true.");
+	}
+	const absolutePath = resolveProjectPath(data.path);
+	const status = await applyPsdSmartObjectPayloadReplacement(absolutePath, psdSmartObjectPayloadReplacementOptions(data), data.expectedFingerprint);
+	await refreshAssetRegistryPaths([resolveProjectPath(status.destinationPath)]);
+	refreshAssetsBrowser(options);
+	return {
+		replaced: true,
+		...status,
+		next: "The destination is a normal project PSD asset containing the exact selected top-level embedded liFD payload bytes. The original source PSD was not modified.",
+	};
 }
 
 /** Returns exact-fingerprint audio importer artifact status and probe evidence without modifying the project. */
@@ -1867,7 +2073,7 @@ export async function convertImageAsset(_scene: Scene, data: any, options: IMCPA
 		throw new Error(`Image asset not found: ${data.sourcePath}`);
 	}
 	if (!IMAGE_EXTENSIONS.has(extname(sourcePath).toLowerCase())) {
-		throw new Error("sourcePath must be a supported raster or SVG image asset.");
+		throw new Error("sourcePath must be a supported raster, SVG, Radiance HDR, or OpenEXR image asset.");
 	}
 	if (await pathExists(outputPath)) {
 		throw new Error(`An asset already exists at: ${data.outputPath}`);
@@ -1880,7 +2086,7 @@ export async function convertImageAsset(_scene: Scene, data: any, options: IMCPA
 		throw new Error(`outputPath must end in ${expectedExtensions[format]?.join(" or ")} for format "${format}".`);
 	}
 
-	let image = sharp(sourcePath, { animated: false }).rotate();
+	let image = (await openProjectImage(sourcePath, { animated: false })).rotate();
 	if (data.width || data.height) {
 		image = image.resize({ width: data.width, height: data.height, fit: data.fit ?? "inside", withoutEnlargement: data.withoutEnlargement ?? false });
 	}
@@ -1941,6 +2147,9 @@ export async function instantiateMeshAsset(scene: Scene, data: any, options: IMC
 		}
 	} catch {
 		// Assets without a current model artifact use the normal live importer path.
+	}
+	if (!processedModel && extname(importPath).toLowerCase() === ".blend") {
+		importPath = await tryConvertBlendFileLocally(importPath);
 	}
 	const result = await loadImportedSceneFile(scene, importPath, { processedModel });
 	if (!result) {

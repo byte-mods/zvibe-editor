@@ -54,14 +54,18 @@ export function registerSpriteTools(server: McpServer): void {
 		{
 			title: "Pack PNG sprite atlas",
 			description:
-				"Pack project PNG assets into a deterministic power-of-two atlas PNG and TexturePacker-compatible JSON descriptor. Set trimTransparent to crop transparent borders while preserving source-size/offset metadata. Use the returned atlasJsonPath when creating or configuring a Sprite Manager or Sprite Map.",
-			inputSchema: z.object({
-				sourcePaths: z.array(z.string()).min(1).describe("Project-relative PNG asset paths to pack."),
-				outputPath: z.string().describe("Project-relative output .png atlas path, e.g. assets/atlases/characters.png."),
-				padding: z.number().int().min(0).max(64).optional().describe("Transparent pixel padding between sprites. Defaults to 2."),
-				trimTransparent: z.boolean().optional().describe("Crop transparent borders and emit TexturePacker trim offsets. Defaults to false."),
-				maxSize: z.number().int().min(64).max(8192).optional().describe("Maximum power-of-two atlas dimension. Defaults to 2048."),
-			}),
+				"Pack project PNG assets into a deterministic power-of-two atlas PNG and TexturePacker-compatible JSON descriptor. Optional transparent trimming preserves source offsets; optional clockwise 90-degree rotation reduces shelf height and is decoded by both exported Sprite Managers and Sprite Maps. Returns exact rotated-frame evidence.",
+			inputSchema: z
+				.object({
+					sourcePaths: z.array(z.string().min(1).max(1024)).min(1).max(512).describe("Unique project-relative PNG asset paths to pack."),
+					outputPath: z.string().min(1).max(1024).describe("Project-relative output .png atlas path, e.g. assets/atlases/characters.png."),
+					padding: z.number().int().min(0).max(64).optional().describe("Transparent pixel padding between sprites. Defaults to 2."),
+					trimTransparent: z.boolean().optional().describe("Crop transparent borders and emit TexturePacker trim offsets. Defaults to false."),
+					allowRotation: z.boolean().optional().describe("Permit deterministic clockwise 90-degree packing with rotated=true descriptor evidence. Defaults to false."),
+					maxSize: z.number().int().min(64).max(8192).optional().describe("Maximum power-of-two atlas dimension. Defaults to 2048."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("pack_sprite_atlas", args)
 	);

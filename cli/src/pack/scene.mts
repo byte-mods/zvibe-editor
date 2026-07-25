@@ -671,6 +671,11 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 		scene.environmentTextureType = "BABYLON.HDRCubeTexture";
 		scene.environmentTextureRotationY = scene.environmentTexture.rotationY;
 		scene.environmentTexture = scene.environmentTexture.name;
+	} else if (scene.environmentTexture?.name && scene.environmentTexture.customType === "BABYLON.EXRCubeTexture") {
+		scene.environmentTextureSize = 512;
+		scene.environmentTextureType = "BABYLON.HDRCubeTexture";
+		scene.environmentTextureRotationY = scene.environmentTexture.rotationY;
+		scene.environmentTexture = `${scene.environmentTexture.name}.environment.hdr`;
 	}
 
 	// Manage usedfiles

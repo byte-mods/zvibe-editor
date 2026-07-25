@@ -1,18 +1,30 @@
 import { dirname, join, basename, relative, normalize } from "path/posix";
 import { copy, mkdir, pathExists, remove } from "fs-extra";
+import { createHash } from "crypto";
 
 import { Camera, FreeCamera, Scene, Vector3 } from "babylonjs";
 
-import { normalizedGlob } from "../../tools/fs";
 import { saveProject, saveProjectConfiguration } from "../../project/save/save";
 import { ensureSceneFolders, saveScene as saveSceneToDisk } from "../../project/save/scene";
 import { createNewSceneDefaultNodes } from "../../project/load/default";
-import { loadScene } from "../../project/load/scene";
+import { replaceWithSingleSceneWorkspace } from "../../project/load/workspace";
+import { createSceneLoadResult } from "../../project/load/result";
 import { renameScene } from "../../tools/scene/rename";
 import { createSceneLink } from "../../tools/scene/scene-link";
 import { isSceneLinkNode } from "../../tools/guards/scene";
 import { SceneLinkNode } from "../../editor/nodes/scene-link";
 import { projectConfiguration } from "../../project/configuration";
+import {
+	addSceneToBuildSettings,
+	createSceneTemplate,
+	deleteSceneTemplate,
+	discoverProjectScenes,
+	instantiateSceneTemplate,
+	listSceneTemplates,
+	normalizeSceneBuildSettings,
+	removeSceneFromBuildSettings,
+} from "../../project/scenes";
+import { IEditorSceneBuildSettings } from "../../project/typings";
 
 import { IMCPActionOptions } from "../action";
 import { deepSet } from "../tools/resolve";
@@ -21,6 +33,28 @@ export interface IPhysicsCollisionLayer {
 	name: string;
 	bit: number;
 	collidesWith: number;
+}
+
+function getSceneBuildSettingsFingerprint(settings: IEditorSceneBuildSettings): string {
+	return createHash("sha256").update(JSON.stringify(settings)).digest("hex");
+}
+
+async function getCurrentSceneBuildSettings(options: IMCPActionOptions): Promise<IEditorSceneBuildSettings> {
+	const directory = getProjectDirectory();
+	const activeScenePath = options.editor.state.lastOpenedScenePath ? relative(directory, options.editor.state.lastOpenedScenePath) : null;
+	const settings = normalizeSceneBuildSettings(options.editor.state.sceneBuildSettings, activeScenePath, await discoverProjectScenes(directory));
+	if (settings.scenes.length > 512) {
+		throw new Error("Scene management supports at most 512 scene assets per project.");
+	}
+	return settings;
+}
+
+function paginate<T>(items: T[], data: any): { items: T[]; offset: number; limit: number; total: number; hasMore: boolean; nextOffset: number | null } {
+	const offset = Number.isInteger(data?.offset) && data.offset >= 0 ? data.offset : 0;
+	const limit = Number.isInteger(data?.limit) ? Math.min(100, Math.max(1, data.limit)) : 50;
+	const page = items.slice(offset, offset + limit);
+	const nextOffset = offset + page.length < items.length ? offset + page.length : null;
+	return { items: page, offset, limit, total: items.length, hasMore: nextOffset !== null, nextOffset };
 }
 
 /**
@@ -58,25 +92,100 @@ async function refreshSceneEditor(options: IMCPActionOptions): Promise<void> {
 /**
  * Lists all the `.scene` assets available in the project.
  */
-export async function listScenes(_scene: Scene, _data: any, options: IMCPActionOptions): Promise<any> {
+export async function listScenes(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
 	const directory = getProjectDirectory();
 	const activeScenePath = options.editor.state.lastOpenedScenePath;
-
-	const folders = await normalizedGlob(join(directory, "/**/*.scene"), {
-		nodir: false,
-		ignore: ["**/node_modules/**"],
-	});
+	const settings = await getCurrentSceneBuildSettings(options);
+	const page = paginate(settings.scenes, data);
 
 	return {
-		scenes: folders.map((folderPath) => {
-			const path = folderPath.toString();
+		scenes: page.items.map((entry, pageIndex) => {
+			const path = join(directory, entry.path);
 			return {
 				name: basename(path, ".scene"),
-				path: relative(directory, path),
+				path: entry.path,
 				isActive: !!activeScenePath && join(activeScenePath) === join(path),
+				enabled: entry.enabled,
+				buildIndex: page.offset + pageIndex,
 			};
 		}),
+		offset: page.offset,
+		limit: page.limit,
+		total: page.total,
+		hasMore: page.hasMore,
+		nextOffset: page.nextOffset,
 	};
+}
+
+export async function getSceneBuildSettings(_scene: Scene, _data: any, options: IMCPActionOptions): Promise<any> {
+	const settings = await getCurrentSceneBuildSettings(options);
+	return { ...settings, fingerprint: getSceneBuildSettingsFingerprint(settings) };
+}
+
+export async function setSceneBuildSettings(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const current = await getCurrentSceneBuildSettings(options);
+	if (data.expectedFingerprint !== getSceneBuildSettingsFingerprint(current)) {
+		throw new Error("Scene build settings changed after inspection. Call get_scene_build_settings again and retry with its fingerprint.");
+	}
+	if (!Array.isArray(data.scenes) || data.scenes.length > 512) {
+		throw new Error("Scene build settings require an array of at most 512 scenes.");
+	}
+
+	const discovered = await discoverProjectScenes(getProjectDirectory());
+	const discoveredSet = new Set(discovered);
+	const inputPaths = new Set<string>();
+	for (const entry of data.scenes) {
+		if (!entry || typeof entry.path !== "string" || typeof entry.enabled !== "boolean" || !discoveredSet.has(entry.path)) {
+			throw new Error(`Unknown or invalid scene build entry: ${entry?.path ?? "<missing>"}`);
+		}
+		if (inputPaths.has(entry.path)) {
+			throw new Error(`Scene build entries must be unique: ${entry.path}`);
+		}
+		inputPaths.add(entry.path);
+	}
+	if (inputPaths.size !== discoveredSet.size) {
+		throw new Error("Scene build settings must include every discovered .scene asset exactly once. Disable scenes instead of omitting them.");
+	}
+
+	const sceneBuildSettings: IEditorSceneBuildSettings = { version: 1, scenes: data.scenes.map((entry: any) => ({ path: entry.path, enabled: entry.enabled })) };
+	await new Promise<void>((resolve) => options.editor.setState({ sceneBuildSettings }, resolve));
+	await saveProjectConfiguration(options.editor);
+
+	return { ...sceneBuildSettings, fingerprint: getSceneBuildSettingsFingerprint(sceneBuildSettings) };
+}
+
+export async function listProjectSceneTemplates(_scene: Scene, data: any): Promise<any> {
+	const page = paginate(await listSceneTemplates(getProjectDirectory()), data);
+	return { templates: page.items, offset: page.offset, limit: page.limit, total: page.total, hasMore: page.hasMore, nextOffset: page.nextOffset };
+}
+
+export async function createProjectSceneTemplate(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const directory = getProjectDirectory();
+	const sourceAbsolutePath = resolveScenePath(data.sourcePath);
+	if (sourceAbsolutePath === options.editor.state.lastOpenedScenePath) {
+		await saveProject(options.editor);
+	}
+	const template = await createSceneTemplate(directory, data);
+	options.editor.layout.assets.refresh();
+	return { created: true, template };
+}
+
+export async function instantiateProjectSceneTemplate(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const result = await instantiateSceneTemplate(getProjectDirectory(), data);
+	const sceneBuildSettings = addSceneToBuildSettings(options.editor.state.sceneBuildSettings, result.path);
+	await new Promise<void>((resolve) => options.editor.setState({ sceneBuildSettings }, resolve));
+	await saveProjectConfiguration(options.editor);
+	options.editor.layout.assets.refresh();
+	return { created: true, ...result };
+}
+
+export async function deleteProjectSceneTemplate(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	if (data.confirm !== true) {
+		throw new Error("Deleting a scene template is destructive. Retry with confirm: true after verifying the path.");
+	}
+	const result = await deleteSceneTemplate(getProjectDirectory(), data.path);
+	options.editor.layout.assets.refresh();
+	return result;
 }
 
 /**
@@ -117,20 +226,13 @@ export async function createScene(_scene: Scene, data: any, options: IMCPActionO
 	await ensureSceneFolders(scenePath);
 	await options.editor.layout.preview.reset();
 
-	const result = {
-		lights: [],
-		meshes: [],
-		cameras: [],
-		sceneLinks: [],
-		transformNodes: [],
-		animationGroups: [],
-		particleSystems: [],
-		soundNodes: [],
-		spriteMaps: [],
-		spriteManagers: [],
-	};
+	const result = createSceneLoadResult();
 	createNewSceneDefaultNodes(options.editor, result);
 	await saveSceneToDisk(options.editor, getProjectDirectory(), scenePath);
+	await replaceWithSingleSceneWorkspace(options.editor, getProjectDirectory(), scenePath);
+	await new Promise<void>((resolve) =>
+		options.editor.setState({ sceneBuildSettings: addSceneToBuildSettings(options.editor.state.sceneBuildSettings, relative(getProjectDirectory(), scenePath)) }, resolve)
+	);
 	await setActiveScenePath(options, scenePath);
 	await refreshSceneEditor(options);
 
@@ -146,8 +248,10 @@ export async function openScene(_scene: Scene, data: any, options: IMCPActionOpt
 		throw new Error(`Scene not found: ${data.path}`);
 	}
 
-	await options.editor.layout.preview.reset();
-	await loadScene(options.editor, getProjectDirectory(), scenePath);
+	await replaceWithSingleSceneWorkspace(options.editor, getProjectDirectory(), scenePath);
+	await new Promise<void>((resolve) =>
+		options.editor.setState({ sceneBuildSettings: addSceneToBuildSettings(options.editor.state.sceneBuildSettings, relative(getProjectDirectory(), scenePath)) }, resolve)
+	);
 	await setActiveScenePath(options, scenePath);
 	await refreshSceneEditor(options);
 
@@ -169,6 +273,9 @@ export async function duplicateScene(_scene: Scene, data: any, options: IMCPActi
 
 	await copy(sourcePath, destinationPath);
 	await renameScene(sourcePath, destinationPath);
+	const sceneBuildSettings = addSceneToBuildSettings(options.editor.state.sceneBuildSettings, relative(getProjectDirectory(), destinationPath));
+	await new Promise<void>((resolve) => options.editor.setState({ sceneBuildSettings }, resolve));
+	await saveProjectConfiguration(options.editor);
 	options.editor.layout.assets.refresh();
 
 	return { duplicated: true, path: relative(getProjectDirectory(), destinationPath) };
@@ -191,6 +298,9 @@ export async function deleteScene(_scene: Scene, data: any, options: IMCPActionO
 	}
 
 	await remove(scenePath);
+	const sceneBuildSettings = removeSceneFromBuildSettings(options.editor.state.sceneBuildSettings, relative(getProjectDirectory(), scenePath));
+	await new Promise<void>((resolve) => options.editor.setState({ sceneBuildSettings }, resolve));
+	await saveProjectConfiguration(options.editor);
 	options.editor.layout.assets.refresh();
 
 	return { deleted: true, path: relative(getProjectDirectory(), scenePath) };
@@ -279,7 +389,9 @@ export function set2DSceneMode(scene: Scene, data: any, options: IMCPActionOptio
 	const previous = get2DSceneMode(scene);
 	if (!data.enabled) {
 		const camera = previous.cameraId ? scene.getCameraById(previous.cameraId) : null;
-		if (camera) camera.mode = Camera.PERSPECTIVE_CAMERA;
+		if (camera) {
+			camera.mode = Camera.PERSPECTIVE_CAMERA;
+		}
 		scene.metadata.babylonEditor2DMode = { ...previous, enabled: false };
 		options.editor.layout.inspector.forceUpdate();
 		return get2DSceneMode(scene);
@@ -293,9 +405,13 @@ export function set2DSceneMode(scene: Scene, data: any, options: IMCPActionOptio
 		camera = createdCamera;
 	}
 	const orthographicSize = data.orthographicSize ?? previous.orthographicSize ?? 500;
-	if (!(orthographicSize > 0)) throw new Error("2D orthographicSize must be greater than zero.");
+	if (!(orthographicSize > 0)) {
+		throw new Error("2D orthographicSize must be greater than zero.");
+	}
 	const aspectRatio = data.aspectRatio ?? 1;
-	if (!(aspectRatio > 0)) throw new Error("2D aspectRatio must be greater than zero.");
+	if (!(aspectRatio > 0)) {
+		throw new Error("2D aspectRatio must be greater than zero.");
+	}
 	camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
 	camera.orthoLeft = -orthographicSize * aspectRatio;
 	camera.orthoRight = orthographicSize * aspectRatio;
@@ -319,15 +435,21 @@ export function findPhysicsCollisionLayer(scene: Scene, name: string): IPhysicsC
 /** Replaces named 3D physics collision layers after validating unique single-bit memberships. */
 export function setPhysicsCollisionLayers(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const layers = data.layers as IPhysicsCollisionLayer[];
-	if (!Array.isArray(layers) || !layers.length || layers.length > 16) throw new Error("Physics collision layers require from one to sixteen layers.");
+	if (!Array.isArray(layers) || !layers.length || layers.length > 16) {
+		throw new Error("Physics collision layers require from one to sixteen layers.");
+	}
 	const names = new Set<string>();
 	const bits = new Set<number>();
 	for (const layer of layers) {
-		if (!layer?.name?.trim() || names.has(layer.name)) throw new Error("Physics collision layer names must be non-empty and unique.");
-		if (!Number.isInteger(layer.bit) || layer.bit <= 0 || layer.bit > 0x8000 || (layer.bit & (layer.bit - 1)) !== 0 || bits.has(layer.bit))
+		if (!layer?.name?.trim() || names.has(layer.name)) {
+			throw new Error("Physics collision layer names must be non-empty and unique.");
+		}
+		if (!Number.isInteger(layer.bit) || layer.bit <= 0 || layer.bit > 0x8000 || (layer.bit & (layer.bit - 1)) !== 0 || bits.has(layer.bit)) {
 			throw new Error("Each physics collision layer needs a unique single membership bit from 1 through 32768.");
-		if (!Number.isInteger(layer.collidesWith) || layer.collidesWith < 0 || layer.collidesWith > 0xffff)
+		}
+		if (!Number.isInteger(layer.collidesWith) || layer.collidesWith < 0 || layer.collidesWith > 0xffff) {
 			throw new Error("Physics collision layer collidesWith must be a 16-bit non-negative mask.");
+		}
 		names.add(layer.name);
 		bits.add(layer.bit);
 	}

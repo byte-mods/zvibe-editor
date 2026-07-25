@@ -203,6 +203,7 @@ export class AnimatorControllerRuntime {
 	private _baseLifecycleState: string | null = null;
 	private _layerLifecycleStates = new Map<string, IState>();
 	private _pendingStateBehaviours: IPendingStateBehaviour[] = [];
+	private _disposed = false;
 
 	public constructor(
 		private _scene: Scene,
@@ -210,6 +211,15 @@ export class AnimatorControllerRuntime {
 	) {
 		this._layerAnimationGroups = new AnimatorLayerAnimationGroups(this._scene);
 		this._scene.onDisposeObservable.addOnce(() => this._layerAnimationGroups.dispose());
+	}
+
+	/** Stops this controller and releases its non-serialized layer animation groups. */
+	public dispose(): void {
+		if (this._disposed) {
+			return;
+		}
+		this._disposed = true;
+		this._layerAnimationGroups.dispose();
 	}
 	public setParameter(name: string, value: string | number | boolean): boolean {
 		if (!Object.prototype.hasOwnProperty.call(this._controller.parameters, name)) {

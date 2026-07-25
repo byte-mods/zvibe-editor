@@ -1,9 +1,24 @@
-import { dirname, join, isAbsolute, basename, relative, extname } from "path/posix";
+import { dirname, join, isAbsolute, relative, extname } from "path/posix";
 import { ensureDir, pathExists, readJSON, writeJSON } from "fs-extra";
 
 import sharp from "sharp";
 
-import { Color3, Color4, CubeTexture, CustomBlock, Material, NodeMaterial, NodeMaterialBlockConnectionPointTypes, Scene, Texture, Vector2, Vector3, Vector4 } from "babylonjs";
+import {
+	Color3,
+	Color4,
+	CubeTexture,
+	CustomBlock,
+	EXRCubeTexture,
+	HDRCubeTexture,
+	Material,
+	NodeMaterial,
+	NodeMaterialBlockConnectionPointTypes,
+	Scene,
+	Texture,
+	Vector2,
+	Vector3,
+	Vector4,
+} from "babylonjs";
 import { TerrainMaterial } from "babylonjs-materials";
 
 import { findAvailableFilename } from "../../tools/fs";
@@ -30,6 +45,7 @@ import { projectConfiguration } from "../../project/configuration";
 import { IMCPActionOptions } from "../action";
 import { resolveMaterial, deepSet } from "../tools/resolve";
 import { isNodeMaterial } from "../../tools/guards/material";
+import { getOrApplyTextureImporterArtifact, requiresDecodedTextureImporterArtifact } from "../assets/texture-importer";
 
 /**
  * Returns the absolute path of the project directory.
@@ -810,7 +826,7 @@ export function replaceNodeMaterialGraph(scene: Scene, data: any, options: IMCPA
 /**
  * Loads a texture asset and assigns it to a material channel.
  */
-export function assignTextureToMaterial(scene: Scene, data: any, options: IMCPActionOptions): any {
+export async function assignTextureToMaterial(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
 	const material = resolveMaterial({ scene, materialId: data.materialId });
 
 	const absolutePath = resolveProjectPath(data.texturePath);
@@ -819,6 +835,13 @@ export function assignTextureToMaterial(scene: Scene, data: any, options: IMCPAc
 	let texture: Texture | CubeTexture;
 	if (extension === ".env") {
 		texture = configureImportedTexture(CubeTexture.CreateFromPrefilteredData(absolutePath, scene));
+	} else if (requiresDecodedTextureImporterArtifact(absolutePath)) {
+		const imported = await getOrApplyTextureImporterArtifact(absolutePath);
+		texture = configureImportedTexture(new Texture(imported.result!.outputPath, scene));
+		const authoredPath = relative(getProjectDirectory(), absolutePath).replace(/\\/g, "/");
+		texture.name = authoredPath;
+		texture.url = authoredPath;
+		texture.metadata = { ...(texture.metadata ?? {}), babylonEditorAuthoredTexturePath: authoredPath };
 	} else {
 		texture = configureImportedTexture(new Texture(absolutePath, scene));
 	}
@@ -833,7 +856,7 @@ export function assignTextureToMaterial(scene: Scene, data: any, options: IMCPAc
 		name: material.name,
 		className: material.getClassName(),
 		channel: data.channel,
-		texture: basename(absolutePath),
+		texture: relative(getProjectDirectory(), absolutePath).replace(/\\/g, "/"),
 	};
 }
 
@@ -972,15 +995,29 @@ export async function paintTerrainLayer(scene: Scene, data: any, options: IMCPAc
 /**
  * Sets the scene environment/skybox texture from a `.env`/`.hdr` cube texture asset.
  */
-export function setEnvironmentTexture(scene: Scene, data: any, options: IMCPActionOptions): any {
+export async function setEnvironmentTexture(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
 	const absolutePath = resolveProjectPath(data.texturePath);
 	const extension = extname(absolutePath).toLowerCase();
 
-	let texture: CubeTexture;
+	let texture: CubeTexture | HDRCubeTexture | EXRCubeTexture;
 	if (extension === ".env") {
 		texture = configureImportedTexture(CubeTexture.CreateFromPrefilteredData(absolutePath, scene));
+	} else if (extension === ".hdr" || extension === ".exr") {
+		const imported = await getOrApplyTextureImporterArtifact(absolutePath);
+		const outputPath = imported.result?.outputPath;
+		if (!outputPath || !imported.result?.highDynamicRange?.environmentPath) {
+			throw new Error("HDR/EXR environment textures must import successfully as a 2:1 equirectangular panorama.");
+		}
+		texture =
+			extension === ".exr"
+				? configureImportedTexture(new EXRCubeTexture(outputPath, scene, imported.result.highDynamicRange.cubeFaceSize ?? 512))
+				: configureImportedTexture(new HDRCubeTexture(outputPath, scene, imported.result.highDynamicRange.cubeFaceSize ?? 512));
+		const authoredPath = relative(getProjectDirectory(), absolutePath).replace(/\\/g, "/");
+		texture.name = authoredPath;
+		texture.url = authoredPath;
+		texture.metadata = { ...(texture.metadata ?? {}), babylonEditorAuthoredTexturePath: authoredPath };
 	} else {
-		texture = configureImportedTexture(new CubeTexture(absolutePath, scene));
+		throw new Error("Environment textures must use .env, .hdr, or .exr assets.");
 	}
 
 	scene.environmentTexture = texture;

@@ -72,26 +72,34 @@ export class InputActions {
 	private _touchPressed = false;
 	private _touchX = 0;
 	private _touchY = 0;
+	private _listeners: Array<{ type: string; listener: EventListener }> = [];
 
 	public constructor(
 		private _maps: IInputActionMapDefinition[],
 		target: EventTarget
 	) {
 		this._target = target;
-		target.addEventListener("keydown", (event: Event) => {
+		this._listen("keydown", (event: Event) => {
 			const keyboard = event as KeyboardEvent;
 			this._pressed.add(keyboard.code.toLowerCase());
 			this._pressed.add(keyboard.key.toLowerCase());
 		});
-		target.addEventListener("keyup", (event: Event) => {
+		this._listen("keyup", (event: Event) => {
 			const keyboard = event as KeyboardEvent;
 			this._pressed.delete(keyboard.code.toLowerCase());
 			this._pressed.delete(keyboard.key.toLowerCase());
 		});
-		target.addEventListener("pointerdown", (event: Event) => this._updateTouch(event, true));
-		target.addEventListener("pointermove", (event: Event) => this._updateTouch(event, this._touchPressed));
-		target.addEventListener("pointerup", (event: Event) => this._updateTouch(event, false));
-		target.addEventListener("pointercancel", (event: Event) => this._updateTouch(event, false));
+		this._listen("pointerdown", (event: Event) => this._updateTouch(event, true));
+		this._listen("pointermove", (event: Event) => this._updateTouch(event, this._touchPressed));
+		this._listen("pointerup", (event: Event) => this._updateTouch(event, false));
+		this._listen("pointercancel", (event: Event) => this._updateTouch(event, false));
+	}
+
+	/** Removes the host listeners owned by this input-map runtime. */
+	public dispose(): void {
+		this._listeners.forEach(({ type, listener }) => this._target.removeEventListener(type, listener));
+		this._listeners = [];
+		this._pressed.clear();
 	}
 
 	public isPressed(mapName: string, actionName: string): boolean {
@@ -250,6 +258,11 @@ export class InputActions {
 
 	public getMaps(): IInputActionMapDefinition[] {
 		return this._maps;
+	}
+
+	private _listen(type: string, listener: EventListener): void {
+		this._listeners.push({ type, listener });
+		this._target.addEventListener(type, listener);
 	}
 }
 

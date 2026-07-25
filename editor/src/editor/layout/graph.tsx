@@ -1,7 +1,8 @@
-import { extname } from "path/posix";
+import { basename, extname } from "path/posix";
 
 import { Component, DragEvent, ReactNode } from "react";
 import { Button, Tree, TreeNodeInfo } from "@blueprintjs/core";
+import { toast } from "sonner";
 
 import { FaLink } from "react-icons/fa6";
 import { IoMdCube } from "react-icons/io";
@@ -16,7 +17,7 @@ import { TbGhost2Filled, TbServerSpark, TbBrandAdobeIndesign } from "react-icons
 import { FaCamera, FaImage, FaLightbulb, FaBone, FaRegLightbulb } from "react-icons/fa";
 
 import { AdvancedDynamicTexture } from "babylonjs-gui";
-import { BaseTexture, Node, Scene, Tools, IParticleSystem, Sprite, Skeleton, TransformNode, AbstractMesh } from "babylonjs";
+import { BaseTexture, Node, Scene, Tools, IParticleSystem, Sprite, Skeleton, TransformNode, AbstractMesh, Light } from "babylonjs";
 
 import { Editor } from "../main";
 
@@ -34,7 +35,7 @@ import {
 
 import { cloneNode } from "../../tools/node/clone";
 import { isSoundNode } from "../../tools/guards/sound";
-import { registerUndoRedo } from "../../tools/undoredo";
+import { clearUndoRedo, registerUndoRedo } from "../../tools/undoredo";
 import { isDomTextInputFocused } from "../../tools/dom";
 import { isSceneLinkNode } from "../../tools/guards/scene";
 import { updateAllLights } from "../../tools/light/shadows";
@@ -82,12 +83,16 @@ import { getSpriteCommands } from "../dialogs/command-palette/sprite";
 
 import { addSoundNode } from "../../project/add/sound";
 import { onProjectConfigurationChangedObservable } from "../../project/configuration";
+import { IEditorLoadedSceneState } from "../../project/scene-workspace-runtime";
+import { getAuthoringSceneRootNodes, getEffectiveHierarchyOwner, getSceneScopedHierarchyId } from "../../project/scene-hierarchy";
+import { revertWorkspaceScene, saveWorkspaceScene, setActiveWorkspaceScene, setLightingWorkspaceScene, unloadWorkspaceScene } from "../../project/scene-workspace-actions";
+import { showConfirm } from "../../ui/dialog";
 
 import { applySoundAsset } from "./preview/import/sound";
 
 import { EditorGraphLabel } from "./graph/label";
 import { EditorGraphContextMenu } from "./graph/context-menu";
-import { setNewParentForGraphSelectedNodes } from "./graph/move";
+import { moveGraphSelectedNodesToScene, setNewParentForGraphSelectedNodes } from "./graph/move";
 
 export interface IEditorGraphProps {
 	/**
@@ -126,9 +131,14 @@ export interface IEditorGraphState {
 	hideInstancedMeshes: boolean;
 }
 
+interface IAuthoringSceneTreeNodeInfo extends TreeNodeInfo {
+	authoringScenePath: string;
+}
+
 export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState> {
 	public _nodeToCopyTransform: Node | null = null;
 	public _objectsToCopy: TreeNodeInfo<unknown>[] = [];
+	private _sceneWorkspaceCleanup: (() => void) | null = null;
 
 	public constructor(props: IEditorGraphProps) {
 		super(props);
@@ -288,6 +298,12 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 		onProjectConfigurationChangedObservable.add(() => {
 			this.refresh();
 		});
+		this._sceneWorkspaceCleanup = this.props.editor.sceneWorkspace.subscribe(() => void this.refresh());
+	}
+
+	public componentWillUnmount(): void {
+		this._sceneWorkspaceCleanup?.();
+		this._sceneWorkspaceCleanup = null;
 	}
 
 	/**
@@ -296,40 +312,13 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 	public refresh(): Promise<void> {
 		const scene = this.props.editor.layout.preview.scene;
 		const clusteredLightContainer = this.props.editor.layout.preview.clusteredLightContainer;
-
-		let nodes: (TreeNodeInfo | null)[] = [];
-
-		if (this.state.showOnlyLights || this.state.showOnlyDecals) {
-			if (this.state.showOnlyLights) {
-				nodes.push(...scene.lights.concat(clusteredLightContainer.lights).map((light) => this._parseSceneNode(light, true)));
-			}
-
-			if (this.state.showOnlyDecals) {
-				nodes.push(...scene.meshes.filter((mesh) => mesh.metadata?.decal).map((mesh) => this._parseSceneNode(mesh, true)));
-			}
-		} else {
-			nodes = scene.rootNodes.filter((n) => !isEditorCamera(n)).map((n) => this._parseSceneNode(n));
-		}
-
-		const guiNode = this._parseGuiNode(scene);
-		if (guiNode) {
-			nodes.splice(0, 0, guiNode);
-		}
-
-		const skeletonNode = this._parseSkeletonNode(scene);
-		if (skeletonNode) {
-			nodes.splice(0, 0, skeletonNode);
-		}
-
-		nodes.splice(0, 0, {
-			id: "__editor__scene__",
-			nodeData: scene,
-			icon: <SiBabylondotjs className="w-4 h-4" />,
-			label: this._getNodeLabelComponent(scene, "Scene", false),
-		});
+		const sceneStates = this.props.editor.sceneWorkspace.getLoadedSceneStates();
+		const nodes = sceneStates.length
+			? sceneStates.map((state) => this._parseAuthoringSceneRoot(scene, state, clusteredLightContainer.lights))
+			: [this._parseLegacySceneRoot(scene, clusteredLightContainer.lights)];
 
 		this.setState({
-			nodes: nodes.filter((n) => n !== null) as TreeNodeInfo[],
+			nodes,
 		});
 
 		return waitNextAnimationFrame();
@@ -353,18 +342,28 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 		}
 
 		const idsToExpand: string[] = [];
+		const isLegacyHierarchy = this.props.editor.sceneWorkspace.getLoadedSceneStates().length === 0;
+
+		const owner = getEffectiveHierarchyOwner(this.props.editor.sceneWorkspace, source);
+		if (isLegacyHierarchy) {
+			idsToExpand.push("__editor__scene__");
+		} else if (owner) {
+			idsToExpand.push(this._getAuthoringSceneRootId(owner));
+		}
 
 		while (source) {
-			idsToExpand.push(source.id);
+			if (!isLegacyHierarchy && getEffectiveHierarchyOwner(this.props.editor.sceneWorkspace, source) !== owner) {
+				break;
+			}
+			idsToExpand.push(isLegacyHierarchy ? `legacy::${source.id}` : getSceneScopedHierarchyId(this.props.editor.sceneWorkspace, source, source.id));
 			source = source.parent;
 		}
 
 		if (isLight(originalSource) && this.props.editor.layout.preview.clusteredLightContainer.lights.includes(originalSource)) {
-			source = this.props.editor.layout.preview.clusteredLightContainer;
-
-			while (source) {
-				idsToExpand.push(source.id);
-				source = source.parent;
+			if (isLegacyHierarchy) {
+				idsToExpand.push("__editor__scene__");
+			} else if (owner) {
+				idsToExpand.push(this._getAuthoringSceneRootId(owner));
 			}
 		}
 
@@ -717,94 +716,169 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 		}
 	}
 
-	private _parseSkeletonNode(scene: Scene): TreeNodeInfo | null {
-		if (!scene.skeletons.length) {
+	private _parseAuthoringSceneRoot(scene: Scene, state: IEditorLoadedSceneState, clusteredLights: readonly Light[]): IAuthoringSceneTreeNodeInfo {
+		const scenePath = state.path;
+		let childNodes: TreeNodeInfo[] = [];
+
+		if (this.state.showOnlyLights) {
+			childNodes.push(
+				...[...scene.lights, ...clusteredLights]
+					.filter((light) => getEffectiveHierarchyOwner(this.props.editor.sceneWorkspace, light) === scenePath)
+					.map((light) => this._parseSceneNode(light, scenePath, true))
+					.filter((node) => node !== null)
+			);
+		}
+
+		if (this.state.showOnlyDecals) {
+			childNodes.push(
+				...scene.meshes
+					.filter((mesh) => mesh.metadata?.decal && getEffectiveHierarchyOwner(this.props.editor.sceneWorkspace, mesh) === scenePath)
+					.map((mesh) => this._parseSceneNode(mesh, scenePath, true))
+					.filter((node) => node !== null)
+			);
+		}
+
+		if (!this.state.showOnlyLights && !this.state.showOnlyDecals) {
+			const rootNodes = getAuthoringSceneRootNodes(scene, this.props.editor.sceneWorkspace, scenePath)
+				.filter((node) => !isClusteredLightContainer(node))
+				.map((node) => this._parseSceneNode(node, scenePath))
+				.filter((node) => node !== null) as TreeNodeInfo[];
+			const directClusteredLights = clusteredLights
+				.filter((light) => getEffectiveHierarchyOwner(this.props.editor.sceneWorkspace, light) === scenePath)
+				.map((light) => this._parseSceneNode(light, scenePath))
+				.filter((node) => node !== null) as TreeNodeInfo[];
+			childNodes.push(...rootNodes, ...directClusteredLights);
+
+			const guiNode = this._parseGuiNode(scene, scenePath);
+			if (guiNode) {
+				childNodes.splice(0, 0, guiNode);
+			}
+
+			const skeletonNode = this._parseSkeletonNode(scene, scenePath);
+			if (skeletonNode) {
+				childNodes.splice(0, 0, skeletonNode);
+			}
+		}
+
+		const rootId = this._getAuthoringSceneRootId(scenePath);
+		const rootNode = {
+			id: rootId,
+			nodeData: scene,
+			authoringScenePath: scenePath,
+			childNodes: childNodes.length ? childNodes : undefined,
+			hasCaret: childNodes.length > 0,
+			icon: <SiBabylondotjs className="w-4 h-4" />,
+			label: this._getAuthoringSceneLabel(state),
+		} as IAuthoringSceneTreeNodeInfo;
+
+		this._restoreTreeNodeState(rootNode);
+		return rootNode;
+	}
+
+	private _parseLegacySceneRoot(scene: Scene, clusteredLights: readonly Light[]): TreeNodeInfo {
+		let childNodes: TreeNodeInfo[] = [];
+		if (this.state.showOnlyLights) {
+			childNodes.push(...[...scene.lights, ...clusteredLights].map((light) => this._parseSceneNode(light, "legacy", true)).filter((node) => node !== null));
+		}
+		if (this.state.showOnlyDecals) {
+			childNodes.push(
+				...scene.meshes
+					.filter((mesh) => mesh.metadata?.decal)
+					.map((mesh) => this._parseSceneNode(mesh, "legacy", true))
+					.filter((node) => node !== null)
+			);
+		}
+		if (!this.state.showOnlyLights && !this.state.showOnlyDecals) {
+			childNodes = scene.rootNodes
+				.filter((node) => !isEditorCamera(node))
+				.map((node) => this._parseSceneNode(node, "legacy"))
+				.filter((node) => node !== null) as TreeNodeInfo[];
+		}
+
+		const rootNode = {
+			id: "__editor__scene__",
+			nodeData: scene,
+			childNodes: childNodes.length ? childNodes : undefined,
+			hasCaret: childNodes.length > 0,
+			icon: <SiBabylondotjs className="w-4 h-4" />,
+			label: this._getNodeLabelComponent(scene, "Scene", false),
+		} as TreeNodeInfo;
+		this._restoreTreeNodeState(rootNode);
+		return rootNode;
+	}
+
+	private _parseSkeletonNode(scene: Scene, scenePath: string): TreeNodeInfo | null {
+		const skeletons = scene.skeletons.filter((skeleton) => getEffectiveHierarchyOwner(this.props.editor.sceneWorkspace, skeleton) === scenePath);
+		if (!skeletons.length) {
 			return null;
 		}
 
 		const childNodes: TreeNodeInfo[] = [];
 
-		scene.skeletons.forEach((skeleton) => {
+		skeletons.forEach((skeleton) => {
 			if (!(skeleton.name ?? "").toLowerCase().includes(this.state.search.toLowerCase())) {
 				return;
 			}
 
-			childNodes.push(this._getSkeletonNode(skeleton));
+			childNodes.push(this._getSkeletonNode(skeleton, scenePath));
 		});
 
 		const rootSkeletonNode = {
 			childNodes,
 			nodeData: scene,
-			id: "__editor__skeletons__",
+			id: `${scenePath}::__editor__skeletons__`,
 			icon: <FaBone className="w-4 h-4" />,
 			label: this._getNodeLabelComponent(scene, "Skeletons", false),
 		} as TreeNodeInfo;
 
-		this._forEachNode(this.state.nodes, (n) => {
-			if (n.id === rootSkeletonNode.id) {
-				rootSkeletonNode.isSelected = n.isSelected;
-				rootSkeletonNode.isExpanded = n.isExpanded;
-			}
-		});
+		this._restoreTreeNodeState(rootSkeletonNode);
 
 		return rootSkeletonNode;
 	}
 
-	private _getSkeletonNode(skeleton: Skeleton): TreeNodeInfo {
+	private _getSkeletonNode(skeleton: Skeleton, scenePath: string): TreeNodeInfo {
 		const info = {
 			nodeData: skeleton,
-			id: skeleton.id ?? `__editor__skeleton__${skeleton.uniqueId}`,
+			id: `${scenePath}::${skeleton.id ?? `__editor__skeleton__${skeleton.uniqueId}`}`,
 			icon: <FaBone className="w-4 h-4" />,
 			label: this._getNodeLabelComponent(skeleton, skeleton.name, false),
 		} as TreeNodeInfo;
 
-		this._forEachNode(this.state.nodes, (n) => {
-			if (n.id === info.id) {
-				info.isSelected = n.isSelected;
-			}
-		});
+		this._restoreTreeNodeState(info);
 
 		return info;
 	}
 
-	private _getParticleSystemNode(particleSystem: IParticleSystem): TreeNodeInfo {
+	private _getParticleSystemNode(particleSystem: IParticleSystem, scenePath: string): TreeNodeInfo {
 		const info = {
 			nodeData: particleSystem,
-			id: particleSystem.id,
+			id: `${scenePath}::${particleSystem.id}`,
 			icon: this._getIcon(particleSystem),
 			label: this._getNodeLabelComponent(particleSystem, particleSystem.name, false),
 		} as TreeNodeInfo;
 
-		this._forEachNode(this.state.nodes, (n) => {
-			if (n.id === info.id) {
-				info.isSelected = n.isSelected;
-				info.isExpanded = n.isExpanded;
-			}
-		});
+		this._restoreTreeNodeState(info);
 
 		return info;
 	}
 
-	private _getSpriteNode(sprite: Sprite): TreeNodeInfo {
+	private _getSpriteNode(sprite: Sprite, scenePath: string): TreeNodeInfo {
 		const info = {
 			nodeData: sprite,
-			id: sprite.uniqueId,
+			id: `${scenePath}::${sprite.uniqueId}`,
 			icon: this._getIcon(sprite),
 			label: this._getNodeLabelComponent(sprite, sprite.name, false),
 		} as TreeNodeInfo;
 
-		this._forEachNode(this.state.nodes, (n) => {
-			if (n.id === info.id) {
-				info.isSelected = n.isSelected;
-				info.isExpanded = n.isExpanded;
-			}
-		});
+		this._restoreTreeNodeState(info);
 
 		return info;
 	}
 
-	private _parseGuiNode(scene: Scene): TreeNodeInfo | null {
-		const guiTextures = scene.textures.filter((texture) => texture.getClassName() === "AdvancedDynamicTexture") as AdvancedDynamicTexture[];
+	private _parseGuiNode(scene: Scene, scenePath: string): TreeNodeInfo | null {
+		const guiTextures = scene.textures.filter(
+			(texture) => texture.getClassName() === "AdvancedDynamicTexture" && getEffectiveHierarchyOwner(this.props.editor.sceneWorkspace, texture) === scenePath
+		) as AdvancedDynamicTexture[];
 		if (!guiTextures.length) {
 			return null!;
 		}
@@ -818,17 +892,12 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 
 			const info = {
 				nodeData: texture,
-				id: texture.uniqueId,
+				id: `${scenePath}::${texture.uniqueId}`,
 				icon: this._getAdvancedTextureIconComponent(texture),
 				label: this._getNodeLabelComponent(texture, texture.name, false),
 			} as TreeNodeInfo;
 
-			this._forEachNode(this.state.nodes, (n) => {
-				if (n.id === info.id) {
-					info.isSelected = n.isSelected;
-					info.isExpanded = n.isExpanded;
-				}
-			});
+			this._restoreTreeNodeState(info);
 
 			childNodes.push(info);
 		});
@@ -840,22 +909,18 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 		const rootGuiNode = {
 			childNodes,
 			nodeData: scene,
-			id: "__editor__gui__",
+			id: `${scenePath}::__editor__gui__`,
 			icon: <TbBrandAdobeIndesign className="w-4 h-4" />,
 			label: this._getNodeLabelComponent(scene, "Gui", false),
 		} as TreeNodeInfo;
 
-		this._forEachNode(this.state.nodes, (n) => {
-			if (n.id === rootGuiNode.id) {
-				rootGuiNode.isSelected = n.isSelected;
-				rootGuiNode.isExpanded = n.isExpanded;
-			}
-		});
+		this._restoreTreeNodeState(rootGuiNode);
 
 		return rootGuiNode;
 	}
 
-	private _parseSceneNode(node: Node, noChildren?: boolean): TreeNodeInfo | null {
+	private _parseSceneNode(node: Node, scenePath: string, noChildren?: boolean): TreeNodeInfo | null {
+		const isLegacyHierarchy = scenePath === "legacy";
 		if ((isMesh(node) && (node._masterMesh || !isNodeVisibleInGraph(node))) || isCollisionMesh(node) || isCollisionInstancedMesh(node)) {
 			return null;
 		}
@@ -888,7 +953,7 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 		node.id ??= Tools.RandomId();
 
 		const info = {
-			id: node.id,
+			id: `${scenePath}::${node.id}`,
 			nodeData: node,
 			isSelected: false,
 			childNodes: [],
@@ -898,22 +963,24 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 		} as TreeNodeInfo;
 
 		if (!isSceneLinkNode(node) && !noChildren) {
-			const children = node.getDescendants(true);
+			const children = node.getDescendants(true).filter((child) => isLegacyHierarchy || getEffectiveHierarchyOwner(this.props.editor.sceneWorkspace, child) === scenePath);
 
 			if (children.length) {
-				info.childNodes = children.map((c) => this._parseSceneNode(c)).filter((c) => c !== null) as TreeNodeInfo[];
+				info.childNodes = children.map((child) => this._parseSceneNode(child, scenePath)).filter((child) => child !== null) as TreeNodeInfo[];
 			}
 
 			// Handle particle systems
 			if (isAbstractMesh(node) && !noChildren) {
-				const particleSystems = this.props.editor.layout.preview.scene.particleSystems.filter((ps) => ps.emitter === node);
+				const particleSystems = this.props.editor.layout.preview.scene.particleSystems.filter((particleSystem) => {
+					return particleSystem.emitter === node && (isLegacyHierarchy || getEffectiveHierarchyOwner(this.props.editor.sceneWorkspace, particleSystem) === scenePath);
+				});
 				particleSystems.forEach((particleSystem) => {
 					if (
 						(isParticleSystem(particleSystem) || isGPUParticleSystem(particleSystem)) &&
 						isParticleSystemVisibleInGraph(particleSystem) &&
 						(particleSystem.name ?? "").toLowerCase().includes(this.state.search.toLowerCase())
 					) {
-						info.childNodes?.push(this._getParticleSystemNode(particleSystem));
+						info.childNodes?.push(this._getParticleSystemNode(particleSystem, scenePath));
 					}
 				});
 			}
@@ -921,18 +988,20 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 			// Handle sprites
 			if (isSpriteManagerNode(node) && !noChildren) {
 				node.spriteManager?.sprites.forEach((sprite) => {
-					info.childNodes?.push(this._getSpriteNode(sprite));
+					info.childNodes?.push(this._getSpriteNode(sprite, scenePath));
 				});
 			}
 
 			// Handle clustered lights
 			if (isClusteredLightContainer(node) && !noChildren) {
-				node.lights.forEach((light) => {
-					const clusteredLightNode = this._parseSceneNode(light, false);
-					if (clusteredLightNode) {
-						info.childNodes?.push(clusteredLightNode);
-					}
-				});
+				node.lights
+					.filter((light) => isLegacyHierarchy || getEffectiveHierarchyOwner(this.props.editor.sceneWorkspace, light) === scenePath)
+					.forEach((light) => {
+						const clusteredLightNode = this._parseSceneNode(light, scenePath, false);
+						if (clusteredLightNode) {
+							info.childNodes?.push(clusteredLightNode);
+						}
+					});
 			}
 
 			if (info.childNodes?.length) {
@@ -946,14 +1015,129 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 			return null;
 		}
 
-		this._forEachNode(this.state.nodes, (n) => {
-			if (n.id === info.id) {
-				info.isSelected = n.isSelected;
-				info.isExpanded = n.isExpanded;
-			}
-		});
+		this._restoreTreeNodeState(info);
 
 		return info;
+	}
+
+	private _getAuthoringSceneRootId(scenePath: string): string {
+		return `__editor__scene__::${scenePath}`;
+	}
+
+	private _getAuthoringSceneLabel(state: IEditorLoadedSceneState): JSX.Element {
+		const fileName = basename(state.path);
+		const label = (
+			<div
+				className="flex min-w-0 items-center gap-1.5"
+				title={`${state.path}\nDrop scene-root objects here to move them into this scene.`}
+				onDragOver={(event) => {
+					if (event.dataTransfer.types.includes("graph/node")) {
+						event.preventDefault();
+						event.stopPropagation();
+					}
+				}}
+				onDrop={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					if (event.dataTransfer.getData("graph/node")) {
+						try {
+							moveGraphSelectedNodesToScene(this.props.editor, state.path);
+						} catch (error) {
+							toast.error(error instanceof Error ? error.message : String(error));
+						}
+					}
+				}}
+			>
+				<span className="truncate">{fileName}</span>
+				{state.isActive && <span className="rounded bg-blue-600/30 px-1 text-[10px] text-blue-200">Active</span>}
+				{state.isLighting && <span className="rounded bg-amber-600/30 px-1 text-[10px] text-amber-200">Lighting</span>}
+				{state.isDirty && (
+					<span className="text-amber-300" title="Unsaved changes">
+						●
+					</span>
+				)}
+			</div>
+		);
+
+		return (
+			<ContextMenu>
+				<ContextMenuTrigger>{label}</ContextMenuTrigger>
+				<ContextMenuContent>
+					<ContextMenuItem disabled={state.isActive} onClick={() => void this._executeSceneRootAction("active", state)}>
+						Set Active Scene
+					</ContextMenuItem>
+					<ContextMenuItem disabled={state.isLighting} onClick={() => void this._executeSceneRootAction("lighting", state)}>
+						Set Lighting Scene
+					</ContextMenuItem>
+					<ContextMenuSeparator />
+					<ContextMenuItem onClick={() => void this._executeSceneRootAction("save", state)}>Save Scene</ContextMenuItem>
+					<ContextMenuItem onClick={() => void this._executeSceneRootAction("revert", state)}>Revert Scene</ContextMenuItem>
+					<ContextMenuSeparator />
+					<ContextMenuItem
+						disabled={this.props.editor.sceneWorkspace.getLoadedSceneStates().length === 1}
+						onClick={() => void this._executeSceneRootAction("unload", state)}
+					>
+						Unload Scene
+					</ContextMenuItem>
+				</ContextMenuContent>
+			</ContextMenu>
+		);
+	}
+
+	private async _executeSceneRootAction(action: "active" | "lighting" | "save" | "revert" | "unload", state: IEditorLoadedSceneState): Promise<void> {
+		try {
+			if ((action === "revert" || action === "unload") && state.isDirty) {
+				const confirmed = await showConfirm(
+					action === "revert" ? "Discard Scene Changes?" : "Unload Unsaved Scene?",
+					action === "revert" ? `Reload "${state.path}" from disk and discard its unsaved changes?` : `Unload "${state.path}" and discard its unsaved changes?`,
+					{ confirmText: action === "revert" ? "Revert" : "Unload" }
+				);
+				if (!confirmed) {
+					return;
+				}
+			}
+
+			switch (action) {
+				case "active":
+					await setActiveWorkspaceScene(this.props.editor, state.path);
+					break;
+				case "lighting":
+					await setLightingWorkspaceScene(this.props.editor, state.path);
+					break;
+				case "save":
+					await saveWorkspaceScene(this.props.editor, state.path);
+					break;
+				case "revert":
+					clearUndoRedo();
+					await revertWorkspaceScene(this.props.editor, state.path);
+					break;
+				case "unload":
+					clearUndoRedo();
+					await unloadWorkspaceScene(this.props.editor, state.path);
+					this.props.editor.layout.inspector.setEditedObject(this.props.editor.layout.preview.scene);
+					this.props.editor.layout.animations.setEditedObject(this.props.editor.layout.preview.scene);
+					break;
+			}
+			const message = {
+				active: "activated",
+				lighting: "selected for lighting",
+				save: "saved",
+				revert: "reverted",
+				unload: "unloaded",
+			}[action];
+			toast.success(`Scene "${state.path}" ${message}.`);
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private _restoreTreeNodeState(node: TreeNodeInfo): void {
+		this._forEachNode(this.state.nodes, (previousNode) => {
+			if (previousNode.id === node.id) {
+				node.isSelected = previousNode.isSelected;
+				node.isExpanded = previousNode.isExpanded;
+			}
+		});
 	}
 
 	private _getNodeIconComponent(node: Node): ReactNode {

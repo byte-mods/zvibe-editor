@@ -21,6 +21,7 @@ export async function createEditorWindow(): Promise<BrowserWindow> {
 	};
 
 	const window = new BrowserWindow({
+		title: "Zvibe Editor",
 		show: false,
 		frame: false,
 		closable: true,
@@ -91,6 +92,7 @@ export async function createEditorWindow(): Promise<BrowserWindow> {
 	}
 
 	const splash = new BrowserWindow({
+		title: "Zvibe Editor",
 		width: 480,
 		height: 320,
 		frame: false,
@@ -131,6 +133,7 @@ export async function createEditorWindow(): Promise<BrowserWindow> {
  */
 export async function createCustomWindow(indexPath: string, options: any): Promise<BrowserWindow> {
 	const window = new BrowserWindow({
+		title: "Zvibe Editor",
 		show: true,
 		frame: false,
 		closable: true,

@@ -6,6 +6,11 @@ import {
 	textureImporterEncodingOptions,
 	textureImporterOutputExtension,
 } from "../../src/assets/texture-importer";
+import {
+	normalizeTextureImporterPlatformOverrides,
+	resolveTextureImporterPlatformSettings,
+	serializeTextureImporterPlatformOverrides,
+} from "../../src/assets/texture-platform-overrides";
 import { configureImportedTextures } from "../../src/loading/texture";
 
 describe("texture importer contract", () => {
@@ -27,6 +32,37 @@ describe("texture importer contract", () => {
 		expect(textureImporterOutputExtension("assets/source.jpeg")).toBe(".jpg");
 		expect(textureImporterOutputExtension("assets/source.svg")).toBe(".png");
 		expect(textureImporterEncodingOptions("high")).toEqual({ quality: 96, compressionLevel: 9, lossless: false });
+	});
+
+	test("strictly normalizes and resolves Web/Desktop texture overrides", () => {
+		const overrides = normalizeTextureImporterPlatformOverrides({
+			web: { enabled: true, maxSize: 512, compression: "low", generateMipmaps: false },
+			desktop: { enabled: false, readable: true },
+		});
+		const settings = normalizeTextureImporterSettings({
+			textureType: "default",
+			colorSpace: "sRGB",
+			alphaSource: "input",
+			generateMipmaps: true,
+			maxSize: 4096,
+			resizeAlgorithm: "lanczos3",
+			compression: "high",
+			readable: false,
+			platformOverrides: serializeTextureImporterPlatformOverrides(overrides),
+		});
+		expect(resolveTextureImporterPlatformSettings(settings, "web")).toMatchObject({
+			platform: "web",
+			overrideApplied: true,
+			settings: { maxSize: 512, compression: "low", generateMipmaps: false, readable: false },
+		});
+		expect(resolveTextureImporterPlatformSettings(settings, "electron")).toMatchObject({
+			platform: "desktop",
+			overrideApplied: false,
+			settings: { maxSize: 4096, readable: false },
+		});
+		expect(() => normalizeTextureImporterPlatformOverrides({ mobile: { enabled: true } })).toThrow("Unsupported texture importer platform");
+		expect(() => normalizeTextureImporterPlatformOverrides({ web: { enabled: true, maxSize: 300 } })).toThrow("power of two");
+		expect(() => normalizeTextureImporterPlatformOverrides({ web: { enabled: true, mystery: true } })).toThrow("Unsupported texture platform override setting");
 	});
 
 	test("applies build redirects and sampling semantics before final scene readiness", async () => {

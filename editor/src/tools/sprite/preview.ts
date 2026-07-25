@@ -89,8 +89,8 @@ export async function computeSpritePreviewImagesFromAtlasJson(atlasJson: any, im
 			continue;
 		}
 
-		canvas.width = f.frame.w;
-		canvas.height = f.frame.h;
+		canvas.width = f.rotated ? f.frame.h : f.frame.w;
+		canvas.height = f.rotated ? f.frame.w : f.frame.h;
 
 		const context = canvas.getContext("2d");
 		if (!context) {
@@ -98,8 +98,18 @@ export async function computeSpritePreviewImagesFromAtlasJson(atlasJson: any, im
 		}
 
 		context.fillStyle = "rgba(0,0,0,0)";
-		context?.clearRect(0, 0, f.frame.w, f.frame.h);
-		context.drawImage(image, f.frame.x, f.frame.y, f.frame.w, f.frame.h, 0, 0, f.frame.w, f.frame.h);
+		context.clearRect(0, 0, canvas.width, canvas.height);
+		if (f.rotated) {
+			const packed = document.createElement("canvas");
+			packed.width = f.frame.w;
+			packed.height = f.frame.h;
+			packed.getContext("2d")?.drawImage(image, f.frame.x, f.frame.y, f.frame.w, f.frame.h, 0, 0, f.frame.w, f.frame.h);
+			context.translate(0, canvas.height);
+			context.rotate(-Math.PI / 2);
+			context.drawImage(packed, 0, 0);
+		} else {
+			context.drawImage(image, f.frame.x, f.frame.y, f.frame.w, f.frame.h, 0, 0, f.frame.w, f.frame.h);
+		}
 
 		f._preview = canvas.toDataURL("image/png");
 	}

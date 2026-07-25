@@ -500,6 +500,7 @@ export interface IEditorSceneInspectorState {
 	spriteAtlasOutputPath: string;
 	spriteAtlasPadding: number;
 	spriteAtlasTrimTransparent: boolean;
+	spriteAtlasAllowRotation: boolean;
 	spriteAtlasError: string | null;
 	spriteSheetSourcePath: string;
 	spriteSheetOutputPath: string;
@@ -738,6 +739,7 @@ export class EditorSceneInspector extends Component<IEditorInspectorImplementati
 			spriteAtlasOutputPath: "assets/atlas.png",
 			spriteAtlasPadding: 2,
 			spriteAtlasTrimTransparent: false,
+			spriteAtlasAllowRotation: false,
 			spriteAtlasError: null,
 			spriteSheetSourcePath: "",
 			spriteSheetOutputPath: "assets/sprites.json",
@@ -1507,14 +1509,6 @@ export class EditorSceneInspector extends Component<IEditorInspectorImplementati
 							Install
 						</Button>
 					</div>
-					<label className="flex items-center gap-2 text-xs text-muted-foreground">
-						<input
-							type="checkbox"
-							checked={this.state.spriteAtlasTrimTransparent}
-							onChange={(event) => this.setState({ spriteAtlasTrimTransparent: event.currentTarget.checked, spriteAtlasError: null })}
-						/>
-						Trim transparent borders (preserves TexturePacker source offsets)
-					</label>
 					{dependencies.slice(0, 30).map(([name, version]) => (
 						<div key={name} className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded bg-input px-2 py-1 text-xs">
 							<span className="truncate">{name}</span>
@@ -7858,6 +7852,22 @@ export class EditorSceneInspector extends Component<IEditorInspectorImplementati
 							Pack
 						</Button>
 					</div>
+					<label className="flex items-center gap-2 text-xs text-muted-foreground">
+						<input
+							type="checkbox"
+							checked={this.state.spriteAtlasTrimTransparent}
+							onChange={(event) => this.setState({ spriteAtlasTrimTransparent: event.currentTarget.checked, spriteAtlasError: null })}
+						/>
+						Trim transparent borders (preserve source offsets)
+					</label>
+					<label className="flex items-center gap-2 text-xs text-muted-foreground">
+						<input
+							type="checkbox"
+							checked={this.state.spriteAtlasAllowRotation}
+							onChange={(event) => this.setState({ spriteAtlasAllowRotation: event.currentTarget.checked, spriteAtlasError: null })}
+						/>
+						Allow 90° rotation (Sprite Manager and Sprite Map compatible)
+					</label>
 					<div className="text-xs text-muted-foreground">Comma-separated PNG paths · output JSON uses the same name with a .json extension</div>
 					{this.state.spriteAtlasError && <div className="text-xs text-red-400">{this.state.spriteAtlasError}</div>}
 				</div>
@@ -7877,6 +7887,7 @@ export class EditorSceneInspector extends Component<IEditorInspectorImplementati
 					outputPath: this.state.spriteAtlasOutputPath.trim(),
 					padding: this.state.spriteAtlasPadding,
 					trimTransparent: this.state.spriteAtlasTrimTransparent,
+					allowRotation: this.state.spriteAtlasAllowRotation,
 				},
 				{ editor: this.props.editor }
 			);

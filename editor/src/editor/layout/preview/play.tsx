@@ -252,34 +252,49 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 
 		this.props.editor.layout.preview.scene.activeCamera?.detachControl();
 
-		this._temporaryDirectory ??= await ensureTemporaryDirectoryExists(projectConfiguration.path!);
+		try {
+			this._temporaryDirectory ??= await ensureTemporaryDirectoryExists(projectConfiguration.path!);
 
-		if (!noExportScene) {
-			// Export first as src/scripts.ts may change during the export.
-			await exportProject(this.props.editor, {
-				optimize: false,
-				noProgress: true,
+			if (!noExportScene) {
+				// Export first as src/scripts.ts may change during the export.
+				const exported = await exportProject(this.props.editor, {
+					optimize: false,
+					noProgress: true,
+				});
+				if (!exported) {
+					return this.stop();
+				}
+			}
+
+			if (!noCompile) {
+				// Once exported, the src/scripts.ts file is updated and can be compiled.
+				const compiled = await this._compileScripts();
+				if (!compiled) {
+					return this.stop();
+				}
+			}
+
+			await waitNextAnimationFrame();
+
+			if (!this.state.playing) {
+				return; // In case the user stopped the play while preparing it
+			}
+
+			this.setState({
+				preparingPlay: false,
 			});
+
+			await this._createAndLoadScene();
+
+			if (this.state.playing) {
+				this._watchSrcDirectory();
+			}
+		} catch (error) {
+			console.error("Failed to start play mode:", error);
+			this.props.editor.layout.selectTab("console");
+			this.props.editor.layout.console.error(`Failed to start play mode:\n${error instanceof Error ? error.message : String(error)}`);
+			this.stop();
 		}
-
-		if (!noCompile) {
-			// Once exported, the src/scripts.ts file is updated and can be compiled.
-			await this._compileScripts();
-		}
-
-		await waitNextAnimationFrame();
-
-		if (!this.state.playing) {
-			return; // In case the user stopped the play while preparing it
-		}
-
-		this.setState({
-			preparingPlay: false,
-		});
-
-		await this._createAndLoadScene();
-
-		this._watchSrcDirectory();
 	}
 
 	/**

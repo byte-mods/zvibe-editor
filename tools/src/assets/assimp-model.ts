@@ -34,6 +34,53 @@ export interface IAssimpRuntime {
 const MAX_ASSIMP_INPUT_FILES = 512;
 const MAX_ASSIMP_INPUT_BYTES = 256 * 1024 * 1024;
 const MAX_ASSIMP_OUTPUT_BYTES = 512 * 1024 * 1024;
+const BINARY_DXF_SENTINEL = new Uint8Array([65, 117, 116, 111, 67, 65, 68, 32, 66, 105, 110, 97, 114, 121, 32, 68, 88, 70, 13, 10, 26, 0]);
+const BLENDER_MAGIC = new Uint8Array([66, 76, 69, 78, 68, 69, 82]);
+const BLENDER_ZSTD_MAGIC = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd]);
+
+function startsWithBytes(content: Uint8Array, prefix: Uint8Array): boolean {
+	if (content.byteLength < prefix.byteLength) {
+		return false;
+	}
+	for (let index = 0; index < prefix.byteLength; index++) {
+		if (content[index] !== prefix[index]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/** Identifies `.blend` streams that require a real Blender executable instead of the bundled legacy Assimp importer. */
+export function blendRequiresExternalConverter(name: string, content: Uint8Array): boolean {
+	if (!name.toLowerCase().endsWith(".blend")) {
+		return false;
+	}
+	if (startsWithBytes(content, BLENDER_ZSTD_MAGIC)) {
+		return true;
+	}
+	if (!startsWithBytes(content, BLENDER_MAGIC) || content.byteLength < 12) {
+		return false;
+	}
+	const version = String.fromCharCode(content[9], content[10], content[11]);
+	return /^\d{3}$/.test(version) && Number(version) >= 300;
+}
+
+function validateAssimpInputFormat(name: string, content: Uint8Array): void {
+	if (blendRequiresExternalConverter(name, content)) {
+		throw new Error(
+			"Blender 3.0+ and Zstandard-compressed .blend files require an installed Blender executable; configure BJS_EDITOR_BLENDER_EXECUTABLE or export the source as glTF/GLB."
+		);
+	}
+	if (!name.toLowerCase().endsWith(".dxf") || content.byteLength < BINARY_DXF_SENTINEL.byteLength) {
+		return;
+	}
+	for (let index = 0; index < BINARY_DXF_SENTINEL.byteLength; index++) {
+		if (content[index] !== BINARY_DXF_SENTINEL[index]) {
+			return;
+		}
+	}
+	throw new Error("Binary DXF is not supported by the bundled Assimp importer; save or export the drawing as ASCII DXF.");
+}
 
 function validateResult(result: IAssimpConversionResult, inputFileCount: number, inputBytes: number): IAssimpModelConversion {
 	if (!result.IsSuccess() || result.FileCount() !== 1) {
@@ -76,6 +123,7 @@ export function convertAssimpModelToGlb(runtime: IAssimpRuntime, files: IAssimpM
 	const list = new runtime.FileList();
 	for (const file of files) {
 		const normalized = normalizedInputName(file.name);
+		validateAssimpInputFormat(normalized, file.content);
 		const key = normalized.toLowerCase();
 		if (normalizedNames.has(key)) {
 			throw new Error(`Legacy model dependency names must be unique ignoring case: ${normalized}`);
@@ -97,6 +145,7 @@ export function convertAssimpModelFileToGlb(
 	resolveDependency: (name: string) => Uint8Array | null
 ): IAssimpModelConversion {
 	const name = normalizedInputName(mainFile.name);
+	validateAssimpInputFormat(name, mainFile.content);
 	const cache = new Map<string, Uint8Array>([[name, mainFile.content]]);
 	let inputBytes = mainFile.content.byteLength;
 	const resolve = (requestedName: string): Uint8Array | null => {

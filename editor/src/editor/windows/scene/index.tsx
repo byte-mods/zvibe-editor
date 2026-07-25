@@ -3,7 +3,7 @@ import { ipcRenderer } from "electron";
 
 import { Component, ReactNode } from "react";
 
-import { loadScene } from "../../../project/load/scene";
+import { replaceWithSingleSceneWorkspace } from "../../../project/load/workspace";
 import { onProjectConfigurationChangedObservable, projectConfiguration } from "../../../project/configuration";
 
 import { waitUntil } from "../../../tools/tools";
@@ -46,7 +46,7 @@ export default class SceneEditorWindow extends Component<ISceneEditorWindowProps
 
 		const directory = dirname(this.props.projectPath);
 
-		await loadScene(this._editor, directory, this.props.scenePath);
+		await replaceWithSingleSceneWorkspace(this._editor, directory, this.props.scenePath);
 
 		this._editor.layout.graph.refresh();
 		this._editor.layout.inspector.setEditedObject(this._editor.layout.preview.scene);

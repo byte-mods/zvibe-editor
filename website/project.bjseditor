@@ -1,6 +1,8 @@
 {
-    "plugins": [],
-    "version": "5.0.0",
-    "lastOpenedScene": "/assets/landing.scene",
-    "compressedTexturesEnabled": false
+	"plugins": [],
+	"version": "5.0.0",
+	"lastOpenedScene": "/assets/landing.scene",
+	"sceneBuildSettings": { "version": 1, "scenes": [{ "path": "assets/landing.scene", "enabled": true }] },
+	"sceneWorkspace": { "version": 1, "loadedScenes": ["assets/landing.scene"], "activeScene": "assets/landing.scene", "lightingScene": "assets/landing.scene" },
+	"compressedTexturesEnabled": false
 }

@@ -91,6 +91,12 @@ export class LightingScenarioController {
 		return true;
 	}
 
+	/** Stops an in-progress blend owned by this controller. */
+	public dispose(): void {
+		this._observer?.remove();
+		this._observer = null;
+	}
+
 	private _find(idOrName: string): IScenario | undefined {
 		return this._scenarios.find((scenario) => scenario.id === idOrName || scenario.name === idOrName);
 	}

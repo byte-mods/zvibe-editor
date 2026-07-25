@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 import { createReadStream } from "fs";
-import { basename, dirname, extname, isAbsolute, join, normalize, relative } from "path/posix";
+import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from "path/posix";
 import { gunzipSync } from "zlib";
 import { mkdir, move, pathExists, readFile, readJSON, rename, stat, writeJSON } from "fs-extra";
 import StreamZip from "node-stream-zip";
@@ -17,9 +17,10 @@ import {
 	IAssetWorkerPoolOptions,
 } from "./registry-worker-client";
 import { AssetDependencyGraphDirection, IAssetDependencyGraph, IAssetDependencyGraphEdge, IAssetDependencyGraphNode } from "./dependency-graph";
+import { extractB3dReferences, extractBlendReferences, extractDxfReferences, extractLwoReferences, extractMs3dReferences, extractXReferences } from "./binary-model-rewrite";
 
 export const ASSET_META_SUFFIX = ".bjsmeta.json";
-export const ASSET_REGISTRY_VERSION = 6;
+export const ASSET_REGISTRY_VERSION = 12;
 
 const ASSET_REGISTRY_PATH = ".bjseditor/asset-registry.json";
 const MAX_HASH_BYTES = 64 * 1024 * 1024;
@@ -101,9 +102,9 @@ const TEXT_DEPENDENCY_EXTENSIONS = new Set([
 ]);
 
 const ASSET_TYPE_EXTENSIONS: Record<string, string[]> = {
-	texture: ["png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff", "svg", "rgba"],
-	"cube-texture": ["env", "hdr"],
-	mesh: ["babylon", "glb", "gltf", "fbx", "obj", "dae", "3ds", "stl"],
+	texture: ["png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff", "tga", "psd", "psb", "svg", "rgba"],
+	"cube-texture": ["env", "hdr", "exr"],
+	mesh: ["babylon", "glb", "gltf", "fbx", "obj", "dae", "3ds", "stl", "ms3d", "b3d", "x", "lwo", "dxf", "blend"],
 	sound: ["mp3", "ogg", "wav", "flac", "m4a"],
 	video: ["mp4", "webm", "ogv", "mov"],
 	material: ["material", "mtl"],
@@ -118,7 +119,7 @@ const ASSET_TYPE_EXTENSIONS: Record<string, string[]> = {
 	style: ["css", "scss", "sass", "less"],
 	markup: ["html", "htm", "xml"],
 	font: ["ttf", "otf", "woff", "woff2"],
-	data: ["json", "yaml", "yml", "csv", "txt", "md", "bin", "zip", "tar", "tgz", "gz", "unitypackage"],
+	data: ["json", "yaml", "yml", "csv", "txt", "md", "bin", "pdf", "dwg", "dwf", "dwfx", "dgn", "nwd", "nwc", "ies", "zip", "tar", "tgz", "gz", "unitypackage"],
 };
 
 export interface IAssetContainerEntry {
@@ -186,7 +187,7 @@ export interface IAssetRegistryEntry {
 	containerDependencies: IAssetContainerDependency[];
 }
 
-export type AssetDependencyScanKind = "text" | "glb" | "fbx" | "3ds" | "archive" | "none";
+export type AssetDependencyScanKind = "text" | "glb" | "fbx" | "3ds" | "ms3d" | "b3d" | "x" | "lwo" | "dxf" | "blend" | "archive" | "none";
 export type AssetDependencyScanStatus = "complete" | "deferred" | "malformed" | "notApplicable";
 
 export interface IAssetDependencyScannerDefinition {
@@ -234,7 +235,7 @@ function projectDirectory(): string {
 	if (!projectConfiguration.path) {
 		throw new Error("No project is currently open.");
 	}
-	return dirname(projectConfiguration.path);
+	return resolve(dirname(projectConfiguration.path));
 }
 
 function registryPath(): string {
@@ -526,6 +527,19 @@ export function resolveAssetDependencyCandidate(sourcePath: string, candidate: s
 	return normalizeDependencyCandidate(resolveProjectPath(sourcePath), candidate, projectDirectory());
 }
 
+function normalizeBlendDependencyCandidate(sourcePath: string, candidate: string, root: string): string | null {
+	const trimmed = candidate.trim();
+	if (/^(?:\/[^/]|[a-z]:[\\/])/i.test(trimmed)) {
+		return null;
+	}
+	return normalizeDependencyCandidate(sourcePath, trimmed.startsWith("//") ? `./${trimmed.slice(2)}` : trimmed, root);
+}
+
+/** Resolves Blender's `//` project-file-relative paths without treating protocol-relative URLs as local assets in other formats. */
+export function resolveBlendDependencyCandidate(sourcePath: string, candidate: string): string | null {
+	return normalizeBlendDependencyCandidate(resolveProjectPath(sourcePath), candidate, projectDirectory());
+}
+
 function extractGlbUris(buffer: Buffer): { values: string[]; error?: string } {
 	if (buffer.length < 20 || buffer.readUInt32LE(0) !== GLB_MAGIC || buffer.readUInt32LE(4) !== 2) {
 		return { values: [], error: "The GLB header is missing or is not glTF binary version 2." };
@@ -730,7 +744,16 @@ function archiveMemberScanLimit(path: string): number | null {
 	if (extension === ".glb") {
 		return MAX_GLB_DEPENDENCY_BYTES;
 	}
-	if (extension === ".fbx" || extension === ".3ds") {
+	if (
+		extension === ".fbx" ||
+		extension === ".3ds" ||
+		extension === ".ms3d" ||
+		extension === ".b3d" ||
+		extension === ".x" ||
+		extension === ".lwo" ||
+		extension === ".dxf" ||
+		extension === ".blend"
+	) {
 		return MAX_MODEL_DEPENDENCY_BYTES;
 	}
 	return TEXT_DEPENDENCY_EXTENSIONS.has(extension) ? MAX_TEXT_DEPENDENCY_BYTES : null;
@@ -748,6 +771,24 @@ function extractArchiveMemberCandidates(path: string, buffer: Buffer): { values:
 	}
 	if (extension === ".3ds") {
 		return extract3dsTextureNames(buffer);
+	}
+	if (extension === ".ms3d") {
+		return extractMs3dReferences(buffer);
+	}
+	if (extension === ".b3d") {
+		return extractB3dReferences(buffer);
+	}
+	if (extension === ".x") {
+		return extractXReferences(buffer);
+	}
+	if (extension === ".lwo") {
+		return extractLwoReferences(buffer);
+	}
+	if (extension === ".dxf") {
+		return extractDxfReferences(buffer);
+	}
+	if (extension === ".blend") {
+		return extractBlendReferences(buffer);
 	}
 	return { values: extractModelTextDependencyValues(buffer.toString("utf-8"), extension) };
 }
@@ -768,6 +809,14 @@ function normalizeArchiveDependencyCandidate(sourcePath: string, candidate: stri
 		return null;
 	}
 	return normalizeArchiveMemberPath(cleaned.startsWith("/") ? cleaned.slice(1) : join(dirname(sourcePath), cleaned));
+}
+
+function normalizeArchiveBlendDependencyCandidate(sourcePath: string, candidate: string): string | null {
+	const trimmed = candidate.trim();
+	if (/^(?:\/[^/]|[a-z]:[\\/])/i.test(trimmed)) {
+		return null;
+	}
+	return normalizeArchiveDependencyCandidate(sourcePath, trimmed.startsWith("//") ? trimmed.slice(2) : trimmed);
 }
 
 async function scanArchiveMembers(
@@ -861,7 +910,10 @@ async function scanArchiveMembers(
 				containerDependencies.push({ sourcePath: member.path, targetPath: projectCandidate, missing: false, external: true });
 				continue;
 			}
-			const targetPath = normalizeArchiveDependencyCandidate(member.path, rawCandidate);
+			const targetPath =
+				extname(member.path).toLowerCase() === ".blend"
+					? normalizeArchiveBlendDependencyCandidate(member.path, rawCandidate)
+					: normalizeArchiveDependencyCandidate(member.path, rawCandidate);
 			if (targetPath && targetPath !== member.path) {
 				containerDependencies.push({ sourcePath: member.path, targetPath, missing: !paths.has(targetPath), external: false });
 			}
@@ -1033,6 +1085,43 @@ export function listAssetDependencyScanners(): IAssetDependencyScannerDefinition
 		},
 		{ kind: "3ds", extensions: [".3ds"], maximumBytes: MAX_MODEL_DEPENDENCY_BYTES, description: "3DS material texture-map filename chunks." },
 		{
+			kind: "ms3d",
+			extensions: [".ms3d"],
+			maximumBytes: MAX_MODEL_DEPENDENCY_BYTES,
+			description: "MilkShape 3D material texture and alpha-map fixed-width filename fields.",
+		},
+		{
+			kind: "b3d",
+			extensions: [".b3d"],
+			maximumBytes: MAX_MODEL_DEPENDENCY_BYTES,
+			description: "Blitz3D BB3D root and TEXS texture filename records with validated chunk lengths.",
+		},
+		{
+			kind: "x",
+			extensions: [".x"],
+			maximumBytes: MAX_MODEL_DEPENDENCY_BYTES,
+			description: "Uncompressed DirectX 0302/0303 text or tokenized-binary TextureFilename data objects.",
+		},
+		{
+			kind: "lwo",
+			extensions: [".lwo"],
+			maximumBytes: MAX_MODEL_DEPENDENCY_BYTES,
+			description: "Big-endian LWOB TIMG and LWO2/LWO3/LXOB CLIP image sources, including bounded numbered ISEQ members.",
+		},
+		{
+			kind: "dxf",
+			extensions: [".dxf"],
+			maximumBytes: MAX_MODEL_DEPENDENCY_BYTES,
+			description: "Bounded ASCII DXF BLOCK xrefs, IMAGEDEF images, underlays, and Navisworks coordination-model paths; binary DXF is explicitly unsupported.",
+		},
+		{
+			kind: "blend",
+			extensions: [".blend"],
+			maximumBytes: MAX_MODEL_DEPENDENCY_BYTES,
+			description:
+				"Bounded raw, GZip, or Zstandard Blender block/DNA inspection with exact external Image, Library, MovieClip, CacheFile, Volume, font, sound, shader, and modifier path fields; packed resources are ignored.",
+		},
+		{
 			kind: "archive",
 			extensions: [".zip", ".tar", ".tgz", ".tar.gz", ".unitypackage"],
 			maximumBytes: MAX_ARCHIVE_BYTES,
@@ -1134,6 +1223,108 @@ async function extractDependencyCandidates(
 		rawCandidates = result.values;
 		dependencyScanStatus = result.error ? "malformed" : "complete";
 		dependencyScanMessage = result.error;
+	} else if (extension === ".ms3d") {
+		dependencyScanKind = "ms3d";
+		if (size > MAX_MODEL_DEPENDENCY_BYTES) {
+			return {
+				dependencyCandidates: [],
+				dependencyScanKind,
+				dependencyScanStatus: "deferred",
+				dependencyScanMessage: "File exceeds the 64 MiB MS3D scan limit.",
+				dependencyScanDeferred: true,
+				containerEntries: [],
+				containerDependencies: [],
+			};
+		}
+		const result = extractMs3dReferences(await readFile(absolutePath));
+		rawCandidates = result.values;
+		dependencyScanStatus = result.error ? "malformed" : "complete";
+		dependencyScanMessage = result.error;
+	} else if (extension === ".b3d") {
+		dependencyScanKind = "b3d";
+		if (size > MAX_MODEL_DEPENDENCY_BYTES) {
+			return {
+				dependencyCandidates: [],
+				dependencyScanKind,
+				dependencyScanStatus: "deferred",
+				dependencyScanMessage: "File exceeds the 64 MiB B3D scan limit.",
+				dependencyScanDeferred: true,
+				containerEntries: [],
+				containerDependencies: [],
+			};
+		}
+		const result = extractB3dReferences(await readFile(absolutePath));
+		rawCandidates = result.values;
+		dependencyScanStatus = result.error ? "malformed" : "complete";
+		dependencyScanMessage = result.error;
+	} else if (extension === ".x") {
+		dependencyScanKind = "x";
+		if (size > MAX_MODEL_DEPENDENCY_BYTES) {
+			return {
+				dependencyCandidates: [],
+				dependencyScanKind,
+				dependencyScanStatus: "deferred",
+				dependencyScanMessage: "File exceeds the 64 MiB DirectX .x scan limit.",
+				dependencyScanDeferred: true,
+				containerEntries: [],
+				containerDependencies: [],
+			};
+		}
+		const result = extractXReferences(await readFile(absolutePath));
+		rawCandidates = result.values;
+		dependencyScanStatus = result.error ? "malformed" : "complete";
+		dependencyScanMessage = result.error;
+	} else if (extension === ".lwo") {
+		dependencyScanKind = "lwo";
+		if (size > MAX_MODEL_DEPENDENCY_BYTES) {
+			return {
+				dependencyCandidates: [],
+				dependencyScanKind,
+				dependencyScanStatus: "deferred",
+				dependencyScanMessage: "File exceeds the 64 MiB LightWave LWO scan limit.",
+				dependencyScanDeferred: true,
+				containerEntries: [],
+				containerDependencies: [],
+			};
+		}
+		const result = extractLwoReferences(await readFile(absolutePath));
+		rawCandidates = result.values;
+		dependencyScanStatus = result.error ? "malformed" : "complete";
+		dependencyScanMessage = result.error;
+	} else if (extension === ".dxf") {
+		dependencyScanKind = "dxf";
+		if (size > MAX_MODEL_DEPENDENCY_BYTES) {
+			return {
+				dependencyCandidates: [],
+				dependencyScanKind,
+				dependencyScanStatus: "deferred",
+				dependencyScanMessage: "File exceeds the 64 MiB ASCII DXF scan limit.",
+				dependencyScanDeferred: true,
+				containerEntries: [],
+				containerDependencies: [],
+			};
+		}
+		const result = extractDxfReferences(await readFile(absolutePath));
+		rawCandidates = result.values;
+		dependencyScanStatus = result.error ? "malformed" : "complete";
+		dependencyScanMessage = result.error;
+	} else if (extension === ".blend") {
+		dependencyScanKind = "blend";
+		if (size > MAX_MODEL_DEPENDENCY_BYTES) {
+			return {
+				dependencyCandidates: [],
+				dependencyScanKind,
+				dependencyScanStatus: "deferred",
+				dependencyScanMessage: "File exceeds the 64 MiB compressed Blender scan limit.",
+				dependencyScanDeferred: true,
+				containerEntries: [],
+				containerDependencies: [],
+			};
+		}
+		const result = extractBlendReferences(await readFile(absolutePath));
+		rawCandidates = result.values;
+		dependencyScanStatus = result.error ? "malformed" : "complete";
+		dependencyScanMessage = result.error;
 	} else if (TEXT_DEPENDENCY_EXTENSIONS.has(extension)) {
 		dependencyScanKind = "text";
 		if (size > MAX_TEXT_DEPENDENCY_BYTES) {
@@ -1151,7 +1342,13 @@ async function extractDependencyCandidates(
 		dependencyScanStatus = "complete";
 	}
 	const dependencyCandidates = [
-		...new Set(rawCandidates.map((candidate) => normalizeDependencyCandidate(absolutePath, candidate, root)).filter((candidate): candidate is string => candidate !== null)),
+		...new Set(
+			rawCandidates
+				.map((candidate) =>
+					extension === ".blend" ? normalizeBlendDependencyCandidate(absolutePath, candidate, root) : normalizeDependencyCandidate(absolutePath, candidate, root)
+				)
+				.filter((candidate): candidate is string => candidate !== null)
+		),
 	].sort();
 	return { dependencyCandidates, dependencyScanKind, dependencyScanStatus, dependencyScanMessage, dependencyScanDeferred, containerEntries, containerDependencies };
 }

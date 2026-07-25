@@ -52,6 +52,8 @@ import { EditorSpriteManagerNodeInspector } from "./inspector/sprites/sprite-man
 import { EditorSkeletonInspector } from "./inspector/mesh/skeleton";
 
 import { EditorMarketplaceAssetInspector } from "./inspector/marketplace/asset";
+import { PrefabPropertyOverrideProvider } from "./inspector/prefab-property-overrides";
+import { GameObjectComponentsInspector } from "./inspector/components/game-object-components";
 
 export interface IEditorInspectorProps {
 	/**
@@ -149,7 +151,9 @@ export class EditorInspector extends Component<IEditorInspectorProps, IEditorIns
 					/>
 
 					<TabsContent value="entity" className="w-full h-full overflow-auto">
-						<div className={`flex flex-col gap-2 h-full ${disabled ? "pointer-events-none opacity-50 cursor-not-allowed" : ""}`}>{this._getContent()}</div>
+						<PrefabPropertyOverrideProvider editor={this.props.editor} object={this.state.editedObject}>
+							<div className={`flex flex-col gap-2 h-full ${disabled ? "pointer-events-none opacity-50 cursor-not-allowed" : ""}`}>{this._getContent()}</div>
+						</PrefabPropertyOverrideProvider>
 					</TabsContent>
 
 					<TabsContent value="decals" className="w-full h-full overflow-auto">
@@ -175,7 +179,14 @@ export class EditorInspector extends Component<IEditorInspectorProps, IEditorIns
 
 		const inspectors = EditorInspector._inspectors.filter((i) => i.IsSupported(this.state.editedObject)).map((i) => ({ inspector: i }));
 
-		return inspectors.map((i) => <i.inspector key={Tools.RandomId()} editor={this.props.editor} object={this.state.editedObject} />);
+		return (
+			<>
+				{inspectors.map((i) => (
+					<i.inspector key={Tools.RandomId()} editor={this.props.editor} object={this.state.editedObject} />
+				))}
+				{isNode(this.state.editedObject) && <GameObjectComponentsInspector editor={this.props.editor} object={this.state.editedObject} />}
+			</>
+		);
 	}
 
 	private _handleSearchChanged(search: string): void {

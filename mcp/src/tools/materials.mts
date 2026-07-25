@@ -167,15 +167,19 @@ export function registerMaterialTools(server: McpServer): void {
 			title: "Assign texture to material",
 			description:
 				"Load a texture asset from the project and assign it to a material channel (albedoTexture, bumpTexture, metallicTexture, emissiveTexture, diffuseTexture, opacityTexture, ...). " +
-				"Use `list_assets` to find available textures, or download new ones via the visible marketplace tools.",
-			inputSchema: z.object({
-				materialId: z.string().describe("Id of the target material."),
-				channel: z
-					.string()
-					.describe("Material texture channel, e.g. `albedoTexture`, `bumpTexture`, `metallicTexture`, `emissiveTexture`, `diffuseTexture`, `opacityTexture`."),
-				texturePath: z.string().describe("Project-relative or absolute path to the texture asset."),
-			}),
-			annotations: { idempotentHint: true },
+				"TGA and supported merged-composite PSD sources are validated and atomically imported to PNG first. HDR/EXR sources are decoded and re-emitted as linear format-preserving high-dynamic artifacts. Every decoded source retains its authored path for save/build runtime redirects. Use `list_assets` to find available textures, or download new ones via the visible marketplace tools.",
+			inputSchema: z
+				.object({
+					materialId: z.string().min(1).max(256).describe("Id of the target material."),
+					channel: z
+						.string()
+						.min(1)
+						.max(128)
+						.describe("Material texture channel, e.g. `albedoTexture`, `bumpTexture`, `metallicTexture`, `emissiveTexture`, `diffuseTexture`, `opacityTexture`."),
+					texturePath: z.string().min(1).max(1024).describe("Project-relative or absolute path to the texture asset."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("assign_texture_to_material", args)
 	);
@@ -465,12 +469,14 @@ export function registerMaterialTools(server: McpServer): void {
 		{
 			title: "Set environment texture",
 			description:
-				"Set the scene's environment/skybox from a `.env`/`.hdr` cube texture asset, optionally creating a skybox. Great for establishing ambient lighting and the sky backdrop.",
-			inputSchema: z.object({
-				texturePath: z.string().describe("Project-relative or absolute path to the `.env`/`.hdr` cube texture."),
-				createSkybox: z.boolean().optional().describe("Also create a skybox mesh using this texture."),
-			}),
-			annotations: { idempotentHint: true },
+				"Set the scene environment and optional skybox from a prefiltered `.env` asset or an executed `.hdr`/`.exr` equirectangular high-dynamic texture. HDR/EXR use the exact shared Texture Importer artifact and Babylon's matching cube-texture class so ambient lighting retains dynamic range.",
+			inputSchema: z
+				.object({
+					texturePath: z.string().min(1).max(1024).describe("Project-relative or absolute path to the `.env`, `.hdr`, or `.exr` environment texture."),
+					createSkybox: z.boolean().optional().describe("Also create a skybox mesh using this texture."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_environment_texture", args)
 	);

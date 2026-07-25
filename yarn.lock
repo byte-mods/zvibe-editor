@@ -6705,6 +6705,11 @@
     hookable "^6.0.1"
     unhead "2.1.15"
 
+"@unicode/unicode-13.0.0@1.6.17":
+  version "1.6.17"
+  resolved "https://registry.yarnpkg.com/@unicode/unicode-13.0.0/-/unicode-13.0.0-1.6.17.tgz#58d368ccca41b9a987afa1733241ecf4b9444d29"
+  integrity sha512-xiIwQIOHn/Kvd3qwI/A8OS6dGTzsahStVQ+FjrGDh2Lwjx1as3RMu90plUutxfSC4aeJT8umH31K2i0wULG7PQ==
+
 "@vercel/nft@^1.5.0":
   version "1.5.0"
   resolved "https://registry.yarnpkg.com/@vercel/nft/-/nft-1.5.0.tgz#37dbededa3023d9e44d1292b594786ab1653536f"
@@ -7819,6 +7824,7 @@ babylonjs-editor-tools@latest:
 "babylonjs-editor-tools@link:tools":
   version "5.4.3-alpha.1"
   dependencies:
+    fflate "0.8.3"
     yaml "2.9.0"
 
 babylonjs-editor@latest:
@@ -8045,6 +8051,13 @@ baseline-browser-mapping@^2.10.12, baseline-browser-mapping@^2.9.19:
   version "2.10.25"
   resolved "https://registry.yarnpkg.com/baseline-browser-mapping/-/baseline-browser-mapping-2.10.25.tgz#183b45c0d3bdd12addb352426555fb3627eb022a"
   integrity sha512-QO/VHsXCQdnzADMfmkeOPvHdIAkoB7i0/rGjINPJEetLx75hNttVWGQ/jycHUDP9zZ9rupbm60WRxcwViB0MiA==
+
+bidi-js@1.0.3:
+  version "1.0.3"
+  resolved "https://registry.npmjs.org/bidi-js/-/bidi-js-1.0.3.tgz#6f8bcf3c877c4d9220ddf49b9bb6930c88f877d2"
+  integrity sha512-RKshQI1R3YQ+n9YJz2QQ147P66ELpa1FQEg20Dk8oW9t2KgLbpDLLp9aGZ7y8WHSshDknG0bknqGw5/tyCs5tw==
+  dependencies:
+    require-from-string "^2.0.2"
 
 big.js@^5.2.2:
   version "5.2.2"
@@ -10672,7 +10685,7 @@ fetch-blob@^3.1.2, fetch-blob@^3.1.4:
     node-domexception "^1.0.0"
     web-streams-polyfill "^3.0.3"
 
-fflate@^0.8.2:
+fflate@0.8.3, fflate@^0.8.2:
   version "0.8.3"
   resolved "https://registry.yarnpkg.com/fflate/-/fflate-0.8.3.tgz#bc27d8eb30343d4d512abb03480202ce65d825fc"
   integrity sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==
@@ -10977,6 +10990,11 @@ fzf@^0.5.2:
   version "0.5.2"
   resolved "https://registry.yarnpkg.com/fzf/-/fzf-0.5.2.tgz#a0561b12082c3401b4240cfb7d76085d7aeb68ff"
   integrity sha512-Tt4kuxLXFKHy8KT40zwsUPUkg1CrsgY25FxA2U/j/0WgEDCk3ddc/zLTCCcbSHX9FcKtLuVaDGtGE/STWC+j3Q==
+
+fzstd@0.1.1:
+  version "0.1.1"
+  resolved "https://registry.yarnpkg.com/fzstd/-/fzstd-0.1.1.tgz#a3da29f2fff45070ca90073f866d97e0c56a4a52"
+  integrity sha512-dkuVSOKKwh3eas5VkJy1AW1vFpet8TA/fGmVA5krThl8YcOVE/8ZIoEA1+U1vEn5ckxxhLirSdY837azmbaNHA==
 
 galactus@^1.0.0:
   version "1.0.0"
@@ -11299,6 +11317,11 @@ h3@^1.15.10, h3@^1.15.11:
     ufo "^1.6.3"
     uncrypto "^0.1.3"
 
+harfbuzzjs@1.4.0:
+  version "1.4.0"
+  resolved "https://registry.yarnpkg.com/harfbuzzjs/-/harfbuzzjs-1.4.0.tgz#e0f67ea08259d5261ff685988678000dd3a81c4e"
+  integrity sha512-3KrygnLb4ESsntxvxZA7RhJy2Ci47GdXWC8fl9HwPHNEOUDXUNv5M+x/TiBkXKjUz6jz/CRJOL2Ksgq8V3UdKw==
+
 has-bigints@^1.0.1, has-bigints@^1.0.2:
   version "1.0.2"
   resolved "https://registry.yarnpkg.com/has-bigints/-/has-bigints-1.0.2.tgz#0871bd3e3d51626f6ca0966668ba35d5602d6eaa"
@@ -11556,6 +11579,11 @@ humanize-ms@^1.2.1:
   integrity sha512-Fl70vYtsAFb/C06PTS9dZBo7ihau+Tu/DNCk/OyHhea07S+aeMWpFFkUaXRa8fI+ScZbEI8dfSxwY7gxZ9SAVQ==
   dependencies:
     ms "^2.0.0"
+
+hyphen@1.14.1:
+  version "1.14.1"
+  resolved "https://registry.npmjs.org/hyphen/-/hyphen-1.14.1.tgz"
+  integrity sha512-kvL8xYl5QMTh+LwohVN72ciOxC0OEV79IPdJSTwEXok9y9QHebXGdFgrED4sWfiax/ODx++CAMk3hMy4XPJPOw==
 
 iconv-corefoundation@^1.1.7:
   version "1.1.7"

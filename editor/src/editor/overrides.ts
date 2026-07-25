@@ -6,13 +6,20 @@ const originalLoad = Module["_load"];
 const resolveFilename = Module["_resolveFilename"];
 
 const originalSpawn = childProcess.spawn;
+const developmentWorkspaceRoot = join(__dirname.replace(/\\/g, "/"), "../../../..");
 
 Module["_load"] = function (request: string, parent: typeof Module, isMain: boolean) {
 	if (request.startsWith("babylonjs-editor-tools")) {
+		if (process.env.ZVIBE_DEVELOPMENT === "true") {
+			return originalLoad(join(developmentWorkspaceRoot, "tools/build/index.node.js"), parent, isMain);
+		}
 		return originalLoad(resolveFilename("babylonjs-editor-tools", module, false), parent, isMain);
 	}
 
 	if (request.startsWith("babylonjs-editor-cli")) {
+		if (process.env.ZVIBE_DEVELOPMENT === "true") {
+			return originalLoad(join(developmentWorkspaceRoot, "cli/build/index.node.js"), parent, isMain);
+		}
 		return originalLoad(resolveFilename("babylonjs-editor-cli", module, false), parent, isMain);
 	}
 

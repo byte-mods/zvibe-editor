@@ -3,6 +3,7 @@ import { createServer } from "http";
 import { Scene } from "babylonjs";
 
 import { Editor } from "../editor/main";
+import { waitUntil } from "../tools/tools";
 
 import { IMCPActionOptions } from "./action";
 import {
@@ -199,21 +200,38 @@ import { getSceneHierarchy } from "./scene/hierarchy";
 import {
 	createScene,
 	createSceneLinkNode,
+	createProjectSceneTemplate,
 	deleteScene,
+	deleteProjectSceneTemplate,
 	duplicateScene,
 	getActiveScene,
+	getSceneBuildSettings,
 	getSceneSettings,
 	get2DSceneMode,
 	getPhysicsCollisionLayers,
 	listSceneLinks,
+	listProjectSceneTemplates,
 	listScenes,
+	instantiateProjectSceneTemplate,
 	openScene,
 	reloadSceneLink,
 	saveScene,
 	setSceneSettings,
+	setSceneBuildSettings,
 	set2DSceneMode,
 	setPhysicsCollisionLayers,
 } from "./scene/scene";
+import {
+	getSceneWorkspace,
+	inspectSceneObjectMove,
+	loadSceneAdditive,
+	moveSceneObjects,
+	revertLoadedWorkspaceScene,
+	saveLoadedWorkspaceScene,
+	setActiveSceneWorkspace,
+	setLightingSceneWorkspace,
+	unloadSceneAdditive,
+} from "./scene/workspace";
 
 import {
 	getNode,
@@ -227,6 +245,17 @@ import {
 	selectNode,
 	getSelectedNodes,
 } from "./nodes/nodes";
+import {
+	addGameObjectComponent,
+	copyGameObjectComponent,
+	inspectGameObjectComponents,
+	listGameObjectComponentTypes,
+	moveGameObjectComponent,
+	pasteGameObjectComponent,
+	removeGameObjectComponent,
+	resetGameObjectComponent,
+	setGameObjectComponent,
+} from "./components/components";
 import {
 	createPrimitiveMesh,
 	createInstance,
@@ -407,9 +436,17 @@ import {
 	getAssetByGuid,
 	getAssetPreview,
 	getTextureImporterResult,
+	inspectPsdLayerExtraction,
+	extractPsdLayers,
+	inspectPsdSmartObjectPayloadReplacement,
+	replacePsdSmartObjectPayloads,
+	getTexturePlatformOverrides,
 	getPersistentAssetRegistryStatus,
 	getBackgroundAssetIndexingStatus,
 	getAssetWatchStatus,
+	inspectAutoReimportAction,
+	setAutoReimportSettingsAction,
+	runAutoReimportAction,
 	inspectAssetDependencyDiagnostics,
 	inspectAssetDependencyGraph,
 	exportAssetDependencyGraph,
@@ -425,6 +462,7 @@ import {
 	setModelMaterialRemaps,
 	setModelMaterialSearch,
 	setModelPlatformOverrides,
+	setTexturePlatformOverrides,
 	setModelGeneratedLods,
 	setModelAuthoredLods,
 	applyAnimationImporter,
@@ -637,6 +675,8 @@ import { getRagdoll, listRagdolls, saveRagdoll } from "./ragdoll/ragdoll";
 import { getProjectPreferences, listInstalledExternalEditors, listProjectTemplates, openProjectFileInExternalEditor, setProjectPreferences } from "./project/project";
 import {
 	applyPrefabInstanceBoundary,
+	applyPrefabInstanceOverrides,
+	applyPrefabInstancesOverrides,
 	applyPrefabInstanceNode,
 	applyPrefabInstanceRoot,
 	createPrefab,
@@ -644,26 +684,36 @@ import {
 	getPrefab,
 	inspectPrefabAssetNodeProperty,
 	inspectPrefabInstanceLinks,
+	inspectPrefabInstanceOverrides,
+	inspectPrefabInstancesOverrides,
 	inspectPrefabInstanceStructure,
 	capturePrefabInstanceStructure,
 	comparePrefabInstances,
 	inspectPrefabVariantStructure,
 	inspectPrefabVariantComponents,
+	inspectPrefabVariantConflicts,
 	inspectPrefabVariantRebase,
 	instantiatePrefab,
 	listPrefabs,
 	promotePrefabInstanceBoundaryOverrides,
 	rebasePrefabVariant,
 	revertPrefabInstanceBoundary,
+	revertPrefabInstanceOverrides,
+	revertPrefabInstancesOverrides,
 	revertPrefabInstanceNode,
 	revertPrefabInstanceRoot,
 	setPrefabAssetNodeProperties,
+	setPrefabAssetNodesProperties,
 	setPrefabAssetNodeProperty,
 	setPrefabVariantOverrides,
+	resolvePrefabVariantConflicts,
 	setPrefabVariantStructure,
 	setPrefabVariantComponents,
 	unpackPrefabInstance,
 } from "./prefabs/prefabs";
+import { openPrefabBulkOverridesAction } from "./prefabs/bulk-overrides";
+import { addPrefabReviewComment, inspectPrefabReview, listPrefabReviews, setPrefabReview, submitPrefabReviewDecision } from "./prefabs/reviews";
+import { getPrefabStageSettings, openPrefabStage, setPrefabStageSettings } from "./prefabs/stage";
 import {
 	createAnimatorController,
 	deleteAnimatorController,
@@ -756,6 +806,28 @@ export interface IEditorMCPDataType {
  * The port the editor MCP HTTP server listens on.
  */
 export const MCPServerPort = 3712;
+const MAXIMUM_MCP_REQUEST_BYTES = 16 * 1024 * 1024;
+
+/** Parses and validates one bounded editor-bridge request without letting event-callback exceptions escape the HTTP server. */
+export function parseMcpRequestBody(body: string): IEditorMCPDataType {
+	if (!body.trim()) {
+		throw new Error("MCP request body must contain a JSON object.");
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(body);
+	} catch {
+		throw new Error("MCP request body must contain valid JSON.");
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error("MCP request body must be a JSON object.");
+	}
+	const data = parsed as Record<string, unknown>;
+	if (typeof data.endpoint !== "string" || !data.endpoint.trim()) {
+		throw new Error("MCP request body requires a non-empty endpoint string.");
+	}
+	return parsed as IEditorMCPDataType;
+}
 
 /**
  * Map of all the MCP endpoints to their handler.
@@ -783,6 +855,21 @@ export const MCPEndpoints: Record<string, (scene: Scene, data: any, options: IMC
 	// Scene & project
 	get_scene_hierarchy: (scene, data) => getSceneHierarchy(scene, data.rootNodeName),
 	list_scenes: listScenes,
+	get_scene_build_settings: getSceneBuildSettings,
+	set_scene_build_settings: setSceneBuildSettings,
+	get_scene_workspace: getSceneWorkspace,
+	load_scene_additive: loadSceneAdditive,
+	set_active_workspace_scene: setActiveSceneWorkspace,
+	set_lighting_workspace_scene: setLightingSceneWorkspace,
+	save_workspace_scene: saveLoadedWorkspaceScene,
+	revert_workspace_scene: revertLoadedWorkspaceScene,
+	unload_scene_additive: unloadSceneAdditive,
+	inspect_scene_object_move: inspectSceneObjectMove,
+	move_scene_objects: moveSceneObjects,
+	list_scene_templates: listProjectSceneTemplates,
+	create_scene_template: createProjectSceneTemplate,
+	instantiate_scene_template: instantiateProjectSceneTemplate,
+	delete_scene_template: deleteProjectSceneTemplate,
 	create_scene: createScene,
 	open_scene: openScene,
 	duplicate_scene: duplicateScene,
@@ -824,6 +911,15 @@ export const MCPEndpoints: Record<string, (scene: Scene, data: any, options: IMC
 	delete_node: deleteNode,
 	select_node: selectNode,
 	get_selected_nodes: getSelectedNodes,
+	list_game_object_component_types: listGameObjectComponentTypes,
+	inspect_game_object_components: inspectGameObjectComponents,
+	add_game_object_component: addGameObjectComponent,
+	set_game_object_component: setGameObjectComponent,
+	move_game_object_component: moveGameObjectComponent,
+	remove_game_object_component: removeGameObjectComponent,
+	reset_game_object_component: resetGameObjectComponent,
+	copy_game_object_component: copyGameObjectComponent,
+	paste_game_object_component: pasteGameObjectComponent,
 
 	// Meshes
 	create_primitive_mesh: createPrimitiveMesh,
@@ -1283,6 +1379,9 @@ export const MCPEndpoints: Record<string, (scene: Scene, data: any, options: IMC
 	list_assets: listAssets,
 	get_asset_watch_status: getAssetWatchStatus,
 	refresh_watched_assets: refreshWatchedAssets,
+	inspect_auto_reimport: inspectAutoReimportAction,
+	set_auto_reimport_settings: setAutoReimportSettingsAction,
+	run_auto_reimport: runAutoReimportAction,
 	get_asset_details: getAssetDetails,
 	list_asset_dependency_scanners: listDependencyScannerTypes,
 	get_asset_dependencies: getAssetDependencies,
@@ -1331,6 +1430,12 @@ export const MCPEndpoints: Record<string, (scene: Scene, data: any, options: IMC
 	get_model_authored_lods: getModelAuthoredLods,
 	set_model_authored_lods: setModelAuthoredLods,
 	get_texture_importer_result: getTextureImporterResult,
+	inspect_psd_layer_extraction: inspectPsdLayerExtraction,
+	extract_psd_layers: extractPsdLayers,
+	inspect_psd_smart_object_payload_replacement: inspectPsdSmartObjectPayloadReplacement,
+	replace_psd_smart_object_payloads: replacePsdSmartObjectPayloads,
+	get_texture_platform_overrides: getTexturePlatformOverrides,
+	set_texture_platform_overrides: setTexturePlatformOverrides,
 	apply_texture_importer: applyTextureImporter,
 	get_audio_importer_result: getAudioImporterResult,
 	apply_audio_importer: applyAudioImporter,
@@ -1476,22 +1581,40 @@ export const MCPEndpoints: Record<string, (scene: Scene, data: any, options: IMC
 	get_prefab: getPrefab,
 	create_prefab: createPrefab,
 	create_prefab_variant: createPrefabVariant,
+	list_prefab_reviews: listPrefabReviews,
+	inspect_prefab_review: inspectPrefabReview,
+	set_prefab_review: setPrefabReview,
+	add_prefab_review_comment: addPrefabReviewComment,
+	submit_prefab_review_decision: submitPrefabReviewDecision,
 	inspect_prefab_variant_rebase: inspectPrefabVariantRebase,
+	inspect_prefab_variant_conflicts: inspectPrefabVariantConflicts,
 	inspect_prefab_asset_node_property: inspectPrefabAssetNodeProperty,
 	inspect_prefab_variant_structure: inspectPrefabVariantStructure,
 	inspect_prefab_variant_components: inspectPrefabVariantComponents,
 	rebase_prefab_variant: rebasePrefabVariant,
 	set_prefab_asset_node_properties: setPrefabAssetNodeProperties,
+	set_prefab_asset_nodes_properties: setPrefabAssetNodesProperties,
 	set_prefab_asset_node_property: setPrefabAssetNodeProperty,
+	get_prefab_stage_settings: getPrefabStageSettings,
+	set_prefab_stage_settings: setPrefabStageSettings,
+	open_prefab_stage: openPrefabStage,
 	set_prefab_variant_overrides: setPrefabVariantOverrides,
+	resolve_prefab_variant_conflicts: resolvePrefabVariantConflicts,
 	set_prefab_variant_structure: setPrefabVariantStructure,
 	set_prefab_variant_components: setPrefabVariantComponents,
 	inspect_prefab_instance_links: inspectPrefabInstanceLinks,
+	inspect_prefab_instance_overrides: inspectPrefabInstanceOverrides,
+	inspect_prefab_instances_overrides: inspectPrefabInstancesOverrides,
 	inspect_prefab_instance_structure: inspectPrefabInstanceStructure,
 	capture_prefab_instance_structure: capturePrefabInstanceStructure,
 	compare_prefab_instances: comparePrefabInstances,
 	apply_prefab_instance_boundary: applyPrefabInstanceBoundary,
+	apply_prefab_instance_overrides: applyPrefabInstanceOverrides,
+	apply_prefab_instances_overrides: applyPrefabInstancesOverrides,
 	revert_prefab_instance_boundary: revertPrefabInstanceBoundary,
+	revert_prefab_instance_overrides: revertPrefabInstanceOverrides,
+	revert_prefab_instances_overrides: revertPrefabInstancesOverrides,
+	open_prefab_bulk_overrides: openPrefabBulkOverridesAction,
 	unpack_prefab_instance: unpackPrefabInstance,
 	promote_prefab_instance_boundary_overrides: promotePrefabInstanceBoundaryOverrides,
 	apply_prefab_instance_root: applyPrefabInstanceRoot,
@@ -1624,7 +1747,10 @@ MCPEndpoints.execute_batch = createBatchHandler(MCPEndpoints);
  * @param editor defines the reference to the editor.
  */
 export function initializeMcpServer(editor: Editor): void {
-	void initializeRemoteCollaborationGateway(editor, MCPEndpoints).catch((error) => {
+	void (async () => {
+		await waitUntil(() => editor.state.projectPath);
+		await initializeRemoteCollaborationGateway(editor, MCPEndpoints);
+	})().catch((error) => {
 		editor.layout.console.error(`Remote collaboration gateway failed to initialize: ${error instanceof Error ? error.message : String(error)}`);
 	});
 	const server = createServer(async (req, res) => {
@@ -1632,13 +1758,35 @@ export function initializeMcpServer(editor: Editor): void {
 		try {
 			data = await new Promise<IEditorMCPDataType>((resolve, reject) => {
 				let body = "";
+				let byteLength = 0;
+				let rejected = false;
 
-				req.on("data", (chunk) => (body += chunk));
-				req.on("end", () => resolve(JSON.parse(body)));
+				req.on("data", (chunk: Buffer) => {
+					if (rejected) {
+						return;
+					}
+					byteLength += chunk.byteLength;
+					if (byteLength > MAXIMUM_MCP_REQUEST_BYTES) {
+						rejected = true;
+						reject(new Error(`MCP request body exceeds the ${MAXIMUM_MCP_REQUEST_BYTES / (1024 * 1024)} MiB limit.`));
+						return;
+					}
+					body += chunk.toString();
+				});
+				req.on("end", () => {
+					if (rejected) {
+						return;
+					}
+					try {
+						resolve(parseMcpRequestBody(body));
+					} catch (error) {
+						reject(error);
+					}
+				});
 				req.on("error", reject);
 			});
 		} catch (e) {
-			res.writeHead(400);
+			res.writeHead(400, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
 			return;
 		}
@@ -1646,7 +1794,7 @@ export function initializeMcpServer(editor: Editor): void {
 		const action = MCPEndpoints[data.endpoint];
 
 		if (!action) {
-			res.writeHead(404);
+			res.writeHead(404, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ error: `Unknown endpoint: ${data.endpoint}` }));
 			return;
 		}
@@ -1656,11 +1804,11 @@ export function initializeMcpServer(editor: Editor): void {
 			const result = await action(editor.layout.preview.scene, data, { editor });
 			await publishRemoteCollaborationOperation(data.endpoint, true, data.collaborationToken, { editor }, "Editor action completed.");
 
-			res.writeHead(200);
+			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify(result ?? null));
 		} catch (e) {
 			await publishRemoteCollaborationOperation(data.endpoint, false, data.collaborationToken, { editor }, e instanceof Error ? e.message : String(e)).catch(() => undefined);
-			res.writeHead(500);
+			res.writeHead(500, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
 		}
 	});

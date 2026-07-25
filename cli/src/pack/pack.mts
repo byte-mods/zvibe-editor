@@ -9,12 +9,13 @@ import { CancellationToken } from "../tools/cancel.mjs";
 import { getProjectDir, normalizedGlob } from "../tools/fs.mjs";
 import { locatePVRTexTool, setPVRTexToolAbsolutePath } from "../tools/ktx.mjs";
 import { ensureSceneDirectories, readSceneDirectories } from "../tools/scene.mjs";
-import { ModelImporterPlatform } from "babylonjs-editor-tools";
+import { ModelImporterPlatform, TextureImporterPlatform } from "babylonjs-editor-tools";
 
 import { createBabylonScene } from "./scene.mjs";
 import { createScriptsFile } from "./scripts.mjs";
 import { createAssets } from "./assets/assets.mjs";
 import { createGeometryFiles } from "./geometry.mjs";
+import { selectBuildSceneFiles } from "./scenes.mjs";
 
 export type PackStepType = "assets" | "scenes" | "scripts" | "upload";
 
@@ -26,6 +27,7 @@ export interface IPackStepDetails {
 export interface IPackOptions {
 	optimize: boolean;
 	modelPlatform?: ModelImporterPlatform;
+	assetPlatform?: TextureImporterPlatform;
 	pvrTexToolAbsolutePath?: string;
 	cancellationToken?: CancellationToken;
 
@@ -45,7 +47,10 @@ export async function pack(projectDir: string, options: IPackOptions) {
 	const projectFiles = await fs.readdir(projectDir);
 	const projectConfigurationFile = projectFiles.find((file) => extname(file).toLowerCase() === ".bjseditor");
 
-	let projectConfiguration = {
+	let projectConfiguration: {
+		compressedTexturesEnabled: boolean;
+		sceneBuildSettings?: { version: 1; scenes: Array<{ path: string; enabled: boolean }> };
+	} = {
 		compressedTexturesEnabled: false,
 	};
 
@@ -125,12 +130,14 @@ export async function pack(projectDir: string, options: IPackOptions) {
 
 	const scenesUsedFiles: Record<string, string[]> = {};
 
-	const sceneFiles = await normalizedGlob(`${assetsDirectory}/**/*`, {
+	let sceneFiles = await normalizedGlob(`${assetsDirectory}/**/*.scene`, {
 		nodir: false,
-		ignore: {
-			ignored: (p) => !p.isDirectory() || extname(p.name).toLocaleLowerCase() !== ".scene",
-		},
+		ignore: ["**/*.scenetemplate/**"],
 	});
+
+	if (projectConfiguration.sceneBuildSettings?.version === 1 && Array.isArray(projectConfiguration.sceneBuildSettings.scenes)) {
+		sceneFiles = selectBuildSceneFiles(projectDir, sceneFiles, projectConfiguration.sceneBuildSettings);
+	}
 
 	for (const sceneFile of sceneFiles) {
 		if (options.cancellationToken?.isCanceled) {

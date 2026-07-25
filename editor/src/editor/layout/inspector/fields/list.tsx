@@ -11,6 +11,7 @@ import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
 import { IEditorInspectorFieldProps } from "./field";
+import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorListFieldItem {
 	key?: string | number;
@@ -29,6 +30,7 @@ export interface IEditorInspectorListFieldProps extends IEditorInspectorFieldPro
 }
 
 export function EditorInspectorListField(props: IEditorInspectorListFieldProps) {
+	const prefab = usePrefabFieldOverride(props);
 	const [open, setOpen] = useState(false);
 
 	const [selectedItem, setSelectedItem] = useState<IEditorInspectorListFieldItem | null>(getStartValue());
@@ -37,7 +39,7 @@ export function EditorInspectorListField(props: IEditorInspectorListFieldProps) 
 	useEffect(() => {
 		setSelectedItem(getStartValue());
 		setOldSelectedItem(getStartValue());
-	}, [props.object, props.property, props.items]);
+	}, [props.object, props.property, props.items, prefab.refreshVersion]);
 
 	function getStartValue() {
 		const property = getInspectorPropertyValue(props.object, props.property);
@@ -57,6 +59,7 @@ export function EditorInspectorListField(props: IEditorInspectorListFieldProps) 
 		setInspectorEffectivePropertyValue(props.object, props.property, item.value);
 
 		props.onChange?.(item.value, oldValue);
+		prefab.notifyChanged();
 
 		if (oldSelectedItem && item.value !== oldSelectedItem.value && !props.noUndoRedo) {
 			registerSimpleUndoRedo({
@@ -142,8 +145,9 @@ export function EditorInspectorListField(props: IEditorInspectorListFieldProps) 
 	}
 
 	return (
-		<div className="flex gap-2 items-center px-2">
-			{props.label && <div className="w-1/3 text-ellipsis overflow-hidden whitespace-nowrap">{props.label}</div>}
+		<div className={`flex gap-2 items-center px-2 ${prefab.entry ? "border-l-2 border-blue-500 bg-blue-500/5" : ""}`}>
+			{props.label && <div className={`w-1/3 text-ellipsis overflow-hidden whitespace-nowrap ${prefab.entry ? "font-semibold text-blue-300" : ""}`}>{props.label}</div>}
+			<PrefabFieldOverrideActions {...prefab} />
 			{props.search ? <SearchableList /> : <SimpleList />}
 		</div>
 	);

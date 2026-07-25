@@ -30,11 +30,11 @@ import { processExportedModel } from "./model.mjs";
 import { processImportedTexture } from "./texture-importer.mjs";
 import { normalizedGlob } from "../../tools/fs.mjs";
 
-export const supportedImagesExtensions: string[] = [".jpg", ".jpeg", ".webp", ".png", ".bmp", ".gif", ".tif", ".tiff", ".svg"];
+export const supportedImagesExtensions: string[] = [".jpg", ".jpeg", ".webp", ".png", ".bmp", ".gif", ".tif", ".tiff", ".tga", ".psd", ".psb", ".svg", ".hdr", ".exr"];
 export const supportedCubeTexturesExtensions: string[] = [".env", ".dds", ".hdr"];
 export const supportedAudioExtensions: string[] = [".mp3", ".wav", ".wave", ".ogg", ".flac", ".m4a"];
 export const supportedVideoExtensions: string[] = [".mp4", ".webm", ".ogv", ".mov"];
-export const supportedModelExtensions: string[] = [".glb", ".gltf", ".babylon", ".fbx", ".obj", ".stl", ".dae", ".3ds"];
+export const supportedModelExtensions: string[] = [".glb", ".gltf", ".babylon", ".fbx", ".obj", ".stl", ".dae", ".3ds", ".ms3d", ".b3d", ".x", ".lwo", ".dxf", ".blend"];
 export const supportedFontExtensions: string[] = [".ttf", ".otf", ".woff", ".woff2"];
 export const supportedAnimationExtensions: string[] = [".animation", ".animations", ".animator", ".controller"];
 export const supportedMaterialExtensions: string[] = [".material", ".mtl"];
@@ -105,7 +105,10 @@ async function generatedTextureAssets(runtimePath: string, outputRoot: string): 
 			runtime.outputPath,
 			runtime.readableBitmapPath,
 			runtime.readableDescriptorPath,
+			runtime.previewPath,
+			runtime.environmentPath,
 			...(Array.isArray(runtime.mipmaps) ? runtime.mipmaps.map((mipmap: { path?: unknown }) => mipmap.path) : []),
+			...(Array.isArray(runtime.cubeFaces) ? runtime.cubeFaces.map((face: { path?: unknown }) => face.path) : []),
 		].filter((candidate) => candidate !== null && candidate !== undefined);
 		const paths = candidates.map((candidate) => safeGeneratedAssetPath(outputRoot, candidate));
 		return paths.length > 0 && paths.every((path: string | null): path is string => path !== null) ? paths : null;
@@ -277,7 +280,8 @@ export async function processAssetFile(file: string, options: IProcessAssetFileO
 	let isNewFile = false;
 
 	const fileStat = await fs.stat(file);
-	const baseHash = `${fileStat.mtimeMs}:${JSON.stringify(importer)}${importer.kind === "model" ? `:platform:${options.modelPlatform ?? "default"}` : ""}`;
+	const targetPlatform = options.assetPlatform ?? options.modelPlatform ?? "default";
+	const baseHash = `${fileStat.mtimeMs}:${JSON.stringify(importer)}${importer.kind === "model" || importer.kind === "texture" ? `:platform:${targetPlatform}` : ""}`;
 	const modelDependencyFingerprint = importer.kind === "model" ? await generatedModelDependencyFingerprint(`${finalPath}.bjsmodel.json`, options.projectDir) : "";
 	const hash = `${baseHash}${modelDependencyFingerprint ? `:${modelDependencyFingerprint}` : ""}`;
 
@@ -329,7 +333,7 @@ export async function processAssetFile(file: string, options: IProcessAssetFileO
 	) {
 		if (textureSettings) {
 			await removeGeneratedTextureAssets(textureRuntimePath, options.publicDir);
-			const result = await processImportedTexture(file, finalPath, textureSettings);
+			const result = await processImportedTexture(file, finalPath, textureSettings, targetPlatform);
 			const portablePath = (path: string | null): string | null => (path ? path.replace(`${options.publicDir}/`, "") : null);
 			await fs.writeJSON(
 				textureRuntimePath,
@@ -342,6 +346,9 @@ export async function processAssetFile(file: string, options: IProcessAssetFileO
 					generateMipmaps: result.settings.generateMipmaps,
 					readableBitmapPath: portablePath(result.readableBitmapPath),
 					readableDescriptorPath: portablePath(result.readableDescriptorPath),
+					previewPath: portablePath(result.previewPath ?? null),
+					cubeFaces: result.highDynamicRange?.cubeFaces.map((face) => ({ ...face, path: portablePath(face.path) })) ?? [],
+					environmentPath: portablePath(result.highDynamicRange?.environmentPath ?? null),
 					mipmaps: result.mipmaps.map((mipmap) => ({ path: portablePath(mipmap.path), width: mipmap.width, height: mipmap.height })),
 					result: {
 						...result,
@@ -349,6 +356,14 @@ export async function processAssetFile(file: string, options: IProcessAssetFileO
 						outputPath: portablePath(result.outputPath),
 						readableBitmapPath: portablePath(result.readableBitmapPath),
 						readableDescriptorPath: portablePath(result.readableDescriptorPath),
+						previewPath: portablePath(result.previewPath ?? null),
+						highDynamicRange: result.highDynamicRange
+							? {
+									...result.highDynamicRange,
+									environmentPath: portablePath(result.highDynamicRange.environmentPath),
+									cubeFaces: result.highDynamicRange.cubeFaces.map((face) => ({ ...face, path: portablePath(face.path) })),
+								}
+							: null,
 						mipmaps: result.mipmaps.map((mipmap) => ({ ...mipmap, path: portablePath(mipmap.path) })),
 					},
 				},
@@ -360,6 +375,9 @@ export async function processAssetFile(file: string, options: IProcessAssetFileO
 				...result.mipmaps.map((mipmap) => mipmap.path),
 				...(result.readableBitmapPath ? [result.readableBitmapPath] : []),
 				...(result.readableDescriptorPath ? [result.readableDescriptorPath] : []),
+				...(result.previewPath ? [result.previewPath] : []),
+				...(result.highDynamicRange?.cubeFaces.map((face) => face.path) ?? []),
+				...(result.highDynamicRange?.environmentPath && result.highDynamicRange.environmentPath !== result.outputPath ? [result.highDynamicRange.environmentPath] : []),
 				textureRuntimePath,
 			];
 		} else if (supportedJsonExtensions.includes(extension) && importer.kind !== "material") {

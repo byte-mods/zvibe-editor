@@ -1,5 +1,5 @@
 import { AdvancedDynamicTexture } from "babylonjs-gui";
-import { CubeTexture, Texture, ColorGradingTexture, HDRCubeTexture } from "babylonjs";
+import { CubeTexture, Texture, ColorGradingTexture, EXRCubeTexture, HDRCubeTexture } from "babylonjs";
 
 /**
  * Returns wether or not the given object is a Texture.
@@ -23,6 +23,11 @@ export function isCubeTexture(object: any): object is CubeTexture {
  */
 export function isHDRCubeTexture(object: any): object is HDRCubeTexture {
 	return object?.getClassName?.() === "HDRCubeTexture";
+}
+
+/** Returns whether the object is an OpenEXR panorama-backed cube texture. */
+export function isEXRCubeTexture(object: any): object is EXRCubeTexture {
+	return object?.getClassName?.() === "EXRCubeTexture";
 }
 
 /**

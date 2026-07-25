@@ -2,6 +2,7 @@ import { serializeModelAnimationClipDefinitions } from "./model-animation-clips"
 import { serializeModelMaterialRemaps } from "./model-material-remaps";
 import { serializeModelAuthoredLodGroups, serializeModelLodDefinitions } from "./model-lods";
 import { serializeModelImporterPlatformOverrides } from "./model-platform-overrides";
+import { serializeTextureImporterPlatformOverrides } from "./texture-platform-overrides";
 
 export const ASSET_IMPORTER_CONFIGURATION_VERSION = 1;
 
@@ -42,7 +43,7 @@ const definitions: IAssetImporterDefinition[] = [
 	{
 		kind: "texture",
 		label: "Texture Importer",
-		extensions: ["png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff", "svg", "exr", "hdr", "env", "dds"],
+		extensions: ["png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff", "tga", "psd", "psb", "svg", "exr", "hdr", "env", "dds"],
 		fields: [
 			...commonFields,
 			{
@@ -65,12 +66,18 @@ const definitions: IAssetImporterDefinition[] = [
 			},
 			{ key: "compression", label: "Compression", type: "enum", description: "Requested build compression preference.", values: ["none", "low", "normal", "high"] },
 			{ key: "readable", label: "CPU Readable", type: "boolean", description: "Declare that gameplay code needs CPU pixel access." },
+			{
+				key: "platformOverrides",
+				label: "Platform Overrides",
+				type: "string",
+				description: "Strict JSON Web/Desktop texture-processing overrides authored by the Texture Inspector.",
+			},
 		],
 	},
 	{
 		kind: "model",
 		label: "Model Importer",
-		extensions: ["glb", "gltf", "babylon", "fbx", "obj", "stl", "dae", "3ds"],
+		extensions: ["glb", "gltf", "babylon", "fbx", "obj", "stl", "dae", "3ds", "ms3d", "b3d", "x", "lwo", "dxf", "blend"],
 		fields: [
 			...commonFields,
 			{
@@ -259,6 +266,7 @@ const defaults: Record<AssetImporterKind, Record<string, boolean | number | stri
 		resizeAlgorithm: "lanczos3",
 		compression: "normal",
 		readable: false,
+		platformOverrides: "{}",
 	},
 	model: {
 		includeInBuild: true,
@@ -380,6 +388,9 @@ export function normalizeAssetImporterConfiguration(path: string, value: unknown
 	}
 	if (kind === "texture" && ![32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384].includes(settings.maxSize as number)) {
 		throw new Error("Texture Max Size must be a power of two from 32 through 16384.");
+	}
+	if (kind === "texture") {
+		settings.platformOverrides = serializeTextureImporterPlatformOverrides(settings.platformOverrides);
 	}
 	if (kind === "model") {
 		settings.animationClips = serializeModelAnimationClipDefinitions(settings.animationClips);

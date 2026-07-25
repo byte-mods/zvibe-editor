@@ -45,6 +45,7 @@ import { registerBehaviorTreeTools } from "./tools/behavior-trees.mjs";
 import { registerSortingLayerTools } from "./tools/sorting-layers.mjs";
 import { registerXRTools } from "./tools/xr.mjs";
 import { registerVideoTools } from "./tools/videos.mjs";
+import { registerComponentTools } from "./tools/components.mjs";
 
 const server = new McpServer(
 	{
@@ -99,6 +100,54 @@ const server = new McpServer(
 	}
 );
 
+/**
+ * Contract hardening applied uniformly to EVERY registered tool.
+ *
+ * Two invariants the published surface must satisfy, enforced once here
+ * instead of being restated (and drifted from) across 839 call sites:
+ *
+ * 1. **Closed-world input schemas.** Every object input rejects unknown fields
+ *    with MCP `-32602` before the editor is ever contacted. Tools that already
+ *    declared `.strict()` are untouched; the rest are closed here, so a
+ *    typo'd or hallucinated argument fails loudly instead of being silently
+ *    dropped and producing a confidently wrong result.
+ *
+ * 2. **Complete safety annotations.** Clients use the four hints to decide
+ *    whether a call needs confirmation, so a missing hint is a safety gap.
+ *    Defaults are deliberately CONSERVATIVE and never invent read-only-ness:
+ *    `readOnlyHint` is only ever honoured as authored. A tool that did not
+ *    declare itself read-only is treated as mutating, possibly destructive and
+ *    non-idempotent — over-warning is harmless, under-warning is not.
+ */
+function hardenRegisteredTools(target: McpServer): void {
+	const original = target.registerTool.bind(target) as (...args: unknown[]) => unknown;
+
+	(target as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool = (...args: unknown[]): unknown => {
+		const config = args[1] as { inputSchema?: unknown; annotations?: Record<string, unknown> } | undefined;
+
+		if (config) {
+			const schema = config.inputSchema as { strict?: () => unknown; _def?: { unknownKeys?: string } } | undefined;
+			if (schema && typeof schema.strict === "function" && schema._def?.unknownKeys !== "strict") {
+				config.inputSchema = schema.strict();
+			}
+
+			const authored = config.annotations ?? {};
+			const readOnly = authored.readOnlyHint === true;
+			config.annotations = {
+				...authored,
+				readOnlyHint: readOnly,
+				destructiveHint: authored.destructiveHint ?? !readOnly,
+				idempotentHint: authored.idempotentHint ?? readOnly,
+				openWorldHint: authored.openWorldHint ?? false,
+			};
+		}
+
+		return original(...args);
+	};
+}
+
+hardenRegisteredTools(server);
+
 registerEditorTools(server);
 registerEditorControlTools(server);
 registerSceneTools(server);
@@ -135,6 +184,7 @@ registerExportTools(server);
 registerParticleTools(server);
 registerSoundTools(server);
 registerVideoTools(server);
+registerComponentTools(server);
 registerAnimationTools(server);
 registerMarketplaceTools(server);
 registerScriptTools(server);

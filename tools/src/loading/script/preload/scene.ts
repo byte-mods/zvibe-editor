@@ -5,6 +5,7 @@ import { LoadAssetContainerAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { isMesh } from "../../../tools/guards";
 
 import { configureTransformNodes } from "../../transform-node";
+import { configureGameObjectComponents } from "../../game-object-components";
 
 export async function preloadSceneScriptAsset(key: string, rootUrl: string, scene: Scene) {
 	const iblIntensity = scene.environmentIntensity;
@@ -28,6 +29,7 @@ export async function preloadSceneScriptAsset(key: string, rootUrl: string, scen
 	scene.iblIntensity = iblIntensity;
 
 	configureTransformNodes(scene);
+	configureGameObjectComponents(scene);
 
 	return container;
 }

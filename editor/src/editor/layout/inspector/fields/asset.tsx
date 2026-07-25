@@ -17,6 +17,7 @@ import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
 import { IEditorInspectorFieldProps } from "./field";
+import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorAssetFieldProps extends IEditorInspectorFieldProps {
 	assetType: VisibleInspectorDecoratorAssetPossibleTypes;
@@ -26,13 +27,14 @@ export interface IEditorInspectorAssetFieldProps extends IEditorInspectorFieldPr
 }
 
 export function EditorInspectorAssetField(props: IEditorInspectorAssetFieldProps) {
+	const prefab = usePrefabFieldOverride(props);
 	const [dragOver, setDragOver] = useState(false);
 	const [value, setValue] = useState<string | null>(null);
 
 	useEffect(() => {
 		const nodeOrId = getInspectorPropertyValue(props.object, props.property) ?? null;
 		setValue(nodeOrId);
-	}, [props.object, props.property]);
+	}, [props.object, props.property, prefab.refreshVersion]);
 
 	function handleDragOver(ev: DragEvent<HTMLDivElement>) {
 		ev.preventDefault();
@@ -131,6 +133,7 @@ export function EditorInspectorAssetField(props: IEditorInspectorAssetFieldProps
 		setInspectorEffectivePropertyValue(props.object, props.property, path);
 
 		props.onChange?.(path);
+		prefab.notifyChanged();
 
 		registerSimpleUndoRedo({
 			object: props.object,
@@ -142,10 +145,10 @@ export function EditorInspectorAssetField(props: IEditorInspectorAssetFieldProps
 	}
 
 	return (
-		<div className="flex gap-2 items-center px-2">
+		<div className={`flex gap-2 items-center px-2 ${prefab.entry ? "border-l-2 border-blue-500 bg-blue-500/5" : ""}`}>
 			{props.label && (
 				<div className="flex items-center gap-2 w-1/3 text-ellipsis overflow-hidden whitespace-nowrap">
-					<div>{props.label}</div>
+					<div className={prefab.entry ? "font-semibold text-blue-300" : ""}>{props.label}</div>
 
 					{props.tooltip && (
 						<TooltipProvider delayDuration={0}>
@@ -159,6 +162,7 @@ export function EditorInspectorAssetField(props: IEditorInspectorAssetFieldProps
 					)}
 				</div>
 			)}
+			<PrefabFieldOverrideActions {...prefab} />
 
 			<div
 				onDragOver={(ev) => handleDragOver(ev)}

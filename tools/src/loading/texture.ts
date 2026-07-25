@@ -84,8 +84,8 @@ export async function resolveImportedTextureManifest(rootUrl: string, authoredPa
 }
 
 /** Applies imported output redirects and sampling color-space flags before the loader's final readiness wait. */
-export async function configureImportedTextures(scene: Scene, rootUrl: string): Promise<number> {
-	const candidates = scene.textures
+export async function configureImportedTextures(scene: Scene, rootUrl: string, textures: BaseTexture[] = scene.textures): Promise<number> {
+	const candidates = textures
 		.map((texture) => ({ texture, path: authoredTexturePath(texture, rootUrl) }))
 		.filter((candidate): candidate is { texture: BaseTexture; path: string } => candidate.path !== null);
 	let applied = 0;

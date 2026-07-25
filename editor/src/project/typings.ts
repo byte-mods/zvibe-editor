@@ -11,6 +11,18 @@ export interface IEditorProject {
 	lastOpenedScene: string | null;
 
 	/**
+	 * Ordered scenes included in project builds. Older projects are migrated by
+	 * discovering their `.scene` assets and enabling them in deterministic order.
+	 */
+	sceneBuildSettings?: IEditorSceneBuildSettings;
+
+	/** Restores the editor's additive multi-scene authoring workspace. */
+	sceneWorkspace?: IEditorSceneWorkspaceSettings;
+
+	/** Project-wide defaults for the isolated Unity-style Prefab Stage. */
+	prefabStage?: IEditorPrefabStageSettings;
+
+	/**
 	 * The plugins of the project.
 	 */
 	plugins: IEditorProjectPlugin[];
@@ -58,6 +70,59 @@ export interface IEditorProject {
 	 * Gizmo snap preferences (translate / rotate / scale).
 	 */
 	gizmoSnap?: IGizmoSnapPreferences;
+}
+
+export interface IEditorSceneBuildSettings {
+	version: 1;
+	scenes: IEditorBuildScene[];
+}
+
+export interface IEditorBuildScene {
+	/** Project-relative path ending in `.scene`. Array order is the build index. */
+	path: string;
+	/** Disabled scenes remain authored but are omitted from generated builds. */
+	enabled: boolean;
+}
+
+export interface IEditorSceneWorkspaceSettings {
+	version: 1;
+	/** Ordered project-relative scenes currently loaded for authoring. */
+	loadedScenes: string[];
+	/** Scene that receives newly authored root objects. */
+	activeScene: string | null;
+	/** Loaded scene whose environment, fog, physics, and rendering settings are applied. */
+	lightingScene: string | null;
+}
+
+export type EditorPrefabStageMode = "isolation" | "context";
+export type EditorPrefabStageContextAppearance = "normal" | "gray" | "hidden";
+export type EditorPrefabStageEnvironment = "neutral" | "scene";
+
+export interface IEditorPrefabStageSettings {
+	version: 1;
+	/** Isolation edits only the source; context clones the live authored scene around one instance. */
+	mode: EditorPrefabStageMode;
+	/** Controls how locked scene objects are rendered while editing in context. */
+	contextAppearance: EditorPrefabStageContextAppearance;
+	/** Highlights the locked live instance beside the editable source. */
+	showOverrides: boolean;
+	/** Saves changed source-node properties after a short bounded debounce. */
+	autoSave: boolean;
+	/** Neutral uses the stage light; scene copies the current scene lighting and environment. */
+	environment: EditorPrefabStageEnvironment;
+	/** Neutral-stage clear color in linear RGBA. */
+	backgroundColor: [number, number, number, number];
+	/** Neutral-stage hemispheric-light intensity. */
+	lightIntensity: number;
+}
+
+export interface IEditorSceneTemplateManifest {
+	version: 1;
+	name: string;
+	description?: string;
+	/** Project-relative scene path captured when the template was created. */
+	sourceScenePath: string;
+	createdAt: string;
 }
 
 export interface IEditorProjectPlugin {

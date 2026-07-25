@@ -1,7 +1,8 @@
 import { dirname, isAbsolute, join } from "path/posix";
 import { pathExistsSync, readJSONSync } from "fs-extra";
 
-import { Node, TransformNode, Scene, Tools, serialize, SerializationHelper, Matrix, GetClass, SpriteManager, Texture, Sprite, Observer } from "babylonjs";
+import { Node, TransformNode, Scene, Tools, serialize, SerializationHelper, Matrix, GetClass, SpriteManager, Texture, Sprite, Observer, ShaderStore } from "babylonjs";
+import { configureRotatedPackedSpriteManager, installRotatedPackedSpriteShaders } from "babylonjs-editor-tools";
 
 import { showAlert } from "../../ui/dialog";
 
@@ -105,6 +106,7 @@ export class SpriteManagerNode extends TransformNode {
 		this.atlasJson = atlasJson;
 		this.atlasJsonRelativePath = absolutePath.replace(getProjectAssetsRootUrl()!, "");
 
+		installRotatedPackedSpriteShaders(ShaderStore);
 		this.spriteManager = new SpriteManager(
 			this.name,
 			imagePath,
@@ -116,6 +118,7 @@ export class SpriteManagerNode extends TransformNode {
 			true,
 			this.atlasJson
 		);
+		configureRotatedPackedSpriteManager(this.spriteManager, this.atlasJson);
 		this.spriteManager.isPickable = true;
 
 		configureImportedTexture(this.spriteManager.texture, true);

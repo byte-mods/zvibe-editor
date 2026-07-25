@@ -58,6 +58,7 @@ import { registerMorphTargetManagerParser } from "./morph-target-manager";
 import { configureLights } from "./light";
 import { registerSpriteMapParser } from "./sprite-map";
 import { configureTransformNodes } from "./transform-node";
+import { configureGameObjectComponents } from "./game-object-components";
 import { registerSpriteManagerParser } from "./sprite-manager";
 import { registerNodeParticleSystemSetParser } from "./node-particle-system-set";
 
@@ -285,6 +286,7 @@ export async function loadScene(rootUrl: any, sceneFilename: string, scene: Scen
 	void configureXR(scene);
 
 	configureTransformNodes(scene);
+	configureGameObjectComponents(scene);
 	_applyScriptsForObjects(
 		scene,
 		[scene, ...scene.transformNodes, ...scene.meshes, ...scene.lights, ...scene.cameras, ...(scene.spriteManagers?.flatMap((spriteManager) => spriteManager.sprites) ?? [])],

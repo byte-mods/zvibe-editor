@@ -27,11 +27,245 @@ export function registerSceneTools(server: McpServer): void {
 		"list_scenes",
 		{
 			title: "List scenes",
-			description: "List all `.scene` assets in the project, including which one is currently active. A project can contain multiple scenes that share the same assets.",
-			inputSchema: z.object({}),
+			description:
+				"List project `.scene` assets in build order with active, enabled, and build-index state. Results are bounded and paginated. A project can contain multiple scenes that share assets.",
+			inputSchema: z
+				.object({
+					offset: z.number().int().nonnegative().optional().describe("Zero-based result offset. Defaults to 0."),
+					limit: z.number().int().min(1).max(100).optional().describe("Maximum results. Defaults to 50 and is capped at 100."),
+				})
+				.strict(),
 			annotations: { readOnlyHint: true },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("list_scenes", args)
+	);
+
+	server.registerTool(
+		"get_scene_build_settings",
+		{
+			title: "Get scene build settings",
+			description: "Get the complete ordered scene build list, enabled state, and exact fingerprint required to update it safely.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (): Promise<CallToolResult> => callTextTool("get_scene_build_settings", {})
+	);
+
+	server.registerTool(
+		"set_scene_build_settings",
+		{
+			title: "Set scene build settings",
+			description:
+				"Replace scene build order and enabled state under an exact fingerprint lease. Include every discovered .scene exactly once; disable scenes instead of omitting them.",
+			inputSchema: z
+				.object({
+					expectedFingerprint: z.string().length(64).describe("Fingerprint returned by get_scene_build_settings."),
+					scenes: z.array(z.object({ path: z.string().min(1).max(1024).describe("Project-relative .scene path."), enabled: z.boolean() }).strict()).max(512),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_scene_build_settings", args)
+	);
+
+	server.registerTool(
+		"get_scene_workspace",
+		{
+			title: "Get additive scene workspace",
+			description:
+				"Inspect every authored scene currently loaded together in the editor, including independent root nodes, active/lighting/dirty flags, owned-object counts, and the exact fingerprint required by lifecycle mutations.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (): Promise<CallToolResult> => callTextTool("get_scene_workspace", {})
+	);
+
+	server.registerTool(
+		"load_scene_additive",
+		{
+			title: "Load authored scene additively",
+			description:
+				"Load one project .scene into the current authoring workspace without resetting existing scenes. Content remains independently owned, saveable, revertible, movable, and unloadable.",
+			inputSchema: z
+				.object({
+					path: z.string().min(1).max(1024).describe("Existing project-relative .scene path."),
+					expectedFingerprint: z.string().length(64).describe("Fingerprint returned by get_scene_workspace."),
+					makeActive: z.boolean().optional().describe("Also make this scene receive newly authored root content."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("load_scene_additive", args)
+	);
+
+	server.registerTool(
+		"set_active_workspace_scene",
+		{
+			title: "Set active authored scene",
+			description: "Select the loaded scene that owns newly created or imported root objects without changing lighting configuration.",
+			inputSchema: z
+				.object({ path: z.string().min(1).max(1024), expectedFingerprint: z.string().length(64).describe("Fingerprint returned by get_scene_workspace.") })
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_active_workspace_scene", args)
+	);
+
+	server.registerTool(
+		"set_lighting_workspace_scene",
+		{
+			title: "Set lighting authored scene",
+			description: "Select the loaded scene whose environment, fog, gravity, rendering, and other global configuration is applied to the shared preview.",
+			inputSchema: z
+				.object({ path: z.string().min(1).max(1024), expectedFingerprint: z.string().length(64).describe("Fingerprint returned by get_scene_workspace.") })
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_lighting_workspace_scene", args)
+	);
+
+	server.registerTool(
+		"save_workspace_scene",
+		{
+			title: "Save one authored scene",
+			description: "Save exactly one loaded scene with ownership filtering and clear only that scene's dirty flag.",
+			inputSchema: z
+				.object({ path: z.string().min(1).max(1024), expectedFingerprint: z.string().length(64).describe("Fingerprint returned by get_scene_workspace.") })
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("save_workspace_scene", args)
+	);
+
+	server.registerTool(
+		"revert_workspace_scene",
+		{
+			title: "Revert one authored scene",
+			description: "Discard one loaded scene's in-memory edits and reload only that scene while every other loaded scene remains intact.",
+			inputSchema: z
+				.object({
+					path: z.string().min(1).max(1024),
+					expectedFingerprint: z.string().length(64).describe("Fingerprint returned by get_scene_workspace."),
+					confirm: z.literal(true),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("revert_workspace_scene", args)
+	);
+
+	server.registerTool(
+		"unload_scene_additive",
+		{
+			title: "Unload authored scene",
+			description:
+				"Unload one authored scene and its exact resources while preserving all others. Dirty scenes require confirm:true; the last authored scene cannot be unloaded.",
+			inputSchema: z
+				.object({
+					path: z.string().min(1).max(1024),
+					expectedFingerprint: z.string().length(64).describe("Fingerprint returned by get_scene_workspace."),
+					confirm: z.literal(true).optional().describe("Required when the selected scene has unsaved edits."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("unload_scene_additive", args)
+	);
+
+	const sceneMoveNodesSchema = z
+		.array(z.string().min(1).max(256))
+		.min(1)
+		.max(128)
+		.refine((values) => new Set(values).size === values.length, "nodeIds must be unique.");
+
+	server.registerTool(
+		"inspect_scene_object_move",
+		{
+			title: "Inspect cross-scene object move",
+			description:
+				"Plan a lossless move of authored scene roots, including their exclusive materials, textures, geometry, skeletons, morph data, particle systems, shadows, and animation groups. Rejects partial cross-scene animations.",
+			inputSchema: z.object({ nodeIds: sceneMoveNodesSchema, targetScene: z.string().min(1).max(1024) }).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("inspect_scene_object_move", args)
+	);
+
+	server.registerTool(
+		"move_scene_objects",
+		{
+			title: "Move objects between authored scenes",
+			description: "Apply an exact inspected root/dependency move between loaded scenes with world-transform preservation and complete editor undo/redo support.",
+			inputSchema: z
+				.object({
+					nodeIds: sceneMoveNodesSchema,
+					targetScene: z.string().min(1).max(1024),
+					expectedPlanFingerprint: z.string().length(64).describe("planFingerprint returned by inspect_scene_object_move."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("move_scene_objects", args)
+	);
+
+	server.registerTool(
+		"list_scene_templates",
+		{
+			title: "List scene templates",
+			description: "List reusable self-contained `.scenetemplate` assets with source scene and creation metadata. Results are bounded and paginated.",
+			inputSchema: z
+				.object({
+					offset: z.number().int().nonnegative().optional(),
+					limit: z.number().int().min(1).max(100).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("list_scene_templates", args)
+	);
+
+	server.registerTool(
+		"create_scene_template",
+		{
+			title: "Create scene template",
+			description: "Save the active scene when applicable, then atomically capture a project scene as a self-contained reusable `.scenetemplate` asset.",
+			inputSchema: z
+				.object({
+					sourcePath: z.string().min(1).max(1024).describe("Existing project-relative .scene path."),
+					templatePath: z.string().min(1).max(1024).describe("New project-relative .scenetemplate path."),
+					name: z.string().min(1).max(128).optional(),
+					description: z.string().max(1024).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("create_scene_template", args)
+	);
+
+	server.registerTool(
+		"instantiate_scene_template",
+		{
+			title: "Instantiate scene template",
+			description: "Atomically create a new `.scene` from a self-contained template and add it to scene build settings.",
+			inputSchema: z
+				.object({
+					templatePath: z.string().min(1).max(1024).describe("Existing project-relative .scenetemplate path."),
+					destinationPath: z.string().min(1).max(1024).describe("New project-relative .scene path."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("instantiate_scene_template", args)
+	);
+
+	server.registerTool(
+		"delete_scene_template",
+		{
+			title: "Delete scene template",
+			description: "Permanently delete a `.scenetemplate` asset after explicit confirmation.",
+			inputSchema: z.object({ path: z.string().min(1).max(1024).describe("Existing project-relative .scenetemplate path."), confirm: z.literal(true) }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("delete_scene_template", args)
 	);
 
 	server.registerTool(

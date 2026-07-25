@@ -1,8 +1,10 @@
 {
-    "plugins": [],
-    "version": "5.1.1",
-    "packageManager": "yarn",
-    "lastOpenedScene": "/assets/example.scene",
-    "compressedTexturesEnabled": false,
-    "compressedTexturesEnabledInPreview": false
+	"plugins": [],
+	"version": "5.1.1",
+	"packageManager": "yarn",
+	"lastOpenedScene": "/assets/example.scene",
+	"sceneBuildSettings": { "version": 1, "scenes": [{ "path": "assets/example.scene", "enabled": true }] },
+	"sceneWorkspace": { "version": 1, "loadedScenes": ["assets/example.scene"], "activeScene": "assets/example.scene", "lightingScene": "assets/example.scene" },
+	"compressedTexturesEnabled": false,
+	"compressedTexturesEnabledInPreview": false
 }

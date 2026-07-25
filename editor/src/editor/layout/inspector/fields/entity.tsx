@@ -15,6 +15,7 @@ import { isAnyParticleSystem } from "../../../../tools/guards/particles";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
 import { IEditorInspectorFieldProps } from "./field";
+import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorSceneEntityFieldProps<T = Node | IParticleSystem> extends IEditorInspectorFieldProps {
 	scene: Scene;
@@ -24,6 +25,7 @@ export interface IEditorInspectorSceneEntityFieldProps<T = Node | IParticleSyste
 }
 
 export function EditorInspectorSceneEntityField<T extends Node | IParticleSystem>(props: IEditorInspectorSceneEntityFieldProps<T>) {
+	const prefab = usePrefabFieldOverride(props);
 	const [dragOver, setDragOver] = useState(false);
 	const [value, setValue] = useState<T | null>(null);
 
@@ -38,7 +40,7 @@ export function EditorInspectorSceneEntityField<T extends Node | IParticleSystem
 		} else {
 			setValue(null);
 		}
-	}, [props.object, props.property]);
+	}, [props.object, props.property, prefab.refreshVersion]);
 
 	function getObjectById(id: string): T | null {
 		return (props.scene.getNodeById(id) as T) ?? (props.scene.particleSystems?.find((ps) => ps.id === id) as T);
@@ -92,6 +94,7 @@ export function EditorInspectorSceneEntityField<T extends Node | IParticleSystem
 		setInspectorEffectivePropertyValue(props.object, props.property, node);
 
 		props.onChange?.(node);
+		prefab.notifyChanged();
 
 		registerSimpleUndoRedo({
 			object: props.object,
@@ -103,10 +106,10 @@ export function EditorInspectorSceneEntityField<T extends Node | IParticleSystem
 	}
 
 	return (
-		<div className="flex gap-2 items-center px-2">
+		<div className={`flex gap-2 items-center px-2 ${prefab.entry ? "border-l-2 border-blue-500 bg-blue-500/5" : ""}`}>
 			{props.label && (
 				<div className="flex items-center gap-2 w-1/3 text-ellipsis overflow-hidden whitespace-nowrap">
-					<div>{props.label}</div>
+					<div className={prefab.entry ? "font-semibold text-blue-300" : ""}>{props.label}</div>
 
 					{props.tooltip && (
 						<TooltipProvider delayDuration={0}>
@@ -120,6 +123,7 @@ export function EditorInspectorSceneEntityField<T extends Node | IParticleSystem
 					)}
 				</div>
 			)}
+			<PrefabFieldOverrideActions {...prefab} />
 
 			<div
 				onDragOver={(ev) => handleDragOver(ev)}

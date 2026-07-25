@@ -6,6 +6,7 @@ import { UniqueNumber } from "../../tools/tools";
 
 import { projectConfiguration } from "../../project/configuration";
 import { loadScene, SceneLoadResult } from "../../project/load/scene";
+import { disposeSceneLoadResult, getSceneLoadResultObjects } from "../../project/load/result";
 
 import { Editor } from "../main";
 
@@ -71,16 +72,14 @@ export class SceneLinkNode extends TransformNode {
 		return this._lastLoadResult;
 	}
 
+	/** Returns nested read-only objects so an owning authored scene does not claim them. */
+	public getLoadedObjects(): object[] {
+		return this._lastLoadResult ? getSceneLoadResultObjects(this._lastLoadResult) : [];
+	}
+
 	private _disposeLastLoadResult(): void {
 		if (this._lastLoadResult) {
-			this._lastLoadResult.meshes.forEach((mesh) => mesh.dispose(true, false));
-			this._lastLoadResult.lights.forEach((light) => light.dispose(true, true));
-			this._lastLoadResult.cameras.forEach((camera) => camera.dispose(true, true));
-			this._lastLoadResult.transformNodes.forEach((transformNode) => transformNode.dispose(true, true));
-			this._lastLoadResult.sceneLinks.forEach((sceneLink) => sceneLink.dispose());
-			this._lastLoadResult.animationGroups.forEach((animationGroup) => animationGroup.dispose());
-			this._lastLoadResult.particleSystems.forEach((particleSystem) => particleSystem.dispose());
-
+			disposeSceneLoadResult(this.getScene(), this._lastLoadResult);
 			this._lastLoadResult = null;
 		}
 	}

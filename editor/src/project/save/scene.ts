@@ -3,7 +3,7 @@ import { pathExists, readJSON, remove, stat, writeFile, writeJSON } from "fs-ext
 
 import filenamify from "filenamify";
 
-import { RenderTargetTexture, SceneSerializer } from "babylonjs";
+import { Node, RenderTargetTexture, SceneSerializer } from "babylonjs";
 import { stopAllHumanoidMusclePosePreviews } from "babylonjs-editor-tools";
 
 import { Editor } from "../../editor/main";
@@ -38,6 +38,12 @@ import { writeBinaryMorphTarget } from "../tools/morph-target";
 
 import { saveMergedDecals } from "./decals";
 import { showSaveSceneProgressDialog } from "./dialog";
+import { createSceneSaveOwnershipPredicate } from "./ownership";
+import { mergeSceneSaveConfiguration } from "./configuration";
+
+export interface ISaveSceneOptions {
+	ownerScenePath?: string;
+}
 
 export function ensureSceneFolders(scenePath: string) {
 	return Promise.all([
@@ -62,9 +68,7 @@ export function ensureSceneFolders(scenePath: string) {
 	]);
 }
 
-export async function saveScene(editor: Editor, projectPath: string, scenePath: string): Promise<void> {
-	editor.layout.preview.scene.metadata ??= {};
-	editor.layout.preview.scene.metadata.babylonEditorProjectScriptExecutionOrders = structuredClone(editor.state.scriptExecutionOrders);
+export async function saveScene(editor: Editor, projectPath: string, scenePath: string, options?: ISaveSceneOptions): Promise<void> {
 	const fStat = await stat(scenePath);
 	if (!fStat.isDirectory()) {
 		return editor.layout.console.error("The scene path is not a directory.");
@@ -73,14 +77,35 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	const dialog = await showSaveSceneProgressDialog(editor, "Saving scene...");
 
 	const relativeScenePath = scenePath.replace(join(projectPath, "/"), "");
+	const ownerScenePath = options?.ownerScenePath ?? relativeScenePath;
+	const unownedObjects = new Set<object>();
+	const belongsToOwnedScene = options?.ownerScenePath
+		? createSceneSaveOwnershipPredicate(editor.sceneWorkspace, ownerScenePath, (object) => unownedObjects.add(object))
+		: (object: object) => {
+				const owner = editor.sceneWorkspace.getOwner(object);
+				if (!owner) {
+					unownedObjects.add(object);
+				}
+				return !owner || owner === ownerScenePath;
+			};
+	const isLightingScene = !options?.ownerScenePath || editor.sceneWorkspace.getSettings().lightingScene === ownerScenePath;
+	const isActiveScene = !options?.ownerScenePath || editor.sceneWorkspace.getSettings().activeScene === ownerScenePath;
+	const retainedConfiguration = (editor.sceneWorkspace.getLoadedSceneConfiguration(ownerScenePath) ?? {}) as any;
 
 	await ensureSceneFolders(scenePath);
 
 	const scene = editor.layout.preview.scene;
+	if (isLightingScene) {
+		scene.metadata ??= {};
+		scene.metadata.babylonEditorProjectScriptExecutionOrders = structuredClone(editor.state.scriptExecutionOrders);
+	}
+	const linkedObjects = new Set(scene.transformNodes.filter(isSceneLinkNode).flatMap((sceneLink) => sceneLink.getLoadedObjects()));
+	const belongsToScene = (object: object): boolean => !linkedObjects.has(object) && belongsToOwnedScene(object);
+	const getOwnedParentUniqueId = (node: Node): number | undefined => (node.parent && belongsToScene(node.parent) ? node.parent.uniqueId : undefined);
 	stopAllHumanoidMusclePosePreviews(scene as any);
 	stopHumanoidRetargetDebugVisualization(scene);
 	const meshesToSave = scene.meshes.filter((mesh) => {
-		if ((!isMesh(mesh) && !isCollisionMesh(mesh)) || mesh._masterMesh || isFromSceneLink(mesh) || !isNodeVisibleInGraph(mesh)) {
+		if (!belongsToScene(mesh) || (!isMesh(mesh) && !isCollisionMesh(mesh)) || mesh._masterMesh || isFromSceneLink(mesh) || !isNodeVisibleInGraph(mesh)) {
 			return false;
 		}
 
@@ -90,13 +115,13 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	const progressStep =
 		100 /
 		(meshesToSave.length +
-			scene.transformNodes.length +
-			scene.lights.length +
-			scene.cameras.length +
-			scene.particleSystems.length +
-			scene.skeletons.length +
-			scene.morphTargetManagers.length +
-			scene.animationGroups.length);
+			scene.transformNodes.filter(belongsToScene).length +
+			scene.lights.filter(belongsToScene).length +
+			scene.cameras.filter(belongsToScene).length +
+			scene.particleSystems.filter(belongsToScene).length +
+			scene.skeletons.filter(belongsToScene).length +
+			scene.morphTargetManagers.filter(belongsToScene).length +
+			scene.animationGroups.filter(belongsToScene).length);
 
 	const savedFiles: string[] = [];
 	const savedGeometryIds: string[] = [];
@@ -106,7 +131,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write geometries and meshes
 	await Promise.all(
 		meshesToSave.map(async (mesh) => {
-			if ((!isMesh(mesh) && !isCollisionMesh(mesh)) || mesh._masterMesh || isFromSceneLink(mesh) || !isNodeVisibleInGraph(mesh)) {
+			if (!belongsToScene(mesh) || (!isMesh(mesh) && !isCollisionMesh(mesh)) || mesh._masterMesh || isFromSceneLink(mesh) || !isNodeVisibleInGraph(mesh)) {
 				return;
 			}
 
@@ -163,8 +188,8 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 							mesh.overlayColor = [0, 0, 0];
 						}
 
-						const instantiatedMesh = scene.getMeshById(mesh.id);
-						if (instantiatedMesh?.parent) {
+						const instantiatedMesh = scene.meshes.find((candidate) => belongsToScene(candidate) && candidate.id === mesh.id);
+						if (instantiatedMesh?.parent && belongsToScene(instantiatedMesh.parent)) {
 							mesh.metadata ??= {};
 							mesh.metadata.parentId = instantiatedMesh.parent.uniqueId;
 
@@ -176,10 +201,13 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 							delete mesh.materialId;
 						}
 
+						mesh.instances = mesh.instances?.filter((instanceData: any) =>
+							meshToSerialize.instances.some((instance) => belongsToScene(instance) && instance.id === instanceData.id)
+						);
 						mesh.instances?.forEach((instanceData: any) => {
 							const instance = meshToSerialize.instances.find((instance) => instance.id === instanceData.id);
 							if (instance) {
-								if (instance.parent) {
+								if (instance.parent && belongsToScene(instance.parent)) {
 									instanceData.metadata ??= {};
 									instanceData.metadata.parentId = instance.parent.uniqueId;
 								}
@@ -201,14 +229,10 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 						}
 					});
 
-					data.materials = data.materials?.filter((material) => {
-						const instantiatedMaterial = scene.getMaterialById(material.id);
-						if (instantiatedMaterial && instantiatedMaterial !== scene.defaultMaterial) {
-							return true;
-						}
-
-						return false;
-					});
+					// SerializeMesh already returns only dependencies referenced by this exact mesh.
+					// A material may intentionally be shared with another loaded authored scene, so
+					// dependency serialization cannot be filtered by its single workspace owner.
+					data.materials = data.materials?.filter((material) => material.id !== scene.defaultMaterial.id);
 
 					const lodLevel = mesh.getLODLevels().find((lodLevel) => lodLevel.mesh === meshToSerialize);
 					if (lodLevel) {
@@ -218,7 +242,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 
 					await Promise.all(
 						data.meshes?.map(async (mesh) => {
-							const instantiatedMesh = scene.getMeshById(mesh.id);
+							const instantiatedMesh = scene.meshes.find((candidate) => belongsToScene(candidate) && candidate.id === mesh.id);
 							const geometry = data.geometries?.vertexData?.find((v) => v.id === mesh.geometryId);
 
 							if (geometry) {
@@ -307,7 +331,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write skeletons
 	await Promise.all(
 		scene.skeletons.map(async (skeleton) => {
-			const meshes = scene.meshes.filter((m) => m.skeleton === skeleton && !isFromSceneLink(m));
+			const meshes = scene.meshes.filter((m) => belongsToScene(m) && m.skeleton === skeleton && !isFromSceneLink(m));
 			if (!meshes.length) {
 				return;
 			}
@@ -331,7 +355,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write morph targets
 	await Promise.all(
 		scene.meshes.map(async (mesh) => {
-			if (!mesh.morphTargetManager || isFromSceneLink(mesh) || !isNodeVisibleInGraph(mesh)) {
+			if (!belongsToScene(mesh) || !mesh.morphTargetManager || isFromSceneLink(mesh) || !isNodeVisibleInGraph(mesh)) {
 				return;
 			}
 
@@ -380,7 +404,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write transform nodes
 	await Promise.all(
 		scene.transformNodes.map(async (transformNode) => {
-			if (!isTransformNode(transformNode) || isFromSceneLink(transformNode)) {
+			if (!belongsToScene(transformNode) || !isTransformNode(transformNode) || isFromSceneLink(transformNode)) {
 				return;
 			}
 
@@ -390,7 +414,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 				const data = transformNode.serialize();
 
 				data.metadata ??= {};
-				data.metadata.parentId = transformNode.parent?.uniqueId;
+				data.metadata.parentId = getOwnedParentUniqueId(transformNode);
 
 				delete data.parentId;
 
@@ -410,7 +434,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write lights
 	await Promise.all(
 		scene.lights.concat(editor.layout.preview.clusteredLightContainer.lights).map(async (light) => {
-			if (isFromSceneLink(light) || isClusteredLightContainer(light)) {
+			if (!belongsToScene(light) || isFromSceneLink(light) || isClusteredLightContainer(light)) {
 				return;
 			}
 
@@ -420,7 +444,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 				const data = light.serialize();
 
 				data.metadata ??= {};
-				data.metadata.parentId = light.parent?.uniqueId;
+				data.metadata.parentId = getOwnedParentUniqueId(light);
 
 				delete data.parentId;
 
@@ -439,6 +463,9 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 
 				try {
 					const shadowGeneratorData = shadowGenerator.serialize();
+					shadowGeneratorData.renderList = shadowGeneratorData.renderList?.filter((meshId: string) =>
+						scene.meshes.some((mesh) => belongsToScene(mesh) && mesh.id === meshId)
+					);
 					shadowGeneratorData.refreshRate = shadowGenerator.getShadowMap()?.refreshRate ?? RenderTargetTexture.REFRESHRATE_RENDER_ONEVERYFRAME;
 
 					await writeJSON(shadowGeneratorPath, shadowGeneratorData, {
@@ -458,7 +485,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write cameras
 	await Promise.all(
 		scene.cameras.map(async (camera) => {
-			if (isEditorCamera(camera) || isFromSceneLink(camera)) {
+			if (!belongsToScene(camera) || isEditorCamera(camera) || isFromSceneLink(camera)) {
 				return;
 			}
 
@@ -468,7 +495,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 				const data = camera.serialize();
 
 				data.metadata ??= {};
-				data.metadata.parentId = camera.parent?.uniqueId;
+				data.metadata.parentId = getOwnedParentUniqueId(camera);
 
 				delete data.parentId;
 
@@ -488,14 +515,18 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write scene links
 	await Promise.all(
 		scene.transformNodes.map(async (transformNode) => {
-			if (!isSceneLinkNode(transformNode)) {
+			if (!belongsToScene(transformNode) || !isSceneLinkNode(transformNode)) {
 				return;
 			}
 
 			const sceneLinkPath = join(scenePath, "sceneLinks", `${transformNode.id}.json`);
 
 			try {
-				await writeJSON(sceneLinkPath, transformNode.serialize(), {
+				const data = transformNode.serialize();
+				data.metadata ??= {};
+				data.metadata.parentId = getOwnedParentUniqueId(transformNode);
+				delete data.parentId;
+				await writeJSON(sceneLinkPath, data, {
 					spaces: 4,
 				});
 			} catch (e) {
@@ -509,7 +540,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	);
 
 	// Save scene files
-	const guiTextures = scene.textures.filter((texture) => texture.getClassName() === "AdvancedDynamicTexture");
+	const guiTextures = scene.textures.filter((texture) => belongsToScene(texture) && texture.getClassName() === "AdvancedDynamicTexture");
 	if (guiTextures.length) {
 		const allGuiFiles = await normalizedGlob(join(projectPath, "assets/**/*.gui"), {
 			nodir: true,
@@ -560,7 +591,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write sound nodes
 	await Promise.all(
 		scene.transformNodes.map(async (transformNode) => {
-			if (!isSoundNode(transformNode) || isFromSceneLink(transformNode)) {
+			if (!belongsToScene(transformNode) || !isSoundNode(transformNode) || isFromSceneLink(transformNode)) {
 				return;
 			}
 
@@ -570,7 +601,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 				const data = transformNode.serialize();
 
 				data.metadata ??= {};
-				data.metadata.parentId = transformNode.parent?.uniqueId;
+				data.metadata.parentId = getOwnedParentUniqueId(transformNode);
 
 				delete data.parentId;
 
@@ -590,7 +621,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write particle systems
 	await Promise.all(
 		scene.particleSystems.map(async (particleSystem) => {
-			if (particleSystem.isNodeGenerated) {
+			if (!belongsToScene(particleSystem) || particleSystem.isNodeGenerated) {
 				return;
 			}
 
@@ -626,7 +657,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write node particle systems
 	await Promise.all(
 		scene.meshes.map(async (mesh) => {
-			if (!isNodeParticleSystemSetMesh(mesh) || isFromSceneLink(mesh)) {
+			if (!belongsToScene(mesh) || !isNodeParticleSystemSetMesh(mesh) || isFromSceneLink(mesh)) {
 				return;
 			}
 
@@ -636,7 +667,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 				const data = mesh.serialize();
 
 				data.metadata ??= {};
-				data.metadata.parentId = mesh.parent?.uniqueId;
+				data.metadata.parentId = getOwnedParentUniqueId(mesh);
 
 				delete data.parentId;
 
@@ -656,7 +687,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write animation groups
 	await Promise.all(
 		scene.animationGroups?.map(async (animationGroup) => {
-			if (isAnimationGroupFromSceneLink(animationGroup)) {
+			if (!belongsToScene(animationGroup) || isAnimationGroupFromSceneLink(animationGroup)) {
 				return;
 			}
 
@@ -680,7 +711,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write sprite maps
 	await Promise.all(
 		scene.transformNodes.map(async (transformNode) => {
-			if (!isSpriteMapNode(transformNode) || isFromSceneLink(transformNode)) {
+			if (!belongsToScene(transformNode) || !isSpriteMapNode(transformNode) || isFromSceneLink(transformNode)) {
 				return;
 			}
 
@@ -690,7 +721,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 				const data = transformNode.serialize();
 
 				data.metadata ??= {};
-				data.metadata.parentId = transformNode.parent?.uniqueId;
+				data.metadata.parentId = getOwnedParentUniqueId(transformNode);
 
 				delete data.parentId;
 
@@ -710,7 +741,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write sprite managers
 	await Promise.all(
 		scene.transformNodes.map(async (transformNode) => {
-			if (!isSpriteManagerNode(transformNode) || isFromSceneLink(transformNode)) {
+			if (!belongsToScene(transformNode) || !isSpriteManagerNode(transformNode) || isFromSceneLink(transformNode)) {
 				return;
 			}
 
@@ -720,7 +751,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 				const data = transformNode.serialize();
 
 				data.metadata ??= {};
-				data.metadata.parentId = transformNode.parent?.uniqueId;
+				data.metadata.parentId = getOwnedParentUniqueId(transformNode);
 
 				delete data.parentId;
 
@@ -741,65 +772,69 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	const configPath = join(scenePath, "config.json");
 
 	try {
-		if (scene.activeCamera) {
+		if (isLightingScene && scene.activeCamera) {
 			saveRenderingConfigurationForCamera(scene.activeCamera);
 		}
-
-		await writeJSON(
-			configPath,
-			{
-				clearColor: scene.clearColor.asArray(),
-				ambientColor: scene.ambientColor.asArray(),
-				environment: {
-					iblIntensity: scene.iblIntensity,
-					environmentIntensity: scene.environmentIntensity,
-					environmentTexture: scene.environmentTexture
-						? {
-								...scene.environmentTexture.serialize(),
-								url: scene.environmentTexture.name,
-							}
-						: undefined,
-				},
-				fog: {
-					fogEnabled: scene.fogEnabled,
-					fogMode: scene.fogMode,
-					fogStart: scene.fogStart,
-					fogEnd: scene.fogEnd,
-					fogDensity: scene.fogDensity,
-					fogColor: scene.fogColor.asArray(),
-				},
-				physics: {
-					gravity: scene.getPhysicsEngine()?.gravity?.asArray(),
-				},
-				rendering: scene.cameras.map((camera) => ({
-					cameraId: camera.id,
-					ssao2RenderingPipeline: ssaoRenderingPipelineCameraConfigurations.get(camera),
-					vlsPostProcess: vlsPostProcessCameraConfigurations.get(camera),
-					ssrRenderingPipeline: ssrRenderingPipelineCameraConfigurations.get(camera),
-					motionBlurPostProcess: motionBlurPostProcessCameraConfigurations.get(camera),
-					defaultRenderingPipeline: defaultPipelineCameraConfigurations.get(camera),
-					taaRenderingPipeline: taaPipelineCameraConfigurations.get(camera),
-					customColorPostProcess: customColorPostProcessCameraConfigurations.get(camera),
-					iblShadowsRenderPipeline: iblShadowsRenderingPipelineCameraConfigurations.get(camera),
-				})),
-				metadata: scene.metadata,
-				editorCamera: {
-					...editor.layout.preview.camera.serialize(),
-					uniqueId: undefined,
-				},
-				animations: scene.animations.map((animation) => animation.serialize()),
-				clusteredLight: {
-					maxRange: editor.layout.preview.clusteredLightContainer.maxRange,
-					depthSlices: editor.layout.preview.clusteredLightContainer.depthSlices,
-					verticalTiles: editor.layout.preview.clusteredLightContainer.verticalTiles,
-					horizontalTiles: editor.layout.preview.clusteredLightContainer.horizontalTiles,
-					lights: editor.layout.preview.clusteredLightContainer.lights.map((light) => light.id),
-				},
+		const rendering = scene.cameras.filter(belongsToScene).map((camera) => ({
+			cameraId: camera.id,
+			ssao2RenderingPipeline: ssaoRenderingPipelineCameraConfigurations.get(camera),
+			vlsPostProcess: vlsPostProcessCameraConfigurations.get(camera),
+			ssrRenderingPipeline: ssrRenderingPipelineCameraConfigurations.get(camera),
+			motionBlurPostProcess: motionBlurPostProcessCameraConfigurations.get(camera),
+			defaultRenderingPipeline: defaultPipelineCameraConfigurations.get(camera),
+			taaRenderingPipeline: taaPipelineCameraConfigurations.get(camera),
+			customColorPostProcess: customColorPostProcessCameraConfigurations.get(camera),
+			iblShadowsRenderPipeline: iblShadowsRenderingPipelineCameraConfigurations.get(camera),
+		}));
+		const liveGlobalConfiguration = {
+			clearColor: scene.clearColor.asArray(),
+			ambientColor: scene.ambientColor.asArray(),
+			environment: {
+				iblIntensity: scene.iblIntensity,
+				environmentIntensity: scene.environmentIntensity,
+				environmentTexture: scene.environmentTexture
+					? {
+							...scene.environmentTexture.serialize(),
+							url: scene.environmentTexture.name,
+						}
+					: undefined,
 			},
+			fog: {
+				fogEnabled: scene.fogEnabled,
+				fogMode: scene.fogMode,
+				fogStart: scene.fogStart,
+				fogEnd: scene.fogEnd,
+				fogDensity: scene.fogDensity,
+				fogColor: scene.fogColor.asArray(),
+			},
+			physics: {
+				gravity: scene.getPhysicsEngine()?.gravity?.asArray(),
+			},
+			metadata: scene.metadata,
+			editorCamera: {
+				...editor.layout.preview.camera.serialize(),
+				uniqueId: undefined,
+			},
+			clusteredLight: {
+				maxRange: editor.layout.preview.clusteredLightContainer.maxRange,
+				depthSlices: editor.layout.preview.clusteredLightContainer.depthSlices,
+				verticalTiles: editor.layout.preview.clusteredLightContainer.verticalTiles,
+				horizontalTiles: editor.layout.preview.clusteredLightContainer.horizontalTiles,
+			},
+		};
+		const configuration = mergeSceneSaveConfiguration(
+			retainedConfiguration,
+			liveGlobalConfiguration,
 			{
-				spaces: 4,
-			}
+				rendering,
+				animations: scene.animations.filter(belongsToScene).map((animation) => animation.serialize()),
+				clusteredLightIds: editor.layout.preview.clusteredLightContainer.lights.filter(belongsToScene).map((light) => light.id),
+			},
+			isLightingScene
 		);
+
+		await writeJSON(configPath, configuration, { spaces: 4 });
+		editor.sceneWorkspace.setLoadedSceneConfiguration(ownerScenePath, configuration);
 	} catch (e) {
 		editor.layout.console.error(`Failed to write configuration.`);
 	} finally {
@@ -811,6 +846,10 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	if (await pathExists(attributesPath)) {
 		savedFiles.push(attributesPath);
 	}
+	const previewPath = join(scenePath, "preview.png");
+	if (!isActiveScene && (await pathExists(previewPath))) {
+		savedFiles.push(previewPath);
+	}
 
 	// Merge all decals
 	dialog.setName("Merging decals");
@@ -818,6 +857,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 		scenePath,
 		savedFiles,
 		relativeScenePath,
+		belongsToScene,
 	});
 
 	// Remove old files
@@ -836,14 +876,18 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	);
 
 	// Update screenshot
-	getBufferSceneScreenshot(scene).then((screenshotBuffer) => {
-		writeFile(join(scenePath, "preview.png"), screenshotBuffer);
-	});
+	if (isActiveScene) {
+		getBufferSceneScreenshot(scene).then((screenshotBuffer) => {
+			writeFile(previewPath, screenshotBuffer);
+		});
+	}
 
 	// Update material files
-	const materialFiles = await normalizedGlob(join(projectPath, "/**/*.material"), {
-		nodir: true,
-	});
+	const materialFiles = isActiveScene
+		? await normalizedGlob(join(projectPath, "/**/*.material"), {
+				nodir: true,
+			})
+		: [];
 
 	await Promise.all(
 		materialFiles.map(async (file) => {
@@ -867,8 +911,14 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	);
 
 	// Update assets cache in all scenes and assets files.
-	dialog.setName("Updating assets links");
-	await applyAssetsCache();
+	if (isActiveScene) {
+		dialog.setName("Updating assets links");
+		await applyAssetsCache();
+	}
+
+	if (editor.sceneWorkspace.getSettings().loadedScenes.includes(ownerScenePath) && unownedObjects.size) {
+		editor.sceneWorkspace.claimObjects(ownerScenePath, [...unownedObjects]);
+	}
 
 	dialog.dispose();
 }

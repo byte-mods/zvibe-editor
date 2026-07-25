@@ -9,6 +9,7 @@ import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { getInspectorPropertyValue } from "../../../../tools/property";
 
 import { IEditorInspectorFieldProps } from "./field";
+import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorSliderFieldProps extends IEditorInspectorFieldProps {
 	min: number;
@@ -18,6 +19,7 @@ export interface IEditorInspectorSliderFieldProps extends IEditorInspectorFieldP
 }
 
 export function EditorInspectorSliderField(props: IEditorInspectorSliderFieldProps) {
+	const prefab = usePrefabFieldOverride(props);
 	const [value, setValue] = useState(0);
 	const [oldValue, setOldValue] = useState(0);
 
@@ -25,13 +27,13 @@ export function EditorInspectorSliderField(props: IEditorInspectorSliderFieldPro
 		const v = getInspectorPropertyValue(props.object, props.property) ?? 0;
 		setValue(v);
 		setOldValue(v);
-	}, [props.object, props.property]);
+	}, [props.object, props.property, prefab.refreshVersion]);
 
 	return (
-		<div className="flex gap-2 px-2">
+		<div className={`flex gap-2 px-2 ${prefab.entry ? "border-l-2 border-blue-500 bg-blue-500/5" : ""}`}>
 			{props.label && (
 				<div className="flex items-center gap-2 text-ellipsis overflow-hidden whitespace-nowrap">
-					<div>{props.label}</div>
+					<div className={prefab.entry ? "font-semibold text-blue-300" : ""}>{props.label}</div>
 
 					{props.tooltip && (
 						<TooltipProvider delayDuration={0}>
@@ -45,6 +47,7 @@ export function EditorInspectorSliderField(props: IEditorInspectorSliderFieldPro
 					)}
 				</div>
 			)}
+			<PrefabFieldOverrideActions {...prefab} />
 
 			<Slider
 				min={props.min}
@@ -57,12 +60,14 @@ export function EditorInspectorSliderField(props: IEditorInspectorSliderFieldPro
 						props.object[props.property] = props.defaultValue;
 						setValue(props.defaultValue);
 						setOldValue(props.defaultValue);
+						prefab.notifyChanged();
 					}
 				}}
 				onValueChange={(result) => {
 					const value = result[0];
 					props.object[props.property] = value;
 					setValue(value);
+					prefab.notifyChanged();
 				}}
 				onValueCommit={(result) => {
 					const value = result[0];
