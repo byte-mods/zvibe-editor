@@ -1,185 +1,205 @@
-import { Scene, Tools, VideoTexture } from "babylonjs";
+import { Scene, Tools } from "babylonjs";
+import { dirname, join } from "path/posix";
+import { pathToFileURL } from "url";
+import {
+	configureVideoPlayer,
+	disposeVideoPlayer,
+	IVideoPlayerConfiguration,
+	normalizeVideoPlayerConfiguration,
+	pauseConfiguredVideoPlayer,
+	playConfiguredVideoPlayer,
+	seekConfiguredVideoPlayer,
+} from "babylonjs-editor-tools";
 
-import { getProjectAssetsRootUrl } from "../../project/configuration";
+import { getProjectAssetsRootUrl, projectConfiguration } from "../../project/configuration";
 import { IMCPActionOptions } from "../action";
+import { getVideoImporterArtifactStatus } from "../assets/video-importer";
 
-type IVideoPlayer = {
-	id: string;
-	name: string;
-	path: string;
-	materialId: string;
-	textureSlot: "diffuseTexture" | "albedoTexture" | "emissiveTexture" | "opacityTexture";
-	autoPlay: boolean;
-	loop: boolean;
-	muted: boolean;
-	volume: number;
-	startTime: number;
-};
-
-const videoExtensions = new Set(["mp4", "webm", "ogv", "mov"]);
-const textureSlots = new Set<IVideoPlayer["textureSlot"]>(["diffuseTexture", "albedoTexture", "emissiveTexture", "opacityTexture"]);
-const previewTextures = new WeakMap<Scene, Map<string, VideoTexture>>();
-
-function getPreviewTextures(scene: Scene): Map<string, VideoTexture> {
-	let textures = previewTextures.get(scene);
-	if (!textures) {
-		textures = new Map();
-		previewTextures.set(scene, textures);
-	}
-	return textures;
-}
-
-function disposePreviewTexture(scene: Scene, playerId: string): void {
-	const texture = previewTextures.get(scene)?.get(playerId);
-	if (!texture) {
-		return;
-	}
-	texture.dispose();
-	previewTextures.get(scene)?.delete(playerId);
-}
-
-/** Attaches a VideoTexture to the live editor scene when a project asset root is available. */
-function synchronizePreview(scene: Scene, player: IVideoPlayer): boolean {
-	disposePreviewTexture(scene, player.id);
-	const rootUrl = getProjectAssetsRootUrl();
-	const material: any = scene.getMaterialById(player.materialId);
-	if (!rootUrl || !material) {
-		return false;
-	}
-
-	try {
-		const texture = new VideoTexture(player.name, `${rootUrl}${player.path}`, scene, false, true, undefined, {
-			autoPlay: player.autoPlay,
-			loop: player.loop,
-			muted: player.muted,
-			autoUpdateTexture: true,
-		});
-		texture.video.volume = player.volume;
-		if (player.startTime > 0) {
-			texture.video.addEventListener("loadedmetadata", () => (texture.video.currentTime = player.startTime), { once: true });
-		}
-		material[player.textureSlot] = texture;
-		getPreviewTextures(scene).set(player.id, texture);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-function getVideoPlayers(scene: Scene): IVideoPlayer[] {
+function getVideoPlayers(scene: Scene): IVideoPlayerConfiguration[] {
 	scene.metadata ??= {};
-	return (scene.metadata.babylonEditorVideoPlayers ??= []);
+	const raw = scene.metadata.babylonEditorVideoPlayers;
+	const players = Array.isArray(raw) ? raw.map((value) => normalizeVideoPlayerConfiguration(value)) : [];
+	scene.metadata.babylonEditorVideoPlayers = players;
+	return players;
 }
 
-function findVideoPlayer(scene: Scene, data: { id?: string; name?: string }): IVideoPlayer {
-	const player = getVideoPlayers(scene).find((candidate) => candidate.id === data.id || candidate.name === data.name);
+function findVideoPlayerIn(players: IVideoPlayerConfiguration[], data: { id?: string; name?: string }): IVideoPlayerConfiguration {
+	const player = players.find((candidate) => candidate.id === data.id || candidate.name === data.name);
 	if (!player) {
 		throw new Error("Video player not found.");
 	}
 	return player;
 }
 
-function validatePlayer(scene: Scene, data: any): void {
-	if (typeof data.path !== "string" || !videoExtensions.has(data.path.split(".").pop()?.toLowerCase() ?? "")) {
-		throw new Error("`path` must reference an .mp4, .webm, .ogv, or .mov video asset.");
+function findVideoPlayer(scene: Scene, data: { id?: string; name?: string }): IVideoPlayerConfiguration {
+	return findVideoPlayerIn(getVideoPlayers(scene), data);
+}
+
+function validateReferences(scene: Scene, player: IVideoPlayerConfiguration): void {
+	if (player.targetMode === "material" && !scene.getMaterialById(player.materialId!)) {
+		throw new Error(`Material "${player.materialId}" was not found.`);
 	}
-	if (!scene.getMaterialById(data.materialId)) {
-		throw new Error(`Material "${data.materialId}" was not found.`);
+	if ((player.targetMode === "cameraNearPlane" || player.targetMode === "cameraFarPlane") && player.cameraId && !scene.getCameraById(player.cameraId)) {
+		throw new Error(`Camera "${player.cameraId}" was not found.`);
 	}
-	if (data.textureSlot !== undefined && !textureSlots.has(data.textureSlot)) {
-		throw new Error("textureSlot must be diffuseTexture, albedoTexture, emissiveTexture, or opacityTexture.");
-	}
-	if (data.volume !== undefined && (!Number.isFinite(data.volume) || data.volume < 0 || data.volume > 1)) {
-		throw new Error("volume must be between 0 and 1.");
-	}
-	if (data.startTime !== undefined && (!Number.isFinite(data.startTime) || data.startTime < 0)) {
-		throw new Error("startTime must be zero or greater.");
+	if ((player.targetMode === "cameraNearPlane" || player.targetMode === "cameraFarPlane") && !player.cameraId && !scene.activeCamera) {
+		throw new Error("Camera-targeted video players require cameraId or an active camera.");
 	}
 }
 
-/** Lists persistent, material-targeted video players. */
-export function listVideoPlayers(scene: Scene): any {
+function runtimeSnapshot(scene: Scene, player: IVideoPlayerConfiguration): Record<string, unknown> {
+	const runtime = (scene as any).videoPlayerRuntimes?.get(player.id);
 	return {
-		players: getVideoPlayers(scene).map((player) => ({
-			...structuredClone(player),
-			previewAttached: Boolean(previewTextures.get(scene)?.has(player.id)),
-		})),
+		...structuredClone(player),
+		autoPlay: player.playOnAwake,
+		previewAttached: Boolean(runtime),
+		runtime: runtime
+			? {
+					status: runtime.status,
+					error: runtime.error,
+					resolvedSource: runtime.resolvedSource,
+					currentTime: runtime.texture.video.currentTime,
+					duration: Number.isFinite(runtime.texture.video.duration) ? runtime.texture.video.duration : null,
+					readyState: runtime.texture.video.readyState,
+					isPlaying: runtime.configuration.updateMode === "audioTime" ? !runtime.texture.video.paused : runtime.manualPlaying,
+					targetAttached:
+						runtime.configuration.targetMode === "material"
+							? true
+							: runtime.configuration.targetMode === "renderTexture"
+								? Boolean((scene as any).videoRenderTextures?.has(player.id))
+								: runtime.configuration.targetMode === "cameraNearPlane" || runtime.configuration.targetMode === "cameraFarPlane"
+									? Boolean(runtime.layer)
+									: Boolean((scene as any).videoPlayers?.has(player.id)),
+				}
+			: null,
 	};
 }
 
-/** Creates a persistent VideoTexture player. The exported runtime attaches it to the selected material slot. */
-export function createVideoPlayer(scene: Scene, data: any, options: IMCPActionOptions): any {
-	validatePlayer(scene, data);
-	if (getVideoPlayers(scene).some((candidate) => candidate.name === data.name)) {
-		throw new Error(`Video player "${data.name}" already exists.`);
+async function synchronizePreview(scene: Scene, player: IVideoPlayerConfiguration): Promise<boolean> {
+	const rootUrl = getProjectAssetsRootUrl();
+	if (player.sourceType === "asset" && !rootUrl) {
+		disposeVideoPlayer(scene as any, player.id);
+		return false;
 	}
-	const material: any = scene.getMaterialById(data.materialId);
-	const textureSlot = data.textureSlot ?? ("albedoTexture" in material ? "albedoTexture" : "diffuseTexture");
-	const player: IVideoPlayer = {
-		id: Tools.RandomId(),
-		name: data.name,
-		path: data.path,
-		materialId: data.materialId,
-		textureSlot,
-		autoPlay: data.autoPlay ?? true,
-		loop: data.loop ?? true,
-		muted: data.muted ?? true,
-		volume: data.volume ?? 1,
-		startTime: data.startTime ?? 0,
-	};
-	getVideoPlayers(scene).push(player);
-	const previewAttached = synchronizePreview(scene, player);
+	try {
+		let resolvedAssetSource: string | undefined;
+		if (player.sourceType === "asset") {
+			const absolutePath = join(dirname(projectConfiguration.path!), player.path);
+			const imported = await getVideoImporterArtifactStatus(absolutePath);
+			resolvedAssetSource = imported.current && imported.exists ? pathToFileURL(imported.artifactPath).toString() : `${rootUrl}${player.path}`;
+		}
+		await configureVideoPlayer(scene as any, rootUrl ?? "", player, resolvedAssetSource);
+		return true;
+	} catch (error) {
+		disposeVideoPlayer(scene as any, player.id);
+		throw error;
+	}
+}
+
+function defaultTextureSlot(scene: Scene, materialId: string | null): IVideoPlayerConfiguration["textureSlot"] {
+	const material: any = materialId ? scene.getMaterialById(materialId) : null;
+	return material && "albedoTexture" in material ? "albedoTexture" : "diffuseTexture";
+}
+
+function configurationFromData(scene: Scene, data: any, existing?: IVideoPlayerConfiguration): IVideoPlayerConfiguration {
+	const materialId = data.materialId !== undefined ? data.materialId : (existing?.materialId ?? null);
+	return normalizeVideoPlayerConfiguration({
+		...(existing ?? {}),
+		...data,
+		version: 2,
+		id: existing?.id ?? data.id ?? Tools.RandomId(),
+		name: data.name ?? existing?.name,
+		sourceType: data.sourceType ?? existing?.sourceType ?? "asset",
+		path: data.path ?? existing?.path,
+		targetMode: data.targetMode ?? existing?.targetMode ?? "material",
+		materialId,
+		textureSlot: data.textureSlot ?? existing?.textureSlot ?? defaultTextureSlot(scene, materialId),
+		cameraId: data.cameraId !== undefined ? data.cameraId : (existing?.cameraId ?? null),
+		playOnAwake: data.playOnAwake ?? data.autoPlay ?? existing?.playOnAwake,
+	});
+}
+
+/** Lists normalized players plus live decode, clock, and target diagnostics. */
+export function listVideoPlayers(scene: Scene): any {
+	return { players: getVideoPlayers(scene).map((player) => runtimeSnapshot(scene, player)) };
+}
+
+/** Creates one version-2 Video Player and attaches its selected target in the live preview. */
+export async function createVideoPlayer(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const player = configurationFromData(scene, data);
+	const players = getVideoPlayers(scene);
+	if (players.some((candidate) => candidate.name === player.name)) {
+		throw new Error(`Video player "${player.name}" already exists.`);
+	}
+	validateReferences(scene, player);
+	players.push(player);
+	try {
+		await synchronizePreview(scene, player);
+	} catch (error) {
+		players.splice(
+			players.findIndex((candidate) => candidate.id === player.id),
+			1
+		);
+		throw error;
+	}
 	options.editor.layout.inspector.setEditedObject(scene);
 	options.editor.layout.inspector.forceUpdate();
-	return { ...structuredClone(player), previewAttached };
+	return runtimeSnapshot(scene, player);
 }
 
-/** Updates persistent video playback properties and synchronizes the live editor preview. */
-export function setVideoPlayer(scene: Scene, data: any, options: IMCPActionOptions): any {
-	const player = findVideoPlayer(scene, data);
-	const next = { ...player, ...data, id: player.id, name: data.name ?? player.name };
-	validatePlayer(scene, next);
-	if (data.name !== undefined && getVideoPlayers(scene).some((candidate) => candidate !== player && candidate.name === data.name)) {
-		throw new Error(`Video player "${data.name}" already exists.`);
+/** Updates all authored source, target, timing, layout, audio, and color properties atomically. */
+export async function setVideoPlayer(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const players = getVideoPlayers(scene);
+	const player = findVideoPlayerIn(players, { id: data.id, name: data.currentName ?? data.name });
+	const next = configurationFromData(scene, data, player);
+	if (players.some((candidate) => candidate.id !== player.id && candidate.name === next.name)) {
+		throw new Error(`Video player "${next.name}" already exists.`);
 	}
+	validateReferences(scene, next);
+	const previous = structuredClone(player);
 	Object.assign(player, next);
-	const previewAttached = synchronizePreview(scene, player);
+	try {
+		await synchronizePreview(scene, player);
+	} catch (error) {
+		Object.assign(player, previous);
+		await synchronizePreview(scene, player).catch(() => undefined);
+		throw error;
+	}
 	options.editor.layout.inspector.forceUpdate();
-	return { ...structuredClone(player), previewAttached };
+	return runtimeSnapshot(scene, player);
 }
 
-/** Plays, pauses, or seeks the live editor VideoTexture for a persisted player. */
+/** Plays, pauses, or seeks the exact runtime associated with a persisted player. */
 export async function controlVideoPlayer(scene: Scene, data: any): Promise<any> {
 	const player = findVideoPlayer(scene, data);
-	const texture = previewTextures.get(scene)?.get(player.id) ?? (synchronizePreview(scene, player) ? previewTextures.get(scene)?.get(player.id) : undefined);
-	if (!texture) {
+	let runtime = (scene as any).videoPlayerRuntimes?.get(player.id);
+	if (!runtime && (await synchronizePreview(scene, player))) {
+		runtime = (scene as any).videoPlayerRuntimes?.get(player.id);
+	}
+	if (!runtime) {
 		throw new Error("Video preview is unavailable. Open a project with the video asset to control playback.");
 	}
 	if (data.action === "play") {
-		await texture.video.play();
+		await playConfiguredVideoPlayer(runtime);
 	} else if (data.action === "pause") {
-		texture.video.pause();
+		pauseConfiguredVideoPlayer(runtime);
 	} else if (data.action === "seek") {
-		if (!Number.isFinite(data.time) || data.time < 0) {
-			throw new Error("`time` must be a non-negative number when seeking.");
-		}
-		texture.video.currentTime = data.time;
+		seekConfiguredVideoPlayer(runtime, data.time);
 	} else {
 		throw new Error("action must be play, pause, or seek.");
 	}
-	return {
-		...structuredClone(player),
-		previewAttached: true,
-		isPlaying: !texture.video.paused,
-		currentTime: texture.video.currentTime,
-	};
+	return runtimeSnapshot(scene, player);
 }
 
-/** Deletes a video player configuration. It does not delete the source video asset or material. */
+/** Deletes a player and restores/disposes only the resources owned by that player. */
 export function deleteVideoPlayer(scene: Scene, data: any, options: IMCPActionOptions): any {
-	const player = findVideoPlayer(scene, data);
-	disposePreviewTexture(scene, player.id);
-	getVideoPlayers(scene).splice(getVideoPlayers(scene).indexOf(player), 1);
+	const players = getVideoPlayers(scene);
+	const player = findVideoPlayerIn(players, data);
+	disposeVideoPlayer(scene as any, player.id);
+	players.splice(
+		players.findIndex((candidate) => candidate.id === player.id),
+		1
+	);
 	options.editor.layout.inspector.forceUpdate();
 	return { deleted: true, id: player.id };
 }

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { NullEngine, Scene } from "babylonjs";
 import { TerrainMaterial } from "babylonjs-materials";
 
-vi.mock("babylonjs-editor-tools", () => ({}));
+vi.mock("babylonjs-editor-tools", () => ({ getDeferredLightingRuntimes: vi.fn(() => []) }));
 
 import { setMaterialProperties } from "../../src/mcp/materials/materials";
 import { addTerrainMaterial } from "../../src/project/add/material";

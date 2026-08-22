@@ -2,7 +2,11 @@ import { readJSON } from "fs-extra";
 
 import { AdvancedDynamicTexture } from "babylonjs-gui";
 
+import { applyGUIAuthoringRuntime, createDefaultGUIAuthoringState, createGUIPanelRendererTexture, normalizeGUIAuthoringState } from "babylonjs-editor-tools";
+
 import { showAlert } from "../../../../ui/dialog";
+import { installEditorGUIFontFamily, loadEditorGUIFontAsset } from "../../../../tools/gui/authoring";
+import { configureEditorLocalization } from "../../../../mcp/localization/localization";
 
 import { Editor } from "../../../main";
 
@@ -23,10 +27,18 @@ export async function applyImportedGuiFile(editor: Editor, absolutePath: string,
 		return;
 	}
 
-	if (data.guiType === "fullscreen") {
-		const gui = AdvancedDynamicTexture.CreateFullscreenUI(data.name, true, editor.layout.preview.scene);
+	if (data.guiType === "fullscreen" || data.guiType === "worldSpace") {
+		await configureEditorLocalization(editor.layout.preview.scene);
+		const authoring = normalizeGUIAuthoringState(data.zvibeGUIAuthoring ?? createDefaultGUIAuthoringState());
+		const gui = createGUIPanelRendererTexture<AdvancedDynamicTexture>(editor.layout.preview.scene, data.name, authoring.toolkit.panelRenderer);
 		gui.parseSerializedObject(data.content, false);
 		gui.uniqueId = data.uniqueId;
+		await applyGUIAuthoringRuntime(gui, authoring, {
+			rootUrl: "",
+			scene: editor.layout.preview.scene,
+			loadFontFamily: installEditorGUIFontFamily,
+			loadFontAsset: loadEditorGUIFontAsset,
+		});
 
 		return gui;
 	}

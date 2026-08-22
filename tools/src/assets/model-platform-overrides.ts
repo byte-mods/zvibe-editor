@@ -173,7 +173,7 @@ export function serializeModelImporterPlatformOverrides(value: unknown): string 
 
 /** Maps build-profile and CLI target names to the two currently executable override families. */
 export function normalizeModelImporterPlatform(value: unknown): ModelImporterPlatform {
-	if (value === "web") {
+	if (value === "web" || value === "android" || value === "ios" || value === "webxr") {
 		return "web";
 	}
 	if (value === "desktop" || value === "electron") {

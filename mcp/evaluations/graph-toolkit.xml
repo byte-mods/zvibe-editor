@@ -1,0 +1,42 @@
+<evaluation>
+	<qa_pair>
+		<question>Use the editor and Graph Toolkit capability reports to distinguish the general visual-scripting feature flag from its collection authoring limit. What is the maximum number of elements that one editable list or array may contain? Answer with one integer.</question>
+		<answer>50</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Confirm that the editor advertises Graph Toolkit expressions, then inspect the detailed grammar limits. What is the maximum authored expression length in characters? Answer with one integer.</question>
+		<answer>2048</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Cross-check the editor's expression support with the Graph Toolkit capability contract. How many named value inputs can one Expression node expose? Answer with one integer.</question>
+		<answer>16</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Verify the editor's multiline-port feature and inspect the detailed presentation contract. Which non-default port orientation is explicitly supported? Answer Horizontal or Vertical.</question>
+		<answer>Vertical</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Compare the broad visual-scripting authoring claim with the Graph Toolkit mutation guarantees. Must a Graph Toolkit authoring mutation preserve and supply an exact graph revision? Answer True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect both the editor feature flags and Graph Toolkit value-type catalog. Which explicit value type allows a port or variable to defer type selection? Answer with the exact lowercase type id.</question>
+		<answer>untyped</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>After confirming editable collections are enabled, inspect their complete kind catalog. How many distinct collection kinds are supported? Answer with one integer.</question>
+		<answer>2</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Use both capability reports to verify multiline Graph Toolkit authoring. Are multiline value ports and multiline node options both supported? Answer True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the detailed Graph Toolkit mutation contract after confirming editable collections are enabled. How many distinct direct value mutation conveniences are advertised when counting Constant values and unconnected port fallback values? Answer with one integer.</question>
+		<answer>2</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Confirm expression support in the editor, then inspect the exact operator catalog. What symbolic operator represents the supported conditional expression? Answer with the exact symbol.</question>
+		<answer>?:</answer>
+	</qa_pair>
+</evaluation>

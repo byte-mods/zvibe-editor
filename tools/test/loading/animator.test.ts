@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { Animation, AnimationGroup, NullEngine, Scene, TransformNode, Vector3 } from "@babylonjs/core";
 
 import { AnimatorLayerAnimationGroups } from "../../src/loading/animator-layer-groups";
+import { resolveAnimatorStatePlayback } from "../../src/loading/animator-graph";
 import { ANIMATOR_ANY_STATE, ANIMATOR_EXIT_STATE, configureAnimators } from "../../src/loading/animator";
 import { _registerScriptInstance } from "../../src/loading/script/apply";
 
@@ -52,6 +53,130 @@ describe("loading/animator", () => {
 		expect(scene.animators?.get("locomotion")?.setParameter("speed", 0.6)).toBe(false);
 		expect(scene.getAnimationGroupByName("Idle")?.weight).toBeCloseTo(0.4);
 		expect(scene.getAnimationGroupByName("Run")?.weight).toBeCloseTo(0.6);
+	});
+
+	test("executes dynamic state speed, mirror, cycle-offset, and normalized-time parameters", () => {
+		scene.metadata = {
+			babylonEditorAnimatorControllers: [
+				{
+					id: "dynamic-state-playback",
+					name: "Dynamic State Playback",
+					parameters: { rate: 0.5, mirrored: false, phase: 0.2, scrub: 0.75 },
+					parameterTypes: { rate: "float", mirrored: "bool", phase: "float", scrub: "float" },
+					states: [
+						{
+							name: "Idle",
+							animationGroup: "Idle",
+							speed: -2,
+							speedParameter: "rate",
+							mirrorParameter: "mirrored",
+							cycleOffsetParameter: "phase",
+							timeParameter: "scrub",
+						},
+					],
+					transitions: [],
+					activeState: "Idle",
+				},
+			],
+		};
+
+		configureAnimators(scene);
+		const animator = scene.animators?.get("dynamic-state-playback")!;
+		expect(animator.getDebugSnapshot().base).toMatchObject({
+			effectiveSpeed: -1,
+			cycleOffset: 0.2,
+			mirror: false,
+			timeDriven: true,
+			time: 0.75,
+			playbackBindings: { speed: "rate", mirror: "mirrored", cycleOffset: "phase", time: "scrub" },
+		});
+		expect(animator.setParameter("rate", 0)).toBe(false);
+		expect(animator.setParameter("mirrored", true)).toBe(false);
+		expect(animator.setParameter("phase", -0.25)).toBe(false);
+		expect(animator.setParameter("scrub", 1.25)).toBe(false);
+		expect(animator.getDebugSnapshot().base).toMatchObject({ effectiveSpeed: 0, cycleOffset: -0.25, mirror: true, time: 1.25, loopProgress: 0.25 });
+	});
+
+	test("executes Write Defaults property restoration in exported runtime", () => {
+		const target = new TransformNode("WriteDefaultsTarget", scene);
+		const moveAnimation = new Animation("Move X", "position.x", 30, Animation.ANIMATIONTYPE_FLOAT);
+		moveAnimation.setKeys([
+			{ frame: 0, value: 2 },
+			{ frame: 30, value: 4 },
+		]);
+		const scaleAnimation = new Animation("Scale X", "scaling.x", 30, Animation.ANIMATIONTYPE_FLOAT);
+		scaleAnimation.setKeys([
+			{ frame: 0, value: 5 },
+			{ frame: 30, value: 6 },
+		]);
+		scene.getAnimationGroupByName("Idle")!.addTargetedAnimation(moveAnimation, target);
+		scene.getAnimationGroupByName("Run")!.addTargetedAnimation(scaleAnimation, target);
+		scene.metadata = {
+			babylonEditorAnimatorControllers: [
+				{
+					id: "write-defaults",
+					name: "Write Defaults",
+					parameters: {},
+					states: [
+						{ name: "Scale", animationGroup: "Run" },
+						{ name: "Move", animationGroup: "Idle", writeDefaultValues: true },
+					],
+					transitions: [],
+					activeState: "Scale",
+				},
+			],
+		};
+
+		configureAnimators(scene);
+		expect(target.scaling.x).toBe(5);
+		const animator = scene.animators!.get("write-defaults")!;
+		animator.play("Move");
+		expect(target.scaling.x).toBe(1);
+		expect(target.position.x).toBe(2);
+		expect(animator.getDebugSnapshot().writeDefaults).toMatchObject({
+			enabled: true,
+			invocations: 1,
+			resetCount: 1,
+			lastResetProperties: ["WriteDefaultsTarget.scaling.x"],
+		});
+		target.scaling.x = 9;
+		animator.update(1 / 60);
+		expect(target.scaling.x).toBe(1);
+		expect(animator.getDebugSnapshot().writeDefaults).toMatchObject({ invocations: 2, resetCount: 2 });
+	});
+
+	test("migrates imported playback bindings while allowing an explicit null override", () => {
+		const imported = {
+			name: "Imported",
+			animationGroup: "Idle",
+			speed: 2,
+			unitySource: {
+				fileId: "1102",
+				serializedVersion: 6,
+				footIKField: "m_IKOnFeet" as const,
+				speedParameter: "rate",
+				mirrorParameter: "mirror",
+				cycleOffsetParameter: "phase",
+				timeParameter: "time",
+			},
+		};
+		expect(resolveAnimatorStatePlayback(imported, { rate: 0.5, mirror: true, phase: 0.2, time: 0.75 })).toMatchObject({
+			effectiveSpeed: 1,
+			mirror: true,
+			cycleOffset: 0.2,
+			time: 0.75,
+		});
+		expect(
+			resolveAnimatorStatePlayback(
+				{ ...imported, speedParameter: null, mirrorParameter: null, cycleOffsetParameter: null, timeParameter: null },
+				{ rate: 0.5, mirror: true, phase: 0.2, time: 0.75 }
+			)
+		).toMatchObject({ effectiveSpeed: 2, mirror: false, cycleOffset: 0, time: null, timeDriven: false });
+		expect(resolveAnimatorStatePlayback({ name: "Scrubbed", animationGroup: "Idle", cycleOffset: 0.4, timeParameter: "time" }, { time: 0.2 })).toMatchObject({
+			cycleOffset: 0,
+			time: 0.2,
+			timeDriven: true,
+		});
 	});
 
 	test("restores two-parameter 2D blend tree weights in exported runtime", () => {
@@ -272,6 +397,104 @@ describe("loading/animator", () => {
 		expect(mirrored.metadata).toMatchObject({ babylonEditorInternalAnimatorMotion: true, motionKey: "0", mirrored: true });
 		expect(scene.animationGroups).not.toContain(mirrored);
 		groups.dispose();
+	});
+
+	test("executes static Unity-style state speed, cycle offset, mirror, loop, and tag settings", () => {
+		const leftHand = new TransformNode("StaticLeftHand", scene);
+		const rightHand = new TransformNode("StaticRightHand", scene);
+		const source = scene.getAnimationGroupByName("Run")!;
+		const animation = new Animation("Static Hand Position", "position", 30, Animation.ANIMATIONTYPE_VECTOR3, Animation.ANIMATIONLOOPMODE_CYCLE);
+		animation.setKeys([
+			{ frame: 0, value: new Vector3(1, 0, 0) },
+			{ frame: 30, value: new Vector3(3, 0, 0) },
+		]);
+		source.addTargetedAnimation(animation, leftHand);
+		scene.metadata = {
+			babylonEditorHumanoidAvatars: [
+				{ id: "static-avatar", name: "Static Avatar", animationType: "humanoid", mapping: { leftHand: leftHand.name, rightHand: rightHand.name } },
+			],
+			babylonEditorAnimatorControllers: [
+				{
+					id: "static-state-playback",
+					name: "Static State Playback",
+					parameters: {},
+					states: [
+						{
+							name: "Reverse Mirrored",
+							animationGroup: "Run",
+							speed: -1.5,
+							cycleOffset: 0.25,
+							mirror: true,
+							loop: false,
+							tag: "Locomotion",
+							footIK: true,
+							writeDefaultValues: false,
+						},
+					],
+					transitions: [],
+					entryState: "Reverse Mirrored",
+				},
+			],
+		};
+
+		configureAnimators(scene);
+		const animator = scene.animators?.get("static-state-playback")!;
+		const snapshot = animator.getDebugSnapshot().base;
+		expect(snapshot).toMatchObject({
+			activeState: "Reverse Mirrored",
+			speed: -1.5,
+			cycleOffset: 0.25,
+			mirror: true,
+			loop: false,
+			tag: "Locomotion",
+			footIK: true,
+			writeDefaultValues: false,
+			clips: [{ name: "Run", speedRatio: -1.5, cycleOffset: 0.25, mirrored: true, internalLayerClone: true, playbackFromFrame: 30, currentFrame: 7.5 }],
+		});
+		expect(snapshot.clips[0].targetedAnimationCount).toBeUndefined();
+		animator.update(0.1);
+		expect(animator.getDebugSnapshot().base.clips[0].currentFrame).toBeCloseTo(3);
+		expect(animator.getDebugSnapshot().footIK.layers[0]).toMatchObject({ enabled: true, invocations: 1, failedFeet: 2, avatarId: null });
+		expect(animator.getDebugSnapshot().footIK.layers[0].warnings[0]).toContain("Humanoid Avatar");
+		expect(source.targetedAnimations[0].target).toBe(leftHand);
+		expect(scene.animationGroups.map((group) => group.name)).toEqual(["Idle", "Run", "Sprint"]);
+	});
+
+	test("composes state-level cycle offset and mirror with Blend Tree child modifiers", () => {
+		scene.metadata = {
+			babylonEditorAnimatorControllers: [
+				{
+					id: "composed-state-playback",
+					name: "Composed State Playback",
+					parameters: { blend: 0.25 },
+					states: [
+						{
+							name: "Blend",
+							cycleOffset: 0.25,
+							mirror: true,
+							blendTree: {
+								parameter: "blend",
+								children: [
+									{ animationGroup: "Run", threshold: 0, cycleOffset: 0.1 },
+									{ animationGroup: "Sprint", threshold: 1, cycleOffset: 0.2, mirror: true },
+								],
+							},
+						},
+					],
+					transitions: [],
+					entryState: "Blend",
+				},
+			],
+		};
+
+		configureAnimators(scene);
+		const clips = scene.animators?.get("composed-state-playback")?.getDebugSnapshot().base.clips;
+		expect(clips).toMatchObject([
+			{ name: "Run", weight: 0.75, mirrored: true, internalLayerClone: true },
+			{ name: "Sprint", weight: 0.25, mirrored: false, internalLayerClone: true },
+		]);
+		expect(clips[0].cycleOffset).toBeCloseTo(0.35);
+		expect(clips[1].cycleOffset).toBeCloseTo(0.45);
 	});
 
 	test("restores Freeform Directional 2D blend weights using child direction and speed", () => {
@@ -1041,6 +1264,8 @@ describe("loading/animator", () => {
 				onAnimatorStateEnter: (_object, info) => events.push(`${info.phase}:${info.stateName}:${info.layerName ?? "base"}`),
 				onAnimatorStateUpdate: (_object, info) => events.push(`${info.phase}:${info.stateName}:${info.layerName ?? "base"}`),
 				onAnimatorStateExit: (_object, info) => events.push(`${info.phase}:${info.stateName}:${info.layerName ?? "base"}`),
+				onAnimatorStateMachineEnter: (_object, info) => events.push(`${info.phase}:${info.machinePath.join("/") || "$root"}:${info.layerName ?? "base"}`),
+				onAnimatorStateMachineExit: (_object, info) => events.push(`${info.phase}:${info.machinePath.join("/") || "$root"}:${info.layerName ?? "base"}`),
 			},
 			"src/character-state.ts",
 			{}
@@ -1061,6 +1286,7 @@ describe("loading/animator", () => {
 					id: "state-behaviour-runtime",
 					name: "State Behaviour Runtime",
 					targetNodeId: target.id,
+					behaviours: [{ id: "root-machine-behaviour", scriptKey: "src/character-state.ts" }],
 					parameters: { moving: false, done: false },
 					states: [
 						{
@@ -1114,6 +1340,7 @@ describe("loading/animator", () => {
 		animator.update(0);
 
 		expect(events).toEqual([
+			"machineEnter:$root:base",
 			"enter:Idle:base",
 			"update:Idle:base",
 			"exit:Idle:base",
@@ -1122,9 +1349,18 @@ describe("loading/animator", () => {
 			"update:Run:base",
 			"override-update:UpperRun:Upper",
 			"exit:Run:base",
+			"machineExit:$root:base",
 			"override-exit:UpperRun:Upper",
 		]);
-		expect(animator.getDebugSnapshot().stateBehaviours).toMatchObject({ enterCalls: 3, updateCalls: 3, exitCalls: 3, errorCount: 0, missingScripts: 0 });
+		expect(animator.getDebugSnapshot().stateBehaviours).toMatchObject({
+			enterCalls: 3,
+			updateCalls: 3,
+			exitCalls: 3,
+			machineEnterCalls: 1,
+			machineExitCalls: 1,
+			errorCount: 0,
+			missingScripts: 0,
+		});
 	});
 
 	test("executes Base Layer and additional-layer IK Pass callbacks before existing rig observers", () => {

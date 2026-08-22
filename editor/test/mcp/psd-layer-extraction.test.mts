@@ -103,6 +103,18 @@ function f32(value: number): Buffer {
 	return result;
 }
 
+function f32le(value: number): Buffer {
+	const result = Buffer.alloc(4);
+	result.writeFloatLE(value);
+	return result;
+}
+
+function u32le(value: number): Buffer {
+	const result = Buffer.alloc(4);
+	result.writeUInt32LE(value >>> 0);
+	return result;
+}
+
 function fixedPoint(value: number): Buffer {
 	return i32(Math.round(value * 0x1000000));
 }
@@ -245,6 +257,17 @@ function descriptorEnum(type: string, value: string): Buffer {
 
 function descriptorUnit(units: string, value: number): Buffer {
 	return Buffer.concat([Buffer.from(units), f64(value)]);
+}
+
+function descriptorPath(signature: string, path: string, declaredLengthDelta = 0): Buffer {
+	const encoded = Buffer.from(path, "utf16le");
+	const length = 12 + encoded.byteLength;
+	const payload = Buffer.alloc(length);
+	payload.write(signature.padEnd(4, " ").slice(0, 4), 0, 4, "ascii");
+	payload.writeInt32LE(length + declaredLengthDelta, 4);
+	payload.writeInt32LE(path.length, 8);
+	encoded.copy(payload, 12);
+	return Buffer.concat([i32(length), payload]);
 }
 
 function solidColorFillDescriptor(red: number, green: number, blue: number): Buffer {
@@ -475,6 +498,14 @@ function pathListDescriptor(): Buffer {
 
 function descriptorDoubleList(...values: number[]): Buffer {
 	return Buffer.concat([i32(values.length), ...values.map((value) => Buffer.concat([Buffer.from("doub"), f64(value)]))]);
+}
+
+function descriptorBooleanList(...values: boolean[]): Buffer {
+	return Buffer.concat([i32(values.length), ...values.map((value) => Buffer.concat([Buffer.from("bool"), Buffer.from([value ? 1 : 0])]))]);
+}
+
+function descriptorBytes(bytes: Buffer): Buffer {
+	return Buffer.concat([i32(bytes.byteLength), bytes]);
 }
 
 function engineText(value: string): Buffer {
@@ -719,6 +750,797 @@ function tyshText(
 	]);
 }
 
+function puppetWarpFilterDescriptor(options: {
+	originalVertices?: Array<{ x: number; y: number }>;
+	deformedVertices?: Array<{ x: number; y: number }>;
+	triangleIndices?: number[];
+	pinVertexIndices?: number[];
+	omitBoundaryPath?: boolean;
+}): Buffer {
+	const originalVertices = options.originalVertices ?? [
+		{ x: 0, y: 0 },
+		{ x: 8, y: 0 },
+		{ x: 8, y: 6 },
+		{ x: 0, y: 6 },
+	];
+	const deformedVertices = options.deformedVertices ?? [originalVertices[0], originalVertices[1], { x: 6, y: 5 }, originalVertices[3]];
+	const triangleIndices = options.triangleIndices ?? [0, 1, 2, 0, 2, 3];
+	const pinVertexIndices = options.pinVertexIndices ?? [0, 2];
+	const point = (x: number, y: number): Buffer =>
+		descriptorObject("Pnt ", [
+			{ key: "Hrzn", type: "UntF", value: descriptorUnit("#Pxl", x) },
+			{ key: "Vrtc", type: "UntF", value: descriptorUnit("#Pxl", y) },
+		]);
+	const boundaryPoints = originalVertices.map(({ x, y }) =>
+		descriptorObject("Pthp", [
+			{ key: "Anch", type: "Objc", value: point(x, y) },
+			{ key: "Fwd ", type: "Objc", value: point(x, y) },
+			{ key: "Bwd ", type: "Objc", value: point(x, y) },
+			{ key: "Smoo", type: "bool", value: Buffer.from([0]) },
+		])
+	);
+	const boundaryPath = descriptorObject("pathClass", [
+		{
+			key: "pathComponents",
+			type: "VlLs",
+			value: descriptorList(
+				descriptorObject("PaCm", [
+					{ key: "shapeOperation", type: "enum", value: descriptorEnum("shapeOperation", "xor") },
+					{
+						key: "SbpL",
+						type: "VlLs",
+						value: descriptorList(
+							descriptorObject("Sbpl", [
+								{ key: "Clsp", type: "bool", value: Buffer.from([1]) },
+								{ key: "Pts ", type: "VlLs", value: descriptorList(...boundaryPoints) },
+							])
+						),
+					},
+				])
+			),
+		},
+	]);
+	const shapeEntries: Array<{ key: string; type: string; value: Buffer }> = [
+		{ key: "rigidType", type: "bool", value: Buffer.from([0]) },
+		{ key: "VrsM", type: "long", value: i32(1) },
+		{ key: "VrsN", type: "long", value: i32(0) },
+		{ key: "originalVertexArray", type: "tdta", value: descriptorBytes(Buffer.concat(originalVertices.flatMap(({ x, y }) => [f32le(x), f32le(y)]))) },
+		{ key: "deformedVertexArray", type: "tdta", value: descriptorBytes(Buffer.concat(deformedVertices.flatMap(({ x, y }) => [f32le(x), f32le(y)]))) },
+		{ key: "indexArray", type: "tdta", value: descriptorBytes(Buffer.concat(triangleIndices.map(u32le))) },
+		{ key: "pinOffsets", type: "VlLs", value: descriptorDoubleList(0, 0, -2, -1) },
+		{ key: "posFinalPins", type: "VlLs", value: descriptorDoubleList(0, 0, 6, 5) },
+		{ key: "pinVertexIndices", type: "VlLs", value: descriptorDoubleList(...pinVertexIndices) },
+		{ key: "PinP", type: "VlLs", value: descriptorDoubleList(0, 0, 8, 6) },
+		{ key: "PnRt", type: "VlLs", value: descriptorDoubleList(0, 15) },
+		{ key: "PnOv", type: "VlLs", value: descriptorBooleanList(false, true) },
+		{ key: "PnDp", type: "VlLs", value: descriptorDoubleList(0, 1) },
+		{ key: "meshQuality", type: "doub", value: f64(2) },
+		{ key: "meshExpansion", type: "doub", value: f64(0) },
+		{ key: "meshRigidity", type: "doub", value: f64(1) },
+		{ key: "imageResolution", type: "doub", value: f64(72) },
+		...(options.omitBoundaryPath ? [] : [{ key: "meshBoundaryPath", type: "Objc", value: boundaryPath }]),
+		{ key: "selectedPin", type: "VlLs", value: descriptorDoubleList(1) },
+	];
+	return descriptorObject("rigidTransform", [
+		{ key: "rigidType", type: "bool", value: Buffer.from([0]) },
+		{ key: "puppetShapeList", type: "VlLs", value: descriptorList(descriptorObject("puppetShape", shapeEntries)) },
+		...originalVertices.slice(0, 4).map((pointValue, index) => ({ key: `PuX${index}`, type: "doub", value: f64(pointValue.x) })),
+		...originalVertices.slice(0, 4).map((pointValue, index) => ({ key: `PuY${index}`, type: "doub", value: f64(pointValue.y) })),
+	]);
+}
+
+function oilPaintFilterDescriptor(options: {
+	variant?: "modern" | "legacyPlugin";
+	lightingOn?: boolean;
+	stylization?: number;
+	cleanliness?: number;
+	brushScale?: number;
+	bristleDetail?: number;
+	lightDirection?: number;
+	shine?: number;
+	omitControl?: "lightingOn" | "stylization" | "cleanliness" | "brushScale" | "microBrush" | "LghD" | "specularity";
+	lightingAsLong?: boolean;
+	unknownKey?: boolean;
+}): Buffer {
+	const values = {
+		Stylization: options.stylization ?? 6.5,
+		Cleanliness: options.cleanliness ?? 4,
+		Scale: options.brushScale ?? 7,
+		"Bristle Detail": options.bristleDetail ?? 3.5,
+		Angle: options.lightDirection ?? 135,
+		Shine: options.shine ?? 5,
+	};
+	if (options.variant === "legacyPlugin") {
+		const omittedLegacyName =
+			options.omitControl === "stylization"
+				? "Stylization"
+				: options.omitControl === "cleanliness"
+					? "Cleanliness"
+					: options.omitControl === "brushScale"
+						? "Scale"
+						: options.omitControl === "microBrush"
+							? "Bristle Detail"
+							: options.omitControl === "LghD"
+								? "Angle"
+								: options.omitControl === "specularity"
+									? "Shine"
+									: null;
+		const parameters = Object.entries(values).filter(([name]) => name !== omittedLegacyName);
+		return descriptorObject("PbPl", [
+			{ key: "KnNm", type: "TEXT", value: descriptorUnicode("Oil Paint Plugin") },
+			{ key: "GpuY", type: "bool", value: Buffer.from([1]) },
+			{ key: "LIWy", type: "bool", value: Buffer.from([options.lightingOn === false ? 0 : 1]) },
+			{ key: "FPth", type: "TEXT", value: descriptorUnicode("1") },
+			...parameters.flatMap(([name, value], index) => {
+				const suffix = `a${String.fromCharCode(97 + index)}`;
+				return [
+					{ key: `PN${suffix}`, type: "TEXT", value: descriptorUnicode(name) },
+					{ key: `PT${suffix}`, type: "long", value: i32(0) },
+					{ key: `PF${suffix}`, type: "doub", value: f64(value) },
+				];
+			}),
+			...(options.unknownKey ? [{ key: "futureOil", type: "doub", value: f64(1) }] : []),
+		]);
+	}
+	const controls = [
+		options.lightingAsLong
+			? { key: "lightingOn", type: "long", value: i32(options.lightingOn === false ? 0 : 1) }
+			: { key: "lightingOn", type: "bool", value: Buffer.from([options.lightingOn === false ? 0 : 1]) },
+		{ key: "stylization", type: "doub", value: f64(values.Stylization) },
+		{ key: "cleanliness", type: "doub", value: f64(values.Cleanliness) },
+		{ key: "brushScale", type: "doub", value: f64(values.Scale) },
+		{ key: "microBrush", type: "doub", value: f64(values["Bristle Detail"]) },
+		{ key: "LghD", type: "doub", value: f64(values.Angle) },
+		{ key: "specularity", type: "doub", value: f64(values.Shine) },
+	].filter((entry) => entry.key !== options.omitControl);
+	return descriptorObject("oilPaint", [...controls, ...(options.unknownKey ? [{ key: "futureOil", type: "doub", value: f64(1) }] : [])]);
+}
+
+function liquifyMesh(options: {
+	version: 2 | 3;
+	meshWidth: number;
+	meshHeight: number;
+	imageWidth?: number;
+	imageHeight?: number;
+	displacements: Array<{ x: number; y: number }>;
+	signature?: string;
+	formatMarker?: number;
+	repeatedImageWidth?: number;
+	repeatedImageHeight?: number;
+	trailingBytes?: Buffer;
+}): Buffer {
+	if (options.displacements.length !== options.meshWidth * options.meshHeight) {
+		throw new Error("Liquify test mesh displacement count mismatch.");
+	}
+	const header = [
+		u32(options.version),
+		Buffer.from(options.signature ?? "yfqLhseM", "ascii"),
+		u32le(options.formatMarker ?? 2),
+		u32le(options.meshWidth),
+		u32le(options.meshHeight),
+	];
+	if (options.version === 2) {
+		return Buffer.concat([...header, ...options.displacements.flatMap(({ x, y }) => [f32le(x), f32le(y)]), options.trailingBytes ?? Buffer.alloc(0)]);
+	}
+	const imageWidth = options.imageWidth ?? options.meshWidth * 4;
+	const imageHeight = options.imageHeight ?? options.meshHeight * 4;
+	header.push(
+		u32le(0),
+		u32le(0),
+		u32le(0),
+		u32le(0),
+		u32le(imageHeight),
+		u32le(imageWidth),
+		u32le(0),
+		u32le(0),
+		u32le(options.repeatedImageHeight ?? imageHeight),
+		u32le(options.repeatedImageWidth ?? imageWidth)
+	);
+	const rows: Buffer[] = [];
+	for (let row = 0; row < options.meshHeight; ++row) {
+		let column = 0;
+		while (column < options.meshWidth) {
+			let zeroRun = 0;
+			while (column + zeroRun < options.meshWidth) {
+				const displacement = options.displacements[row * options.meshWidth + column + zeroRun];
+				if (displacement.x !== 0 || displacement.y !== 0) break;
+				++zeroRun;
+			}
+			rows.push(u32le(zeroRun));
+			column += zeroRun;
+			if (column === options.meshWidth) break;
+			let valueRun = 0;
+			while (column + valueRun < options.meshWidth) {
+				const displacement = options.displacements[row * options.meshWidth + column + valueRun];
+				if (displacement.x === 0 && displacement.y === 0) break;
+				++valueRun;
+			}
+			rows.push(u32le(valueRun));
+			for (let index = 0; index < valueRun; ++index) {
+				const displacement = options.displacements[row * options.meshWidth + column + index];
+				rows.push(f32le(displacement.x), f32le(displacement.y));
+			}
+			column += valueRun;
+		}
+	}
+	return Buffer.concat([...header, ...rows, options.trailingBytes ?? Buffer.alloc(0)]);
+}
+
+function liquifyFilterDescriptor(options: { mesh: Buffer; entryType?: "tdta" | "TEXT"; duplicateMesh?: boolean; unknownKey?: boolean }): Buffer {
+	const entry = {
+		key: "LqMe",
+		type: options.entryType ?? "tdta",
+		value: options.entryType === "TEXT" ? descriptorUnicode(options.mesh.toString("hex")) : descriptorBytes(options.mesh),
+	};
+	return descriptorObject("LqFy", [entry, ...(options.duplicateMesh ? [entry] : []), ...(options.unknownKey ? [{ key: "futureLiquify", type: "long", value: i32(1) }] : [])]);
+}
+
+function displaceFilterDescriptor(
+	options: {
+		horizontalScale?: number;
+		verticalScale?: number;
+		displacementMap?: "stretchToFit" | "tile" | "unsupported";
+		undefinedAreas?: "wrapAround" | "repeatEdgePixels" | "unsupported";
+		signature?: string;
+		path?: string;
+		horizontalAsDouble?: boolean;
+		pathEntryType?: "Pth " | "TEXT";
+		pathLengthDelta?: number;
+		omitPath?: boolean;
+		duplicatePath?: boolean;
+		unknownKey?: boolean;
+	} = {}
+): Buffer {
+	const pathEntry = {
+		key: "DspF",
+		type: options.pathEntryType ?? "Pth ",
+		value:
+			options.pathEntryType === "TEXT"
+				? descriptorUnicode(options.path ?? "/stored/not-followed/displace.psd")
+				: descriptorPath(options.signature ?? "Pth ", options.path ?? "/stored/not-followed/displace.psd", options.pathLengthDelta),
+	};
+	return descriptorObject("Dspl", [
+		options.horizontalAsDouble
+			? { key: "HrzS", type: "doub", value: f64(options.horizontalScale ?? 12.5) }
+			: { key: "HrzS", type: "long", value: i32(options.horizontalScale ?? 12) },
+		{ key: "VrtS", type: "long", value: i32(options.verticalScale ?? -8) },
+		{
+			key: "DspM",
+			type: "enum",
+			value: descriptorEnum("DspM", ({ stretchToFit: "StrF", tile: "Tile", unsupported: "Nope" } as const)[options.displacementMap ?? "stretchToFit"]),
+		},
+		{
+			key: "UndA",
+			type: "enum",
+			value: descriptorEnum("UndA", ({ wrapAround: "WrpA", repeatEdgePixels: "RptE", unsupported: "Nope" } as const)[options.undefinedAreas ?? "repeatEdgePixels"]),
+		},
+		...(options.omitPath ? [] : [pathEntry]),
+		...(options.duplicatePath ? [pathEntry] : []),
+		...(options.unknownKey ? [{ key: "futureDisplace", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+function pinchFilterDescriptor(options: { amount?: number; amountAsDouble?: boolean; omitAmount?: boolean; duplicateAmount?: boolean; unknownKey?: boolean } = {}): Buffer {
+	const amountEntry = options.amountAsDouble
+		? { key: "Amnt", type: "doub", value: f64(options.amount ?? 65.5) }
+		: { key: "Amnt", type: "long", value: i32(options.amount ?? 65) };
+	return descriptorObject("Pnch", [
+		...(options.omitAmount ? [] : [amountEntry]),
+		...(options.duplicateAmount ? [amountEntry] : []),
+		...(options.unknownKey ? [{ key: "futurePinch", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+function polarCoordinatesFilterDescriptor(
+	options: {
+		conversion?: "rectangularToPolar" | "polarToRectangular" | "unsupported";
+		entryType?: "enum" | "TEXT";
+		enumType?: string;
+		omitConversion?: boolean;
+		duplicateConversion?: boolean;
+		unknownKey?: boolean;
+	} = {}
+): Buffer {
+	const conversion = ({ rectangularToPolar: "RctP", polarToRectangular: "PlrR", unsupported: "Nope" } as const)[options.conversion ?? "rectangularToPolar"];
+	const conversionEntry = {
+		key: "Cnvr",
+		type: options.entryType ?? "enum",
+		value: options.entryType === "TEXT" ? descriptorUnicode(conversion) : descriptorEnum(options.enumType ?? "Cnvr", conversion),
+	};
+	return descriptorObject("Plr ", [
+		...(options.omitConversion ? [] : [conversionEntry]),
+		...(options.duplicateConversion ? [conversionEntry] : []),
+		...(options.unknownKey ? [{ key: "futurePolarCoordinates", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+function rippleFilterDescriptor(
+	options: {
+		amount?: number;
+		amountAsDouble?: boolean;
+		size?: "small" | "medium" | "large" | "unsupported";
+		sizeEntryType?: "enum" | "TEXT";
+		sizeEnumType?: string;
+		omitAmount?: boolean;
+		omitSize?: boolean;
+		duplicateAmount?: boolean;
+		duplicateSize?: boolean;
+		unknownKey?: boolean;
+	} = {}
+): Buffer {
+	const amountEntry = options.amountAsDouble
+		? { key: "Amnt", type: "doub", value: f64(options.amount ?? 240.5) }
+		: { key: "Amnt", type: "long", value: i32(options.amount ?? 240) };
+	const size = ({ small: "Sml ", medium: "Mdm ", large: "Lrg ", unsupported: "Nope" } as const)[options.size ?? "medium"];
+	const sizeEntry = {
+		key: "RplS",
+		type: options.sizeEntryType ?? "enum",
+		value: options.sizeEntryType === "TEXT" ? descriptorUnicode(size) : descriptorEnum(options.sizeEnumType ?? "RplS", size),
+	};
+	return descriptorObject("Rple", [
+		...(options.omitAmount ? [] : [amountEntry]),
+		...(options.duplicateAmount ? [amountEntry] : []),
+		...(options.omitSize ? [] : [sizeEntry]),
+		...(options.duplicateSize ? [sizeEntry] : []),
+		...(options.unknownKey ? [{ key: "futureRipple", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+function shearFilterDescriptor(
+	options: {
+		points?: Array<{ x: number; y: number }>;
+		pointsEntryType?: "VlLs" | "TEXT";
+		undefinedAreas?: "wrapAround" | "repeatEdgePixels" | "unsupported";
+		undefinedAreaEntryType?: "enum" | "TEXT";
+		undefinedAreaEnumType?: string;
+		startIndex?: number;
+		endIndex?: number;
+		startAsDouble?: boolean;
+		endAsDouble?: boolean;
+		pointClassId?: string;
+		pointHorizontalAsLong?: boolean;
+		pointMissingVertical?: boolean;
+		pointDuplicateHorizontal?: boolean;
+		pointUnknownKey?: boolean;
+		omitPoints?: boolean;
+		omitUndefinedAreas?: boolean;
+		omitStart?: boolean;
+		omitEnd?: boolean;
+		duplicatePoints?: boolean;
+		unknownKey?: boolean;
+	} = {}
+): Buffer {
+	const points = options.points ?? [
+		{ x: 0, y: 0 },
+		{ x: 18, y: 42 },
+		{ x: -12, y: 86 },
+		{ x: 6, y: 128 },
+	];
+	const pointValues = points.map((point) => {
+		const horizontalEntry = {
+			key: "Hrzn",
+			type: options.pointHorizontalAsLong ? "long" : "doub",
+			value: options.pointHorizontalAsLong ? i32(point.x) : f64(point.x),
+		};
+		return descriptorObject(options.pointClassId ?? "Pnt ", [
+			horizontalEntry,
+			...(options.pointDuplicateHorizontal ? [horizontalEntry] : []),
+			...(options.pointMissingVertical ? [] : [{ key: "Vrtc", type: "doub", value: f64(point.y) }]),
+			...(options.pointUnknownKey ? [{ key: "futurePoint", type: "long", value: i32(1) }] : []),
+		]);
+	});
+	const pointsEntry = {
+		key: "ShrP",
+		type: options.pointsEntryType ?? "VlLs",
+		value: options.pointsEntryType === "TEXT" ? descriptorUnicode("invalid") : descriptorList(...pointValues),
+	};
+	const undefinedArea = ({ wrapAround: "WrpA", repeatEdgePixels: "RptE", unsupported: "Nope" } as const)[options.undefinedAreas ?? "wrapAround"];
+	return descriptorObject("Shr ", [
+		...(options.omitPoints ? [] : [pointsEntry]),
+		...(options.duplicatePoints ? [pointsEntry] : []),
+		...(options.omitUndefinedAreas
+			? []
+			: [
+					{
+						key: "UndA",
+						type: options.undefinedAreaEntryType ?? "enum",
+						value:
+							options.undefinedAreaEntryType === "TEXT" ? descriptorUnicode(undefinedArea) : descriptorEnum(options.undefinedAreaEnumType ?? "UndA", undefinedArea),
+					},
+				]),
+		...(options.omitStart
+			? []
+			: [
+					{
+						key: "ShrS",
+						type: options.startAsDouble ? "doub" : "long",
+						value: options.startAsDouble ? f64(options.startIndex ?? 0) : i32(options.startIndex ?? 0),
+					},
+				]),
+		...(options.omitEnd
+			? []
+			: [
+					{
+						key: "ShrE",
+						type: options.endAsDouble ? "doub" : "long",
+						value: options.endAsDouble ? f64(options.endIndex ?? points.length - 1) : i32(options.endIndex ?? points.length - 1),
+					},
+				]),
+		...(options.unknownKey ? [{ key: "futureShear", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+function spherizeFilterDescriptor(
+	options: {
+		amount?: number;
+		amountAsDouble?: boolean;
+		mode?: "normal" | "horizontalOnly" | "verticalOnly" | "unsupported";
+		modeEntryType?: "enum" | "TEXT";
+		modeEnumType?: string;
+		omitAmount?: boolean;
+		omitMode?: boolean;
+		duplicateAmount?: boolean;
+		duplicateMode?: boolean;
+		unknownKey?: boolean;
+	} = {}
+): Buffer {
+	const amountEntry = options.amountAsDouble
+		? { key: "Amnt", type: "doub", value: f64(options.amount ?? 70.5) }
+		: { key: "Amnt", type: "long", value: i32(options.amount ?? 70) };
+	const mode = ({ normal: "Nrml", horizontalOnly: "HrzO", verticalOnly: "VrtO", unsupported: "Nope" } as const)[options.mode ?? "normal"];
+	const modeEntry = {
+		key: "SphM",
+		type: options.modeEntryType ?? "enum",
+		value: options.modeEntryType === "TEXT" ? descriptorUnicode(mode) : descriptorEnum(options.modeEnumType ?? "SphM", mode),
+	};
+	return descriptorObject("Sphr", [
+		...(options.omitAmount ? [] : [amountEntry]),
+		...(options.duplicateAmount ? [amountEntry] : []),
+		...(options.omitMode ? [] : [modeEntry]),
+		...(options.duplicateMode ? [modeEntry] : []),
+		...(options.unknownKey ? [{ key: "futureSpherize", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+function twirlFilterDescriptor(options: { angle?: number; angleAsDouble?: boolean; omitAngle?: boolean; duplicateAngle?: boolean; unknownKey?: boolean } = {}): Buffer {
+	const angleEntry = options.angleAsDouble ? { key: "Angl", type: "doub", value: f64(options.angle ?? 420.5) } : { key: "Angl", type: "long", value: i32(options.angle ?? 420) };
+	return descriptorObject("Twrl", [
+		...(options.omitAngle ? [] : [angleEntry]),
+		...(options.duplicateAngle ? [angleEntry] : []),
+		...(options.unknownKey ? [{ key: "futureTwirl", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+type WaveLongDescriptorKey = "NmbG" | "WLMn" | "WLMx" | "AmMn" | "AmMx" | "SclH" | "SclV" | "RndS";
+
+function waveFilterDescriptor(
+	options: {
+		numberOfGenerators?: number;
+		waveType?: "sine" | "triangle" | "square" | "unsupported";
+		minimumWavelength?: number;
+		maximumWavelength?: number;
+		minimumAmplitude?: number;
+		maximumAmplitude?: number;
+		horizontalScale?: number;
+		verticalScale?: number;
+		randomSeed?: number;
+		undefinedAreas?: "wrapAround" | "repeatEdgePixels" | "unsupported";
+		longAsDouble?: WaveLongDescriptorKey;
+		waveTypeEntryType?: "enum" | "TEXT";
+		waveTypeEnumType?: string;
+		undefinedAreaEntryType?: "enum" | "TEXT";
+		undefinedAreaEnumType?: string;
+		omitKey?: WaveLongDescriptorKey | "Wvtp" | "UndA";
+		duplicateKey?: WaveLongDescriptorKey | "Wvtp" | "UndA";
+		unknownKey?: boolean;
+	} = {}
+): Buffer {
+	const values: Record<WaveLongDescriptorKey, number> = {
+		NmbG: options.numberOfGenerators ?? 3,
+		WLMn: options.minimumWavelength ?? 3,
+		WLMx: options.maximumWavelength ?? 9,
+		AmMn: options.minimumAmplitude ?? 1,
+		AmMx: options.maximumAmplitude ?? 4,
+		SclH: options.horizontalScale ?? 75,
+		SclV: options.verticalScale ?? 55,
+		RndS: options.randomSeed ?? 123456,
+	};
+	const longEntries = (Object.keys(values) as WaveLongDescriptorKey[]).map((key) => ({
+		key,
+		type: options.longAsDouble === key ? "doub" : "long",
+		value: options.longAsDouble === key ? f64(values[key]) : i32(values[key]),
+	}));
+	const waveType = ({ sine: "WvSn", triangle: "WvTr", square: "WvSq", unsupported: "Nope" } as const)[options.waveType ?? "sine"];
+	const waveTypeEntry = {
+		key: "Wvtp",
+		type: options.waveTypeEntryType ?? "enum",
+		value: options.waveTypeEntryType === "TEXT" ? descriptorUnicode(waveType) : descriptorEnum(options.waveTypeEnumType ?? "Wvtp", waveType),
+	};
+	const undefinedArea = ({ wrapAround: "WrpA", repeatEdgePixels: "RptE", unsupported: "Nope" } as const)[options.undefinedAreas ?? "wrapAround"];
+	const undefinedAreaEntry = {
+		key: "UndA",
+		type: options.undefinedAreaEntryType ?? "enum",
+		value: options.undefinedAreaEntryType === "TEXT" ? descriptorUnicode(undefinedArea) : descriptorEnum(options.undefinedAreaEnumType ?? "UndA", undefinedArea),
+	};
+	const entries = [waveTypeEntry, ...longEntries, undefinedAreaEntry].filter((entry) => entry.key !== options.omitKey);
+	const duplicate = [waveTypeEntry, ...longEntries, undefinedAreaEntry].find((entry) => entry.key === options.duplicateKey);
+	return descriptorObject("Wave", [...entries, ...(duplicate ? [duplicate] : []), ...(options.unknownKey ? [{ key: "futureWave", type: "long", value: i32(1) }] : [])]);
+}
+
+function zigZagFilterDescriptor(
+	options: {
+		amount?: number;
+		ridges?: number;
+		style?: "aroundCenter" | "outFromCenter" | "pondRipples" | "unsupported";
+		amountAsDouble?: boolean;
+		ridgesAsDouble?: boolean;
+		styleEntryType?: "enum" | "TEXT";
+		styleEnumType?: string;
+		omitAmount?: boolean;
+		omitRidges?: boolean;
+		omitStyle?: boolean;
+		duplicateAmount?: boolean;
+		duplicateRidges?: boolean;
+		duplicateStyle?: boolean;
+		unknownKey?: boolean;
+	} = {}
+): Buffer {
+	const amountEntry = options.amountAsDouble
+		? { key: "Amnt", type: "doub", value: f64(options.amount ?? 65.5) }
+		: { key: "Amnt", type: "long", value: i32(options.amount ?? 65) };
+	const ridgesEntry = options.ridgesAsDouble ? { key: "NmbR", type: "doub", value: f64(options.ridges ?? 5.5) } : { key: "NmbR", type: "long", value: i32(options.ridges ?? 5) };
+	const style = ({ aroundCenter: "ArnC", outFromCenter: "OtFr", pondRipples: "PndR", unsupported: "Nope" } as const)[options.style ?? "aroundCenter"];
+	const styleEntry = {
+		key: "ZZTy",
+		type: options.styleEntryType ?? "enum",
+		value: options.styleEntryType === "TEXT" ? descriptorUnicode(style) : descriptorEnum(options.styleEnumType ?? "ZZTy", style),
+	};
+	return descriptorObject("ZgZg", [
+		...(options.omitAmount ? [] : [amountEntry]),
+		...(options.duplicateAmount ? [amountEntry] : []),
+		...(options.omitRidges ? [] : [ridgesEntry]),
+		...(options.duplicateRidges ? [ridgesEntry] : []),
+		...(options.omitStyle ? [] : [styleEntry]),
+		...(options.duplicateStyle ? [styleEntry] : []),
+		...(options.unknownKey ? [{ key: "futureZigZag", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+function hsbHslFilterDescriptor(
+	options: {
+		inputMode?: "rgb" | "hsb" | "hsl" | "unsupported";
+		rowOrder?: "rgb" | "hsb" | "hsl" | "unsupported";
+		inputEntryType?: "enum" | "TEXT";
+		rowOrderEntryType?: "enum" | "TEXT";
+		inputEnumType?: string;
+		rowOrderEnumType?: string;
+		omitInput?: boolean;
+		omitRowOrder?: boolean;
+		duplicateInput?: boolean;
+		duplicateRowOrder?: boolean;
+		unknownKey?: boolean;
+	} = {}
+): Buffer {
+	const values = { rgb: "RGBC", hsb: "HSBl", hsl: "HSLC", unsupported: "LbCl" } as const;
+	const inputValue = values[options.inputMode ?? "rgb"];
+	const rowOrderValue = values[options.rowOrder ?? "hsb"];
+	const inputEntry = {
+		key: "Inpt",
+		type: options.inputEntryType ?? "enum",
+		value: options.inputEntryType === "TEXT" ? descriptorUnicode(inputValue) : descriptorEnum(options.inputEnumType ?? "ClrS", inputValue),
+	};
+	const rowOrderEntry = {
+		key: "Otpt",
+		type: options.rowOrderEntryType ?? "enum",
+		value: options.rowOrderEntryType === "TEXT" ? descriptorUnicode(rowOrderValue) : descriptorEnum(options.rowOrderEnumType ?? "ClrS", rowOrderValue),
+	};
+	return descriptorObject("HsbP", [
+		...(options.omitInput ? [] : [inputEntry]),
+		...(options.duplicateInput ? [inputEntry] : []),
+		...(options.omitRowOrder ? [] : [rowOrderEntry]),
+		...(options.duplicateRowOrder ? [rowOrderEntry] : []),
+		...(options.unknownKey ? [{ key: "futureHsbHsl", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+function perspectiveWarpFilterDescriptor(
+	options: {
+		vertices?: Array<{ x: number; y: number }>;
+		warpedVertices?: Array<{ x: number; y: number }>;
+		quads?: number[][];
+		descriptorClass?: string;
+		pointClass?: string;
+		quadClass?: string;
+		units?: string;
+		indicesAsDouble?: boolean;
+		omitVertices?: boolean;
+		omitWarpedVertices?: boolean;
+		omitQuads?: boolean;
+		duplicateVertices?: boolean;
+		unknownKey?: boolean;
+	} = {}
+): Buffer {
+	const vertices = options.vertices ?? [
+		{ x: 1, y: 1 },
+		{ x: 7, y: 1 },
+		{ x: 7, y: 5 },
+		{ x: 1, y: 5 },
+	];
+	const warpedVertices = options.warpedVertices ?? [
+		{ x: 0.5, y: 1.5 },
+		{ x: 7.5, y: 0.5 },
+		{ x: 6.5, y: 5.5 },
+		{ x: 1.5, y: 5 },
+	];
+	const pointList = (points: Array<{ x: number; y: number }>): Buffer =>
+		descriptorList(
+			...points.map((point) =>
+				descriptorObject(options.pointClass ?? "Pnt ", [
+					{ key: "Hrzn", type: "UntF", value: descriptorUnit(options.units ?? "#Pxl", point.x) },
+					{ key: "Vrtc", type: "UntF", value: descriptorUnit(options.units ?? "#Pxl", point.y) },
+				])
+			)
+		);
+	const verticesEntry = { key: "vertices", type: "VlLs", value: pointList(vertices) };
+	const warpedVerticesEntry = { key: "warpedVertices", type: "VlLs", value: pointList(warpedVertices) };
+	const quads = options.quads ?? [[0, 1, 2, 3]];
+	const indices = (values: number[]): Buffer =>
+		options.indicesAsDouble ? Buffer.concat([i32(values.length), ...values.map((value) => Buffer.concat([Buffer.from("doub"), f64(value)]))]) : descriptorLongList(...values);
+	const quadsEntry = {
+		key: "quads",
+		type: "VlLs",
+		value: descriptorList(...quads.map((quad) => descriptorObject(options.quadClass ?? "null", [{ key: "indices", type: "VlLs", value: indices(quad) }]))),
+	};
+	return descriptorObject(options.descriptorClass ?? "perspectiveWarpTransform", [
+		...(options.omitVertices ? [] : [verticesEntry]),
+		...(options.duplicateVertices ? [verticesEntry] : []),
+		...(options.omitWarpedVertices ? [] : [warpedVerticesEntry]),
+		...(options.omitQuads ? [] : [quadsEntry]),
+		...(options.unknownKey ? [{ key: "futurePerspectiveWarp", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+type CurvesFilterDescriptorOptions = {
+	presetKind?: "custom" | "default" | "unsupported";
+	adjustments?: Array<{
+		channels: Array<"composite" | "red" | "green" | "blue" | "unsupported">;
+		mode: "curve" | "mapping" | "missing" | "both";
+		points?: Array<{ input: number; output: number; curved?: boolean }>;
+		values?: number[];
+		classId?: string;
+		channelEnumType?: string;
+		channelsAsLong?: boolean;
+		mappingAsDouble?: boolean;
+		unknownKey?: boolean;
+	}>;
+	descriptorClass?: string;
+	presetEntryType?: "enum" | "TEXT";
+	presetEnumType?: string;
+	omitPreset?: boolean;
+	duplicatePreset?: boolean;
+	omitAdjustments?: boolean;
+	pointClass?: string;
+	pointHorizontalAsLong?: boolean;
+	pointOmitVertical?: boolean;
+	pointDuplicateHorizontal?: boolean;
+	pointUnknownKey?: boolean;
+	unknownKey?: boolean;
+};
+
+function curvesFilterDescriptor(options: CurvesFilterDescriptorOptions = {}): Buffer {
+	const adjustments: NonNullable<CurvesFilterDescriptorOptions["adjustments"]> = options.adjustments ?? [
+		{
+			channels: ["composite" as const],
+			mode: "curve" as const,
+			points: [
+				{ input: 0, output: 0 },
+				{ input: 64, output: 48, curved: true },
+				{ input: 128, output: 176, curved: true },
+				{ input: 255, output: 255 },
+			],
+		},
+		{
+			channels: ["red" as const],
+			mode: "curve" as const,
+			points: [
+				{ input: 0, output: 12 },
+				{ input: 96, output: 112 },
+				{ input: 255, output: 244 },
+			],
+		},
+		{ channels: ["green" as const, "blue" as const], mode: "mapping" as const, values: Array.from({ length: 256 }, (_, value) => 255 - value) },
+	];
+	const channelTokens = { composite: "Cmps", red: "Rd  ", green: "Grn ", blue: "Bl  ", unsupported: "Nope" } as const;
+	const channelList = (adjustment: (typeof adjustments)[number]): Buffer =>
+		adjustment.channelsAsLong
+			? descriptorLongList(...adjustment.channels.map((_, index) => index))
+			: Buffer.concat([
+					i32(adjustment.channels.length),
+					...adjustment.channels.map((channel) => Buffer.concat([Buffer.from("enum"), descriptorEnum(adjustment.channelEnumType ?? "Chnl", channelTokens[channel])])),
+				]);
+	const pointList = (points: Array<{ input: number; output: number; curved?: boolean }>): Buffer =>
+		descriptorList(
+			...points.map((point, index) =>
+				descriptorObject(options.pointClass ?? "Pnt ", [
+					options.pointHorizontalAsLong && index === 0 ? { key: "Hrzn", type: "long", value: i32(point.input) } : { key: "Hrzn", type: "doub", value: f64(point.input) },
+					...(options.pointDuplicateHorizontal && index === 0 ? [{ key: "Hrzn", type: "doub", value: f64(point.input) }] : []),
+					...(options.pointOmitVertical && index === 0 ? [] : [{ key: "Vrtc", type: "doub", value: f64(point.output) }]),
+					...(point.curved === undefined ? [] : [{ key: "Cnty", type: "bool", value: Buffer.from([point.curved ? 1 : 0]) }]),
+					...(options.pointUnknownKey && index === 0 ? [{ key: "futureCurvePoint", type: "long", value: i32(1) }] : []),
+				])
+			)
+		);
+	const adjustmentList = descriptorList(
+		...adjustments.map((adjustment) => {
+			const points = adjustment.points ?? [
+				{ input: 0, output: 0 },
+				{ input: 255, output: 255 },
+			];
+			const values = adjustment.values ?? Array.from({ length: 256 }, (_, value) => value);
+			const mapping = adjustment.mappingAsDouble ? descriptorDoubleList(...values) : descriptorLongList(...values);
+			return descriptorObject(adjustment.classId ?? "CrvA", [
+				{ key: "Chnl", type: "VlLs", value: channelList(adjustment) },
+				...(adjustment.mode === "curve" || adjustment.mode === "both" ? [{ key: "Crv ", type: "VlLs", value: pointList(points) }] : []),
+				...(adjustment.mode === "mapping" || adjustment.mode === "both" ? [{ key: "Mpng", type: "VlLs", value: mapping }] : []),
+				...(adjustment.unknownKey ? [{ key: "futureCurveAdjustment", type: "long", value: i32(1) }] : []),
+			]);
+		})
+	);
+	const presetToken = ({ custom: "presetKindCustom", default: "presetKindDefault", unsupported: "Nope" } as const)[options.presetKind ?? "custom"];
+	const presetEntry = {
+		key: "presetKind",
+		type: options.presetEntryType ?? "enum",
+		value: options.presetEntryType === "TEXT" ? descriptorUnicode(presetToken) : descriptorEnum(options.presetEnumType ?? "presetKindType", presetToken),
+	};
+	return descriptorObject(options.descriptorClass ?? "Crvs", [
+		...(options.omitPreset ? [] : [presetEntry]),
+		...(options.duplicatePreset ? [presetEntry] : []),
+		...(options.omitAdjustments ? [] : [{ key: "Adjs", type: "VlLs", value: adjustmentList }]),
+		...(options.unknownKey ? [{ key: "futureCurves", type: "long", value: i32(1) }] : []),
+	]);
+}
+
+type BrightnessContrastFilterDescriptorOptions = {
+	brightness?: number;
+	contrast?: number;
+	useLegacy?: boolean;
+	descriptorClass?: string;
+	brightnessEntryType?: "long" | "doub";
+	contrastEntryType?: "long" | "doub";
+	legacyEntryType?: "bool" | "long";
+	omitBrightness?: boolean;
+	omitContrast?: boolean;
+	omitLegacy?: boolean;
+	duplicateBrightness?: boolean;
+	duplicateContrast?: boolean;
+	duplicateLegacy?: boolean;
+	unknownKey?: boolean;
+};
+
+function brightnessContrastFilterDescriptor(options: BrightnessContrastFilterDescriptorOptions = {}): Buffer {
+	const numericEntry = (key: "Brgh" | "Cntr", value: number, type: "long" | "doub") => ({
+		key,
+		type,
+		value: type === "long" ? i32(value) : f64(value),
+	});
+	const brightnessEntry = numericEntry("Brgh", options.brightness ?? 42, options.brightnessEntryType ?? "long");
+	const contrastEntry = numericEntry("Cntr", options.contrast ?? 65, options.contrastEntryType ?? "long");
+	const legacyEntry = {
+		key: "useLegacy",
+		type: options.legacyEntryType ?? "bool",
+		value: options.legacyEntryType === "long" ? i32(options.useLegacy ? 1 : 0) : Buffer.from([options.useLegacy ? 1 : 0]),
+	};
+	return descriptorObject(options.descriptorClass ?? "BrgC", [
+		...(options.omitBrightness ? [] : [brightnessEntry]),
+		...(options.duplicateBrightness ? [brightnessEntry] : []),
+		...(options.omitContrast ? [] : [contrastEntry]),
+		...(options.duplicateContrast ? [contrastEntry] : []),
+		...(options.omitLegacy ? [] : [legacyEntry]),
+		...(options.duplicateLegacy ? [legacyEntry] : []),
+		...(options.unknownKey ? [{ key: "futureBrightnessContrast", type: "long", value: i32(1) }] : []),
+	]);
+}
+
 function smartObjectLayer(
 	options: {
 		resourceId?: string;
@@ -752,7 +1574,11 @@ function smartObjectLayer(
 				| "colorHalftone"
 				| "clouds"
 				| "crystallize"
+				| "curves"
+				| "brightnessContrast"
+				| "customConvolution"
 				| "differenceClouds"
+				| "displace"
 				| "deInterlace"
 				| "diffuse"
 				| "emboss"
@@ -765,8 +1591,10 @@ function smartObjectLayer(
 				| "fragment"
 				| "gaussianBlur"
 				| "highPass"
+				| "hsbHsl"
 				| "invert"
 				| "lensFlare"
+				| "liquify"
 				| "maximum"
 				| "mezzotint"
 				| "median"
@@ -774,7 +1602,19 @@ function smartObjectLayer(
 				| "motionBlur"
 				| "mosaic"
 				| "ntscColors"
+				| "offset"
+				| "oilPaint"
+				| "perspectiveWarp"
+				| "pinch"
+				| "polarCoordinates"
 				| "pointillize"
+				| "puppetWarp"
+				| "ripple"
+				| "shear"
+				| "spherize"
+				| "twirl"
+				| "wave"
+				| "zigzag"
 				| "radialBlur"
 				| "reduceNoise"
 				| "sharpen"
@@ -791,6 +1631,7 @@ function smartObjectLayer(
 				| "wind"
 				| "unsupported";
 			name?: string;
+			filterIdOverride?: number;
 			enabled?: boolean;
 			opacity?: number;
 			blendMode?: string;
@@ -813,6 +1654,159 @@ function smartObjectLayer(
 			windDirection?: "left" | "right" | "unsupported";
 			deInterlaceEliminate?: "oddLines" | "evenLines" | "unsupported";
 			deInterlaceNewFieldsBy?: "duplication" | "interpolation" | "unsupported";
+			customScale?: number;
+			customOffset?: number;
+			customMatrix?: number[];
+			customScaleAsDouble?: boolean;
+			customOffsetAsDouble?: boolean;
+			customMatrixAsDouble?: boolean;
+			offsetHorizontal?: number;
+			offsetVertical?: number;
+			offsetUndefinedAreas?: "setToTransparent" | "repeatEdgePixels" | "wrapAround" | "unsupported";
+			offsetHorizontalAsDouble?: boolean;
+			offsetVerticalAsDouble?: boolean;
+			displaceHorizontalScale?: number;
+			displaceVerticalScale?: number;
+			displacementMap?: "stretchToFit" | "tile" | "unsupported";
+			displaceUndefinedAreas?: "wrapAround" | "repeatEdgePixels" | "unsupported";
+			displaceSignature?: string;
+			displacePath?: string;
+			displaceHorizontalAsDouble?: boolean;
+			displacePathEntryType?: "Pth " | "TEXT";
+			displacePathLengthDelta?: number;
+			displaceOmitPath?: boolean;
+			displaceDuplicatePath?: boolean;
+			displaceUnknownKey?: boolean;
+			pinchAmount?: number;
+			pinchAmountAsDouble?: boolean;
+			pinchOmitAmount?: boolean;
+			pinchDuplicateAmount?: boolean;
+			pinchUnknownKey?: boolean;
+			polarConversion?: "rectangularToPolar" | "polarToRectangular" | "unsupported";
+			polarConversionEntryType?: "enum" | "TEXT";
+			polarEnumType?: string;
+			polarOmitConversion?: boolean;
+			polarDuplicateConversion?: boolean;
+			polarUnknownKey?: boolean;
+			rippleAmount?: number;
+			rippleAmountAsDouble?: boolean;
+			rippleSize?: "small" | "medium" | "large" | "unsupported";
+			rippleSizeEntryType?: "enum" | "TEXT";
+			rippleSizeEnumType?: string;
+			rippleOmitAmount?: boolean;
+			rippleOmitSize?: boolean;
+			rippleDuplicateAmount?: boolean;
+			rippleDuplicateSize?: boolean;
+			rippleUnknownKey?: boolean;
+			shearPoints?: Array<{ x: number; y: number }>;
+			shearPointsEntryType?: "VlLs" | "TEXT";
+			shearUndefinedAreas?: "wrapAround" | "repeatEdgePixels" | "unsupported";
+			shearUndefinedAreaEntryType?: "enum" | "TEXT";
+			shearUndefinedAreaEnumType?: string;
+			shearStartIndex?: number;
+			shearEndIndex?: number;
+			shearStartAsDouble?: boolean;
+			shearEndAsDouble?: boolean;
+			shearPointClassId?: string;
+			shearPointHorizontalAsLong?: boolean;
+			shearPointMissingVertical?: boolean;
+			shearPointDuplicateHorizontal?: boolean;
+			shearPointUnknownKey?: boolean;
+			shearOmitPoints?: boolean;
+			shearOmitUndefinedAreas?: boolean;
+			shearOmitStart?: boolean;
+			shearOmitEnd?: boolean;
+			shearDuplicatePoints?: boolean;
+			shearUnknownKey?: boolean;
+			spherizeAmount?: number;
+			spherizeAmountAsDouble?: boolean;
+			spherizeMode?: "normal" | "horizontalOnly" | "verticalOnly" | "unsupported";
+			spherizeModeEntryType?: "enum" | "TEXT";
+			spherizeModeEnumType?: string;
+			spherizeOmitAmount?: boolean;
+			spherizeOmitMode?: boolean;
+			spherizeDuplicateAmount?: boolean;
+			spherizeDuplicateMode?: boolean;
+			spherizeUnknownKey?: boolean;
+			twirlAngle?: number;
+			twirlAngleAsDouble?: boolean;
+			twirlOmitAngle?: boolean;
+			twirlDuplicateAngle?: boolean;
+			twirlUnknownKey?: boolean;
+			waveNumberOfGenerators?: number;
+			waveType?: "sine" | "triangle" | "square" | "unsupported";
+			waveMinimumWavelength?: number;
+			waveMaximumWavelength?: number;
+			waveMinimumAmplitude?: number;
+			waveMaximumAmplitude?: number;
+			waveHorizontalScale?: number;
+			waveVerticalScale?: number;
+			waveRandomSeed?: number;
+			waveUndefinedAreas?: "wrapAround" | "repeatEdgePixels" | "unsupported";
+			waveLongAsDouble?: WaveLongDescriptorKey;
+			waveTypeEntryType?: "enum" | "TEXT";
+			waveTypeEnumType?: string;
+			waveUndefinedAreaEntryType?: "enum" | "TEXT";
+			waveUndefinedAreaEnumType?: string;
+			waveOmitKey?: WaveLongDescriptorKey | "Wvtp" | "UndA";
+			waveDuplicateKey?: WaveLongDescriptorKey | "Wvtp" | "UndA";
+			waveUnknownKey?: boolean;
+			zigZagAmount?: number;
+			zigZagRidges?: number;
+			zigZagStyle?: "aroundCenter" | "outFromCenter" | "pondRipples" | "unsupported";
+			zigZagAmountAsDouble?: boolean;
+			zigZagRidgesAsDouble?: boolean;
+			zigZagStyleEntryType?: "enum" | "TEXT";
+			zigZagStyleEnumType?: string;
+			zigZagOmitAmount?: boolean;
+			zigZagOmitRidges?: boolean;
+			zigZagOmitStyle?: boolean;
+			zigZagDuplicateAmount?: boolean;
+			zigZagDuplicateRidges?: boolean;
+			zigZagDuplicateStyle?: boolean;
+			zigZagUnknownKey?: boolean;
+			hsbHslInputMode?: "rgb" | "hsb" | "hsl" | "unsupported";
+			hsbHslRowOrder?: "rgb" | "hsb" | "hsl" | "unsupported";
+			hsbHslInputEntryType?: "enum" | "TEXT";
+			hsbHslRowOrderEntryType?: "enum" | "TEXT";
+			hsbHslInputEnumType?: string;
+			hsbHslRowOrderEnumType?: string;
+			hsbHslOmitInput?: boolean;
+			hsbHslOmitRowOrder?: boolean;
+			hsbHslDuplicateInput?: boolean;
+			hsbHslDuplicateRowOrder?: boolean;
+			hsbHslUnknownKey?: boolean;
+			perspectiveWarpVertices?: Array<{ x: number; y: number }>;
+			perspectiveWarpWarpedVertices?: Array<{ x: number; y: number }>;
+			perspectiveWarpQuads?: number[][];
+			perspectiveWarpDescriptorClass?: string;
+			perspectiveWarpPointClass?: string;
+			perspectiveWarpQuadClass?: string;
+			perspectiveWarpUnits?: string;
+			perspectiveWarpIndicesAsDouble?: boolean;
+			perspectiveWarpOmitVertices?: boolean;
+			perspectiveWarpOmitWarpedVertices?: boolean;
+			perspectiveWarpOmitQuads?: boolean;
+			perspectiveWarpDuplicateVertices?: boolean;
+			perspectiveWarpUnknownKey?: boolean;
+			curvesDescriptor?: CurvesFilterDescriptorOptions;
+			brightnessContrastDescriptor?: BrightnessContrastFilterDescriptorOptions;
+			oilPaintVariant?: "modern" | "legacyPlugin";
+			oilPaintLightingOn?: boolean;
+			oilPaintStylization?: number;
+			oilPaintCleanliness?: number;
+			oilPaintBrushScale?: number;
+			oilPaintBristleDetail?: number;
+			oilPaintLightDirection?: number;
+			oilPaintShine?: number;
+			oilPaintOmitControl?: "lightingOn" | "stylization" | "cleanliness" | "brushScale" | "microBrush" | "LghD" | "specularity";
+			oilPaintLightingAsLong?: boolean;
+			oilPaintUnknownKey?: boolean;
+			puppetOriginalVertices?: Array<{ x: number; y: number }>;
+			puppetDeformedVertices?: Array<{ x: number; y: number }>;
+			puppetTriangleIndices?: number[];
+			puppetPinVertexIndices?: number[];
+			puppetOmitBoundaryPath?: boolean;
 			omitSolidFrontFaces?: boolean;
 			omitMaskIncompleteBlocks?: boolean;
 			anglesDegrees?: [number, number, number, number];
@@ -830,6 +1824,10 @@ function smartObjectLayer(
 			brightness?: number;
 			position?: { x: number; y: number };
 			lensType?: "50-300mm zoom" | "32mm prime" | "105mm prime" | "movie prime" | "unsupported";
+			liquifyMesh?: Buffer;
+			liquifyMeshEntryType?: "tdta" | "TEXT";
+			liquifyDuplicateMesh?: boolean;
+			liquifyUnknownKey?: boolean;
 			moreAccurate?: boolean;
 			smartSharpenBlur?: "gaussianBlur" | "lensBlur" | "motionBlur" | "unsupported";
 			shadow?: { fadeAmount: number; tonalWidth: number; radius: number };
@@ -955,8 +1953,10 @@ function smartObjectLayer(
 		colorHalftone: 1131180616,
 		clouds: 1131177075,
 		crystallize: 1131574132,
+		customConvolution: 1131639917,
 		deInterlace: 1148089458,
 		differenceClouds: 1147564611,
+		displace: 1148416108,
 		diffuse: 1147564832,
 		emboss: 1164796531,
 		extrude: 1165522034,
@@ -965,12 +1965,17 @@ function smartObjectLayer(
 		wind: 1466852384,
 		fibers: 1180856947,
 		lensFlare: 1282306886,
+		liquify: 1282492025,
 		despeckle: 1148416099,
 		dustAndScratches: 1148417107,
 		facet: 1180922912,
 		findEdges: 1181639749,
 		fragment: 1181902701,
 		highPass: 1214736464,
+		hsbHsl: 1215521360,
+		perspectiveWarp: 442,
+		curves: 1131574899,
+		brightnessContrast: 1114793795,
 		invert: 1231976050,
 		maximum: 1299737888,
 		mezzotint: 1299870830,
@@ -979,6 +1984,17 @@ function smartObjectLayer(
 		motionBlur: 1299476034,
 		mosaic: 1299407648,
 		ntscColors: 1314149187,
+		offset: 1332114292,
+		oilPaint: 1122,
+		pinch: 1349411688,
+		polarCoordinates: 1349284384,
+		ripple: 1383099493,
+		shear: 1399353888,
+		spherize: 1399875698,
+		twirl: 1417114220,
+		wave: 1466005093,
+		zigzag: 1516722791,
+		puppetWarp: 991,
 		pointillize: 1349416044,
 		radialBlur: 1382313026,
 		reduceNoise: 633,
@@ -1576,24 +2592,535 @@ function smartObjectLayer(
 																																			),
 																																		},
 																																	])
-																																: filter.type in smartFilterRadiusClasses
-																																	? descriptorObject(
-																																			smartFilterRadiusClasses[
-																																				filter.type as keyof typeof smartFilterRadiusClasses
-																																			],
-																																			[
-																																				{
-																																					key: "Rds ",
-																																					type: "UntF",
-																																					value: descriptorUnit(
-																																						filter.radiusUnits ??
-																																							"#Pxl",
-																																						filter.radius ?? 1
-																																					),
-																																				},
-																																			]
-																																		)
-																																	: null;
+																																: filter.type === "oilPaint"
+																																	? oilPaintFilterDescriptor({
+																																			variant: filter.oilPaintVariant,
+																																			lightingOn: filter.oilPaintLightingOn,
+																																			stylization: filter.oilPaintStylization,
+																																			cleanliness: filter.oilPaintCleanliness,
+																																			brushScale: filter.oilPaintBrushScale,
+																																			bristleDetail:
+																																				filter.oilPaintBristleDetail,
+																																			lightDirection:
+																																				filter.oilPaintLightDirection,
+																																			shine: filter.oilPaintShine,
+																																			omitControl: filter.oilPaintOmitControl,
+																																			lightingAsLong:
+																																				filter.oilPaintLightingAsLong,
+																																			unknownKey: filter.oilPaintUnknownKey,
+																																		})
+																																	: filter.type === "displace"
+																																		? displaceFilterDescriptor({
+																																				horizontalScale:
+																																					filter.displaceHorizontalScale,
+																																				verticalScale:
+																																					filter.displaceVerticalScale,
+																																				displacementMap:
+																																					filter.displacementMap,
+																																				undefinedAreas:
+																																					filter.displaceUndefinedAreas,
+																																				signature: filter.displaceSignature,
+																																				path: filter.displacePath,
+																																				horizontalAsDouble:
+																																					filter.displaceHorizontalAsDouble,
+																																				pathEntryType:
+																																					filter.displacePathEntryType,
+																																				pathLengthDelta:
+																																					filter.displacePathLengthDelta,
+																																				omitPath: filter.displaceOmitPath,
+																																				duplicatePath:
+																																					filter.displaceDuplicatePath,
+																																				unknownKey:
+																																					filter.displaceUnknownKey,
+																																			})
+																																		: filter.type === "pinch"
+																																			? pinchFilterDescriptor({
+																																					amount: filter.pinchAmount,
+																																					amountAsDouble:
+																																						filter.pinchAmountAsDouble,
+																																					omitAmount:
+																																						filter.pinchOmitAmount,
+																																					duplicateAmount:
+																																						filter.pinchDuplicateAmount,
+																																					unknownKey:
+																																						filter.pinchUnknownKey,
+																																				})
+																																			: filter.type === "polarCoordinates"
+																																				? polarCoordinatesFilterDescriptor({
+																																						conversion:
+																																							filter.polarConversion,
+																																						entryType:
+																																							filter.polarConversionEntryType,
+																																						enumType:
+																																							filter.polarEnumType,
+																																						omitConversion:
+																																							filter.polarOmitConversion,
+																																						duplicateConversion:
+																																							filter.polarDuplicateConversion,
+																																						unknownKey:
+																																							filter.polarUnknownKey,
+																																					})
+																																				: filter.type === "ripple"
+																																					? rippleFilterDescriptor({
+																																							amount: filter.rippleAmount,
+																																							amountAsDouble:
+																																								filter.rippleAmountAsDouble,
+																																							size: filter.rippleSize,
+																																							sizeEntryType:
+																																								filter.rippleSizeEntryType,
+																																							sizeEnumType:
+																																								filter.rippleSizeEnumType,
+																																							omitAmount:
+																																								filter.rippleOmitAmount,
+																																							omitSize:
+																																								filter.rippleOmitSize,
+																																							duplicateAmount:
+																																								filter.rippleDuplicateAmount,
+																																							duplicateSize:
+																																								filter.rippleDuplicateSize,
+																																							unknownKey:
+																																								filter.rippleUnknownKey,
+																																						})
+																																					: filter.type === "shear"
+																																						? shearFilterDescriptor({
+																																								points: filter.shearPoints,
+																																								pointsEntryType:
+																																									filter.shearPointsEntryType,
+																																								undefinedAreas:
+																																									filter.shearUndefinedAreas,
+																																								undefinedAreaEntryType:
+																																									filter.shearUndefinedAreaEntryType,
+																																								undefinedAreaEnumType:
+																																									filter.shearUndefinedAreaEnumType,
+																																								startIndex:
+																																									filter.shearStartIndex,
+																																								endIndex:
+																																									filter.shearEndIndex,
+																																								startAsDouble:
+																																									filter.shearStartAsDouble,
+																																								endAsDouble:
+																																									filter.shearEndAsDouble,
+																																								pointClassId:
+																																									filter.shearPointClassId,
+																																								pointHorizontalAsLong:
+																																									filter.shearPointHorizontalAsLong,
+																																								pointMissingVertical:
+																																									filter.shearPointMissingVertical,
+																																								pointDuplicateHorizontal:
+																																									filter.shearPointDuplicateHorizontal,
+																																								pointUnknownKey:
+																																									filter.shearPointUnknownKey,
+																																								omitPoints:
+																																									filter.shearOmitPoints,
+																																								omitUndefinedAreas:
+																																									filter.shearOmitUndefinedAreas,
+																																								omitStart:
+																																									filter.shearOmitStart,
+																																								omitEnd:
+																																									filter.shearOmitEnd,
+																																								duplicatePoints:
+																																									filter.shearDuplicatePoints,
+																																								unknownKey:
+																																									filter.shearUnknownKey,
+																																							})
+																																						: filter.type === "spherize"
+																																							? spherizeFilterDescriptor(
+																																									{
+																																										amount: filter.spherizeAmount,
+																																										amountAsDouble:
+																																											filter.spherizeAmountAsDouble,
+																																										mode: filter.spherizeMode,
+																																										modeEntryType:
+																																											filter.spherizeModeEntryType,
+																																										modeEnumType:
+																																											filter.spherizeModeEnumType,
+																																										omitAmount:
+																																											filter.spherizeOmitAmount,
+																																										omitMode:
+																																											filter.spherizeOmitMode,
+																																										duplicateAmount:
+																																											filter.spherizeDuplicateAmount,
+																																										duplicateMode:
+																																											filter.spherizeDuplicateMode,
+																																										unknownKey:
+																																											filter.spherizeUnknownKey,
+																																									}
+																																								)
+																																							: filter.type ===
+																																								  "twirl"
+																																								? twirlFilterDescriptor(
+																																										{
+																																											angle: filter.twirlAngle,
+																																											angleAsDouble:
+																																												filter.twirlAngleAsDouble,
+																																											omitAngle:
+																																												filter.twirlOmitAngle,
+																																											duplicateAngle:
+																																												filter.twirlDuplicateAngle,
+																																											unknownKey:
+																																												filter.twirlUnknownKey,
+																																										}
+																																									)
+																																								: filter.type ===
+																																									  "wave"
+																																									? waveFilterDescriptor(
+																																											{
+																																												numberOfGenerators:
+																																													filter.waveNumberOfGenerators,
+																																												waveType:
+																																													filter.waveType,
+																																												minimumWavelength:
+																																													filter.waveMinimumWavelength,
+																																												maximumWavelength:
+																																													filter.waveMaximumWavelength,
+																																												minimumAmplitude:
+																																													filter.waveMinimumAmplitude,
+																																												maximumAmplitude:
+																																													filter.waveMaximumAmplitude,
+																																												horizontalScale:
+																																													filter.waveHorizontalScale,
+																																												verticalScale:
+																																													filter.waveVerticalScale,
+																																												randomSeed:
+																																													filter.waveRandomSeed,
+																																												undefinedAreas:
+																																													filter.waveUndefinedAreas,
+																																												longAsDouble:
+																																													filter.waveLongAsDouble,
+																																												waveTypeEntryType:
+																																													filter.waveTypeEntryType,
+																																												waveTypeEnumType:
+																																													filter.waveTypeEnumType,
+																																												undefinedAreaEntryType:
+																																													filter.waveUndefinedAreaEntryType,
+																																												undefinedAreaEnumType:
+																																													filter.waveUndefinedAreaEnumType,
+																																												omitKey:
+																																													filter.waveOmitKey,
+																																												duplicateKey:
+																																													filter.waveDuplicateKey,
+																																												unknownKey:
+																																													filter.waveUnknownKey,
+																																											}
+																																										)
+																																									: filter.type ===
+																																										  "zigzag"
+																																										? zigZagFilterDescriptor(
+																																												{
+																																													amount: filter.zigZagAmount,
+																																													ridges: filter.zigZagRidges,
+																																													style: filter.zigZagStyle,
+																																													amountAsDouble:
+																																														filter.zigZagAmountAsDouble,
+																																													ridgesAsDouble:
+																																														filter.zigZagRidgesAsDouble,
+																																													styleEntryType:
+																																														filter.zigZagStyleEntryType,
+																																													styleEnumType:
+																																														filter.zigZagStyleEnumType,
+																																													omitAmount:
+																																														filter.zigZagOmitAmount,
+																																													omitRidges:
+																																														filter.zigZagOmitRidges,
+																																													omitStyle:
+																																														filter.zigZagOmitStyle,
+																																													duplicateAmount:
+																																														filter.zigZagDuplicateAmount,
+																																													duplicateRidges:
+																																														filter.zigZagDuplicateRidges,
+																																													duplicateStyle:
+																																														filter.zigZagDuplicateStyle,
+																																													unknownKey:
+																																														filter.zigZagUnknownKey,
+																																												}
+																																											)
+																																										: filter.type ===
+																																											  "hsbHsl"
+																																											? hsbHslFilterDescriptor(
+																																													{
+																																														inputMode:
+																																															filter.hsbHslInputMode,
+																																														rowOrder:
+																																															filter.hsbHslRowOrder,
+																																														inputEntryType:
+																																															filter.hsbHslInputEntryType,
+																																														rowOrderEntryType:
+																																															filter.hsbHslRowOrderEntryType,
+																																														inputEnumType:
+																																															filter.hsbHslInputEnumType,
+																																														rowOrderEnumType:
+																																															filter.hsbHslRowOrderEnumType,
+																																														omitInput:
+																																															filter.hsbHslOmitInput,
+																																														omitRowOrder:
+																																															filter.hsbHslOmitRowOrder,
+																																														duplicateInput:
+																																															filter.hsbHslDuplicateInput,
+																																														duplicateRowOrder:
+																																															filter.hsbHslDuplicateRowOrder,
+																																														unknownKey:
+																																															filter.hsbHslUnknownKey,
+																																													}
+																																												)
+																																											: filter.type ===
+																																												  "perspectiveWarp"
+																																												? perspectiveWarpFilterDescriptor(
+																																														{
+																																															vertices:
+																																																filter.perspectiveWarpVertices,
+																																															warpedVertices:
+																																																filter.perspectiveWarpWarpedVertices,
+																																															quads: filter.perspectiveWarpQuads,
+																																															descriptorClass:
+																																																filter.perspectiveWarpDescriptorClass,
+																																															pointClass:
+																																																filter.perspectiveWarpPointClass,
+																																															quadClass:
+																																																filter.perspectiveWarpQuadClass,
+																																															units: filter.perspectiveWarpUnits,
+																																															indicesAsDouble:
+																																																filter.perspectiveWarpIndicesAsDouble,
+																																															omitVertices:
+																																																filter.perspectiveWarpOmitVertices,
+																																															omitWarpedVertices:
+																																																filter.perspectiveWarpOmitWarpedVertices,
+																																															omitQuads:
+																																																filter.perspectiveWarpOmitQuads,
+																																															duplicateVertices:
+																																																filter.perspectiveWarpDuplicateVertices,
+																																															unknownKey:
+																																																filter.perspectiveWarpUnknownKey,
+																																														}
+																																													)
+																																												: filter.type ===
+																																													  "curves"
+																																													? curvesFilterDescriptor(
+																																															filter.curvesDescriptor
+																																														)
+																																													: filter.type ===
+																																														  "brightnessContrast"
+																																														? brightnessContrastFilterDescriptor(
+																																																filter.brightnessContrastDescriptor
+																																															)
+																																														: filter.type ===
+																																															  "liquify"
+																																															? liquifyFilterDescriptor(
+																																																	{
+																																																		mesh:
+																																																			filter.liquifyMesh ??
+																																																			liquifyMesh(
+																																																				{
+																																																					version: 3,
+																																																					meshWidth: 2,
+																																																					meshHeight: 2,
+																																																					imageWidth: 8,
+																																																					imageHeight: 6,
+																																																					displacements:
+																																																						[
+																																																							{
+																																																								x: 0,
+																																																								y: 0,
+																																																							},
+																																																							{
+																																																								x: -1,
+																																																								y: 0.5,
+																																																							},
+																																																							{
+																																																								x: 0.75,
+																																																								y: -0.5,
+																																																							},
+																																																							{
+																																																								x: 0,
+																																																								y: 0,
+																																																							},
+																																																						],
+																																																				}
+																																																			),
+																																																		entryType:
+																																																			filter.liquifyMeshEntryType,
+																																																		duplicateMesh:
+																																																			filter.liquifyDuplicateMesh,
+																																																		unknownKey:
+																																																			filter.liquifyUnknownKey,
+																																																	}
+																																																)
+																																															: filter.type ===
+																																																  "puppetWarp"
+																																																? puppetWarpFilterDescriptor(
+																																																		{
+																																																			originalVertices:
+																																																				filter.puppetOriginalVertices,
+																																																			deformedVertices:
+																																																				filter.puppetDeformedVertices,
+																																																			triangleIndices:
+																																																				filter.puppetTriangleIndices,
+																																																			pinVertexIndices:
+																																																				filter.puppetPinVertexIndices,
+																																																			omitBoundaryPath:
+																																																				filter.puppetOmitBoundaryPath,
+																																																		}
+																																																	)
+																																																: filter.type ===
+																																																	  "offset"
+																																																	? descriptorObject(
+																																																			"Ofst",
+																																																			[
+																																																				filter.offsetHorizontalAsDouble
+																																																					? {
+																																																							key: "Hrzn",
+																																																							type: "doub",
+																																																							value: f64(
+																																																								filter.offsetHorizontal ??
+																																																									2.5
+																																																							),
+																																																						}
+																																																					: {
+																																																							key: "Hrzn",
+																																																							type: "long",
+																																																							value: i32(
+																																																								filter.offsetHorizontal ??
+																																																									2
+																																																							),
+																																																						},
+																																																				filter.offsetVerticalAsDouble
+																																																					? {
+																																																							key: "Vrtc",
+																																																							type: "doub",
+																																																							value: f64(
+																																																								filter.offsetVertical ??
+																																																									-1.5
+																																																							),
+																																																						}
+																																																					: {
+																																																							key: "Vrtc",
+																																																							type: "long",
+																																																							value: i32(
+																																																								filter.offsetVertical ??
+																																																									-1
+																																																							),
+																																																						},
+																																																				{
+																																																					key: "Fl  ",
+																																																					type: "enum",
+																																																					value: descriptorEnum(
+																																																						"FlMd",
+																																																						(
+																																																							{
+																																																								setToTransparent:
+																																																									"Bckg",
+																																																								repeatEdgePixels:
+																																																									"Rpt ",
+																																																								wrapAround:
+																																																									"Wrp ",
+																																																								unsupported:
+																																																									"Nope",
+																																																							} as const
+																																																						)[
+																																																							filter.offsetUndefinedAreas ??
+																																																								"wrapAround"
+																																																						]
+																																																					),
+																																																				},
+																																																			]
+																																																		)
+																																																	: filter.type ===
+																																																		  "customConvolution"
+																																																		? descriptorObject(
+																																																				"Cstm",
+																																																				[
+																																																					filter.customScaleAsDouble
+																																																						? {
+																																																								key: "Scl ",
+																																																								type: "doub",
+																																																								value: f64(
+																																																									filter.customScale ??
+																																																										1.5
+																																																								),
+																																																							}
+																																																						: {
+																																																								key: "Scl ",
+																																																								type: "long",
+																																																								value: i32(
+																																																									filter.customScale ??
+																																																										1
+																																																								),
+																																																							},
+																																																					filter.customOffsetAsDouble
+																																																						? {
+																																																								key: "Ofst",
+																																																								type: "doub",
+																																																								value: f64(
+																																																									filter.customOffset ??
+																																																										4.5
+																																																								),
+																																																							}
+																																																						: {
+																																																								key: "Ofst",
+																																																								type: "long",
+																																																								value: i32(
+																																																									filter.customOffset ??
+																																																										4
+																																																								),
+																																																							},
+																																																					{
+																																																						key: "Mtrx",
+																																																						type: "VlLs",
+																																																						value: filter.customMatrixAsDouble
+																																																							? descriptorDoubleList(
+																																																									...(filter.customMatrix ??
+																																																										Array.from(
+																																																											{
+																																																												length: 25,
+																																																											},
+																																																											(
+																																																												_,
+																																																												index
+																																																											) =>
+																																																												index ===
+																																																												12
+																																																													? 1.5
+																																																													: 0
+																																																										))
+																																																								)
+																																																							: descriptorLongList(
+																																																									...(filter.customMatrix ??
+																																																										Array.from(
+																																																											{
+																																																												length: 25,
+																																																											},
+																																																											(
+																																																												_,
+																																																												index
+																																																											) =>
+																																																												index ===
+																																																												12
+																																																													? 1
+																																																													: 0
+																																																										))
+																																																								),
+																																																					},
+																																																				]
+																																																			)
+																																																		: filter.type in
+																																																			  smartFilterRadiusClasses
+																																																			? descriptorObject(
+																																																					smartFilterRadiusClasses[
+																																																						filter.type as keyof typeof smartFilterRadiusClasses
+																																																					],
+																																																					[
+																																																						{
+																																																							key: "Rds ",
+																																																							type: "UntF",
+																																																							value: descriptorUnit(
+																																																								filter.radiusUnits ??
+																																																									"#Pxl",
+																																																								filter.radius ??
+																																																									1
+																																																							),
+																																																						},
+																																																					]
+																																																				)
+																																																			: null;
 					return descriptorObject("filterFX", [
 						{ key: "Nm  ", type: "TEXT", value: descriptorUnicode(filter.name ?? `Smart Filter ${index + 1}`) },
 						{ key: "blendOptions", type: "Objc", value: blendOptions },
@@ -1628,7 +3155,18 @@ function smartObjectLayer(
 								]),
 						...(filterObject ? [{ key: "Fltr", type: "Objc", value: filterObject }] : []),
 						...(filter.type in smartFilterIds
-							? [{ key: "filterID", type: "long", value: i32(smartFilterIds[filter.type as keyof typeof smartFilterIds]) }]
+							? [
+									{
+										key: "filterID",
+										type: "long",
+										value: i32(
+											filter.filterIdOverride ??
+												(filter.type === "oilPaint" && filter.oilPaintVariant === "legacyPlugin"
+													? 1348620396
+													: smartFilterIds[filter.type as keyof typeof smartFilterIds])
+										),
+									},
+								]
 							: filter.type === "unsupported"
 								? [{ key: "filterID", type: "long", value: i32(987654321) }]
 								: []),
@@ -5702,6 +7240,2514 @@ describe("layered PSD sprite extraction", () => {
 			type: "deInterlace",
 			bakeSupported: false,
 			algorithmExecutionModel: "bounded-field-reconstruction-de-interlace-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes exact 5x5 Custom convolution with complete parameter evidence", async () => {
+		const sourcePath = join(directory, "assets/live-custom-smart-filter.psd");
+		const rgba = Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 7, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat();
+		const matrix = [0, 0, 0, 0, 0, 0, -1, -1, -1, 0, 0, -1, 9, -1, 0, 0, -1, -1, -1, 0, 0, 0, 0, 0, 0];
+		const smartFilter = { type: "customConvolution" as const, customScale: 1, customOffset: 4, customMatrix: matrix };
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Custom",
+						id: 5852,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ transform: [0, 0, 8, 0, 8, 6, 0, 6], nonAffineTransform: null, smartFilters: [smartFilter] }))],
+					}),
+				],
+				{ width: 8, height: 6 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "custom.psd", fileType: "PSD", data: createCompositePsd(8, 6, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-custom-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expectedParameters = { scale: 1, offset: 4, matrix };
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject({
+			type: "customConvolution",
+			customConvolution: expectedParameters,
+			algorithmExecutionModel: "bounded-custom-5x5-convolution-smart-filter-v1",
+			bakeSupported: true,
+		});
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject({
+			type: "customConvolution",
+			customConvolution: expectedParameters,
+			algorithmExecutionModel: "bounded-custom-5x5-convolution-smart-filter-v1",
+		});
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("f41c5017a40e3e7fe8a9881ad8a6c25c82b7855a6f685f08235244912f548aea");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ customMatrix: Array.from({ length: 24 }, () => 0) }, "exactly 25 integer matrix weights"],
+		[{ customMatrix: Array.from({ length: 25 }, (_, index) => (index === 12 ? 1000 : 0)) }, "matrix weights from -999 to 999"],
+		[{ customScale: 0 }, "nonzero signed 32-bit integer scale"],
+		[{ customScaleAsDouble: true }, "nonzero signed 32-bit integer scale"],
+		[{ customOffsetAsDouble: true }, "signed 32-bit integer offset"],
+		[{ customMatrixAsDouble: true }, "integer matrix weights"],
+	] as const)("preserves invalid Custom parameters as explicit non-executable evidence", (settings, warning) => {
+		const source = createLayeredPsd([
+			layer({
+				name: "Malformed Custom",
+				id: 5853,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "customConvolution", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(source).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "customConvolution",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-custom-5x5-convolution-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes exact three-mode Offset displacement with complete parameter evidence", async () => {
+		const sourcePath = join(directory, "assets/live-offset-smart-filter.psd");
+		const rgba = Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 7, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat();
+		const smartFilter = { type: "offset" as const, offsetHorizontal: 2, offsetVertical: -1, offsetUndefinedAreas: "wrapAround" as const };
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Offset",
+						id: 5862,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ transform: [0, 0, 8, 0, 8, 6, 0, 6], nonAffineTransform: null, smartFilters: [smartFilter] }))],
+					}),
+				],
+				{ width: 8, height: 6 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "offset.psd", fileType: "PSD", data: createCompositePsd(8, 6, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-offset-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expectedParameters = { horizontalPixels: 2, verticalPixels: -1, undefinedAreas: "wrapAround" };
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject({
+			type: "offset",
+			offset: expectedParameters,
+			algorithmExecutionModel: "bounded-three-mode-offset-smart-filter-v1",
+			bakeSupported: true,
+		});
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject({
+			type: "offset",
+			offset: expectedParameters,
+			algorithmExecutionModel: "bounded-three-mode-offset-smart-filter-v1",
+		});
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("b8d9ccfa5b3761f2e0b96242bb45274081f2c0751d9bc48345aa5a2c10bf6ceb");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ offsetHorizontalAsDouble: true }, "signed 32-bit integer horizontal/vertical pixel displacements"],
+		[{ offsetVerticalAsDouble: true }, "signed 32-bit integer horizontal/vertical pixel displacements"],
+		[{ offsetHorizontal: 2_147_483_648, offsetHorizontalAsDouble: true }, "signed 32-bit integer horizontal/vertical pixel displacements"],
+		[{ offsetVertical: -2_147_483_649, offsetVerticalAsDouble: true }, "signed 32-bit integer horizontal/vertical pixel displacements"],
+		[{ offsetUndefinedAreas: "unsupported" as const }, "Set To Transparent/Repeat Edge Pixels/Wrap Around"],
+	] as const)("preserves invalid Offset parameters as explicit non-executable evidence", (settings, warning) => {
+		const source = createLayeredPsd([
+			layer({
+				name: "Malformed Offset",
+				id: 5863,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "offset", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(source).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "offset",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-three-mode-offset-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes an explicitly leased PSD Displace map with complete descriptor and channel evidence", async () => {
+		const sourcePath = join(directory, "assets/live-displace-smart-filter.psd");
+		const mapPath = join(directory, "assets/displace-map.psd");
+		const rgba = Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 7, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat();
+		const mapRgba = Array.from({ length: 12 }, (_, index) => [32 + index * 17, 224 - index * 13, 128 + (index % 3) * 20, 255]).flat();
+		const smartFilter = {
+			type: "displace" as const,
+			displaceHorizontalScale: 12,
+			displaceVerticalScale: -8,
+			displacementMap: "stretchToFit" as const,
+			displaceUndefinedAreas: "repeatEdgePixels" as const,
+			displaceSignature: "Pth ",
+			displacePath: "/stored/not-followed/displace.psd",
+		};
+		await writeFile(mapPath, createCompositePsd(4, 3, mapRgba));
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Displace",
+						id: 5902,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ transform: [0, 0, 8, 0, 8, 6, 0, 6], nonAffineTransform: null, smartFilters: [smartFilter] }))],
+					}),
+				],
+				{ width: 8, height: 6 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "displace-source.psd", fileType: "PSD", data: createCompositePsd(8, 6, rgba) })
+				)
+			)
+		);
+		const inspectedWithoutBinding = await getPsdLayerExtractionStatus(sourcePath, { destinationFolder: "assets/live-displace-smart-filter-output" });
+		expect(inspectedWithoutBinding.document.layers[0].smartObject?.smartFilters[0]).toMatchObject({
+			type: "displace",
+			filterClassId: "Dspl",
+			filterId: 1148416108,
+			displace: {
+				horizontalScalePercent: 12,
+				verticalScalePercent: -8,
+				displacementMap: "stretchToFit",
+				undefinedAreas: "repeatEdgePixels",
+				displacementFile: { signature: "Pth ", path: "/stored/not-followed/displace.psd" },
+				mapBinding: null,
+			},
+			bakeSupported: false,
+		});
+		expect(inspectedWithoutBinding.document.layers[0].smartObject?.smartFilters[0].warning).toContain("explicit project-contained PSD/PSB");
+
+		const options = {
+			destinationFolder: "assets/live-displace-smart-filter-output",
+			renderEmbeddedSmartObjects: true,
+			displacementMapBindings: [{ layerIndex: 0, filterIndex: 0, sourcePath: "assets/displace-map.psd" }],
+		} as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const mapHash = createHash("sha256")
+			.update(await readFile(mapPath))
+			.digest("hex");
+		expect(plan.displacementMapBindings).toEqual([
+			expect.objectContaining({
+				layerIndex: 0,
+				layerName: "Displace",
+				filterIndex: 0,
+				sourcePath: "assets/displace-map.psd",
+				sourceHash: mapHash,
+				format: "psd",
+				documentVersion: 1,
+				depth: 8,
+				colorMode: "rgb",
+				channelMapping: "red-horizontal-green-vertical",
+				width: 4,
+				height: 3,
+				storedSignature: "Pth ",
+				storedPath: "/stored/not-followed/displace.psd",
+				executionModel: "bounded-explicit-psd-displacement-map-binding-v1",
+			}),
+		]);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject({
+			type: "displace",
+			displace: { mapBinding: { sourceHash: mapHash, channelMapping: "red-horizontal-green-vertical" } },
+			algorithmExecutionModel: "bounded-explicit-map-displace-smart-filter-v1",
+		});
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-displace-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("d074b20c772b147fbf8719963eb17aa749e1c52bd25f4e5839919d9ff0e661fe");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ displaceHorizontalAsDouble: true }, "exactly one HrzS long"],
+		[{ displaceHorizontalScale: 1000 }, "-999 to 999"],
+		[{ displacementMap: "unsupported" as const }, "Stretch To Fit or Tile"],
+		[{ displaceUndefinedAreas: "unsupported" as const }, "Wrap Around or Repeat Edge Pixels"],
+		[{ displacePathEntryType: "TEXT" as const }, "exactly one DspF Pth"],
+		[{ displaceOmitPath: true }, "exactly one DspF"],
+		[{ displaceDuplicatePath: true }, "duplicate key"],
+		[{ displaceUnknownKey: true }, "unsupported key"],
+	] as const)("preserves invalid Displace descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed Displace",
+				id: 5903,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "displace", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({ type: "displace", bakeSupported: false, algorithmExecutionModel: "bounded-explicit-map-displace-smart-filter-v1" });
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("rejects a malformed Displace file-path payload before semantic inspection", () => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed Displace Path",
+				id: 5905,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "displace", displacePathLengthDelta: 1 }] }))],
+			}),
+		]);
+		expect(() => inspectPsdLayers(bytes)).toThrow("file path length fields do not match");
+	});
+
+	test("rejects unsafe, duplicate, and incorrectly targeted Displace map bindings", async () => {
+		const sourcePath = join(directory, "assets/displace-binding-validation.psd");
+		const mapPath = join(directory, "assets/displace-binding-map.psd");
+		await writeFile(mapPath, createCompositePsd(1, 1, [128, 128, 128, 255]));
+		await writeFile(
+			sourcePath,
+			createLayeredPsd([
+				layer({
+					name: "Binding Validation",
+					id: 5904,
+					left: 0,
+					top: 0,
+					width: 1,
+					height: 1,
+					visible: true,
+					opacity: 255,
+					rgba: [1, 2, 3, 255],
+					additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "displace" }] }))],
+				}),
+			])
+		);
+		const base = { destinationFolder: "assets/displace-binding-output", renderEmbeddedSmartObjects: true } as const;
+		await expect(
+			getPsdLayerExtractionStatus(sourcePath, { ...base, displacementMapBindings: [{ layerIndex: 0, filterIndex: 0, sourcePath: "../outside.psd" }] })
+		).rejects.toThrow("must stay inside");
+		await expect(
+			getPsdLayerExtractionStatus(sourcePath, {
+				...base,
+				displacementMapBindings: [
+					{ layerIndex: 0, filterIndex: 0, sourcePath: "assets/displace-binding-map.psd" },
+					{ layerIndex: 0, filterIndex: 0, sourcePath: "assets/displace-binding-map.psd" },
+				],
+			})
+		).rejects.toThrow("duplicate layer/filter key");
+		await expect(
+			getPsdLayerExtractionStatus(sourcePath, { ...base, displacementMapBindings: [{ layerIndex: 0, filterIndex: 1, sourcePath: "assets/displace-binding-map.psd" }] })
+		).rejects.toThrow("valid Displace smart filter");
+		await expect(
+			getPsdLayerExtractionStatus(sourcePath, {
+				destinationFolder: "assets/displace-binding-output",
+				displacementMapBindings: [{ layerIndex: 0, filterIndex: 0, sourcePath: "assets/displace-binding-map.psd" }],
+			})
+		).rejects.toThrow("requires renderEmbeddedSmartObjects=true or renderExternalSmartObjects=true");
+	});
+
+	test("executes exact-amount radial Pinch with complete shared MCP evidence", async () => {
+		const sourcePath = join(directory, "assets/live-pinch-smart-filter.psd");
+		const rgba = Array.from({ length: 63 }, (_, index) => [index * 13, 255 - index * 9, index * 19, index === 0 ? 0 : index === 31 ? 128 : 255]).flat();
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Pinch",
+						id: 5912,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 9, 0, 9, 7, 0, 7],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "pinch", pinchAmount: 65 }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 9, height: 7 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "pinch-source.psd", fileType: "PSD", data: createCompositePsd(9, 7, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-pinch-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "pinch",
+			filterClassId: "Pnch",
+			filterId: 1349411688,
+			pinch: { amountPercent: 65 },
+			algorithmExecutionModel: "bounded-radial-power-pinch-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-pinch-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("2904f1d311c693ddb525a1b922b119ee14004171b59d48eee78c73bc9d4527c8");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ pinchAmountAsDouble: true }, "exactly one Amnt long"],
+		[{ pinchAmount: 101 }, "-100 to 100"],
+		[{ pinchAmount: -101 }, "-100 to 100"],
+		[{ pinchOmitAmount: true }, "exactly one Amnt long"],
+		[{ pinchDuplicateAmount: true }, "duplicate key"],
+		[{ pinchUnknownKey: true }, "unsupported key"],
+		[{ filterIdOverride: 1 }, "filterID 1349411688"],
+	] as const)("preserves malformed Pinch descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed Pinch",
+				id: 5913,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "pinch", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "pinch",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-radial-power-pinch-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes both exact Polar Coordinates modes with complete shared MCP evidence", async () => {
+		const sourcePath = join(directory, "assets/live-polar-coordinates-smart-filter.psd");
+		const rgba = Array.from({ length: 63 }, (_, index) => [index * 13, 255 - index * 9, index * 19, index === 0 ? 0 : index === 31 ? 128 : 255]).flat();
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Polar Coordinates",
+						id: 5922,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 9, 0, 9, 7, 0, 7],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "polarCoordinates", polarConversion: "rectangularToPolar" }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 9, height: 7 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "polar-source.psd", fileType: "PSD", data: createCompositePsd(9, 7, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-polar-coordinates-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "polarCoordinates",
+			filterClassId: "Plr ",
+			filterId: 1349284384,
+			polarCoordinates: { conversion: "rectangularToPolar" },
+			algorithmExecutionModel: "bounded-aspect-correct-polar-coordinates-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		const inverse = inspectPsdLayers(
+			createLayeredPsd([
+				layer({
+					name: "Inverse Polar Coordinates",
+					id: 5924,
+					left: 0,
+					top: 0,
+					width: 1,
+					height: 1,
+					visible: true,
+					opacity: 255,
+					rgba: [1, 2, 3, 255],
+					additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "polarCoordinates", polarConversion: "polarToRectangular" }] }))],
+				}),
+			])
+		).layers[0].smartObject?.smartFilters[0];
+		expect(inverse).toMatchObject({
+			type: "polarCoordinates",
+			polarCoordinates: { conversion: "polarToRectangular" },
+			algorithmExecutionModel: "bounded-aspect-correct-polar-coordinates-smart-filter-v1",
+			bakeSupported: true,
+		});
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-polar-coordinates-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("0cac8098945cb081de6c0d5a0c9995a90a1e8f809f0cb10d03301c2cf0471e46");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ polarConversionEntryType: "TEXT" as const }, "exactly one Cnvr enum"],
+		[{ polarConversion: "unsupported" as const }, "Rectangular To Polar or Polar To Rectangular"],
+		[{ polarEnumType: "Nope" }, "enum type must be Cnvr"],
+		[{ polarOmitConversion: true }, "exactly one Cnvr enum"],
+		[{ polarDuplicateConversion: true }, "duplicate key"],
+		[{ polarUnknownKey: true }, "unsupported key"],
+		[{ filterIdOverride: 1 }, "filterID 1349284384"],
+	] as const)("preserves malformed Polar Coordinates descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed Polar Coordinates",
+				id: 5923,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "polarCoordinates", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "polarCoordinates",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-aspect-correct-polar-coordinates-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes exact Ripple amount and size with complete shared MCP evidence", async () => {
+		const sourcePath = join(directory, "assets/live-ripple-smart-filter.psd");
+		const rgba = Array.from({ length: 99 }, (_, index) => [index * 17, 255 - index * 11, index * 23, index === 0 ? 0 : index === 49 ? 128 : 255]).flat();
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Ripple",
+						id: 5932,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 11, 0, 11, 9, 0, 9],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "ripple", rippleAmount: 240, rippleSize: "medium" }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 11, height: 9 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "ripple-source.psd", fileType: "PSD", data: createCompositePsd(11, 9, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-ripple-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "ripple",
+			filterClassId: "Rple",
+			filterId: 1383099493,
+			ripple: { amountPercent: 240, size: "medium" },
+			algorithmExecutionModel: "bounded-two-axis-sinusoidal-ripple-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		for (const settings of [
+			{ rippleAmount: -240, rippleSize: "medium" as const },
+			{ rippleAmount: 240, rippleSize: "small" as const },
+			{ rippleAmount: 240, rippleSize: "large" as const },
+		]) {
+			const variant = inspectPsdLayers(
+				createLayeredPsd([
+					layer({
+						name: "Ripple variant",
+						id: 5934,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "ripple", ...settings }] }))],
+					}),
+				])
+			).layers[0].smartObject?.smartFilters[0];
+			expect(variant).toMatchObject({
+				type: "ripple",
+				ripple: { amountPercent: settings.rippleAmount, size: settings.rippleSize },
+				algorithmExecutionModel: "bounded-two-axis-sinusoidal-ripple-smart-filter-v1",
+				bakeSupported: true,
+			});
+		}
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-ripple-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("03f1994143bd3aafd1753cafe6b5f20a0183c04292b1c285784d0ef78fa22fb8");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ rippleAmountAsDouble: true }, "exactly one Amnt long"],
+		[{ rippleAmount: 1000 }, "-999 to 999"],
+		[{ rippleAmount: -1000 }, "-999 to 999"],
+		[{ rippleOmitAmount: true }, "exactly one Amnt long"],
+		[{ rippleSizeEntryType: "TEXT" as const }, "exactly one RplS enum"],
+		[{ rippleSize: "unsupported" as const }, "Small, Medium, or Large"],
+		[{ rippleSizeEnumType: "Nope" }, "enum type must be RplS"],
+		[{ rippleOmitSize: true }, "exactly one RplS enum"],
+		[{ rippleDuplicateAmount: true }, "duplicate key"],
+		[{ rippleDuplicateSize: true }, "duplicate key"],
+		[{ rippleUnknownKey: true }, "unsupported key"],
+		[{ filterIdOverride: 1 }, "filterID 1383099493"],
+	] as const)("preserves malformed Ripple descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed Ripple",
+				id: 5933,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "ripple", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "ripple",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-two-axis-sinusoidal-ripple-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes an exact Shear curve and undefined-area mode with complete shared MCP evidence", async () => {
+		const sourcePath = join(directory, "assets/live-shear-smart-filter.psd");
+		const rgba = Array.from({ length: 108 }, (_, index) => [index * 19, 255 - index * 7, index * 29, index === 0 ? 0 : index === 53 ? 128 : 255]).flat();
+		const curvePoints = [
+			{ x: 0, y: 0 },
+			{ x: 18, y: 42 },
+			{ x: -12, y: 86 },
+			{ x: 6, y: 128 },
+		];
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Shear",
+						id: 5942,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 12, 0, 12, 9, 0, 9],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "shear", shearPoints: curvePoints, shearUndefinedAreas: "wrapAround" }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 12, height: 9 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "shear-source.psd", fileType: "PSD", data: createCompositePsd(12, 9, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-shear-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "shear",
+			filterClassId: "Shr ",
+			filterId: 1399353888,
+			shear: { curvePoints, curveStartIndex: 0, curveEndIndex: 3, undefinedAreas: "wrapAround" },
+			algorithmExecutionModel: "bounded-monotone-cubic-shear-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		const repeatEdge = inspectPsdLayers(
+			createLayeredPsd([
+				layer({
+					name: "Shear Repeat Edge",
+					id: 5944,
+					left: 0,
+					top: 0,
+					width: 1,
+					height: 1,
+					visible: true,
+					opacity: 255,
+					rgba: [1, 2, 3, 255],
+					additionalInfo: [
+						additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "shear", shearPoints: curvePoints, shearUndefinedAreas: "repeatEdgePixels" }] })),
+					],
+				}),
+			])
+		).layers[0].smartObject?.smartFilters[0];
+		expect(repeatEdge).toMatchObject({
+			type: "shear",
+			shear: { curvePoints, curveStartIndex: 0, curveEndIndex: 3, undefinedAreas: "repeatEdgePixels" },
+			algorithmExecutionModel: "bounded-monotone-cubic-shear-smart-filter-v1",
+			bakeSupported: true,
+		});
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-shear-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("6af9bf340a39a99919eadc382e481427668b5a5eb414e06d06450e6e46d2b8f0");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ shearPointsEntryType: "TEXT" as const }, "exactly one ShrP descriptor list"],
+		[{ shearPoints: [{ x: 0, y: 0 }] }, "2 through 255"],
+		[{ shearPoints: Array.from({ length: 256 }, (_, index) => ({ x: 0, y: index })) }, "2 through 255"],
+		[{ shearPointClassId: "Nope" }, "requires class Pnt"],
+		[{ shearPointHorizontalAsLong: true }, "exact Hrzn/Vrtc double"],
+		[{ shearPointMissingVertical: true }, "exact Hrzn/Vrtc double"],
+		[{ shearPointDuplicateHorizontal: true }, "duplicate key"],
+		[{ shearPointUnknownKey: true }, "unsupported key"],
+		[
+			{
+				shearPoints: [
+					{ x: 0.5, y: 0 },
+					{ x: 0, y: 128 },
+				],
+			},
+			"integer horizontal displacement",
+		],
+		[
+			{
+				shearPoints: [
+					{ x: 1_000_001, y: 0 },
+					{ x: 0, y: 128 },
+				],
+			},
+			"integer horizontal displacement",
+		],
+		[
+			{
+				shearPoints: [
+					{ x: 0, y: -1 },
+					{ x: 0, y: 128 },
+				],
+			},
+			"vertical coordinate",
+		],
+		[
+			{
+				shearPoints: [
+					{ x: 0, y: 64 },
+					{ x: 0, y: 32 },
+				],
+			},
+			"strictly ordered",
+		],
+		[{ shearUndefinedAreaEntryType: "TEXT" as const }, "exactly one UndA enum"],
+		[{ shearUndefinedAreas: "unsupported" as const }, "Wrap Around or Repeat Edge Pixels"],
+		[{ shearUndefinedAreaEnumType: "Nope" }, "enum type must be UndA"],
+		[{ shearStartAsDouble: true }, "exact ShrS/ShrE long"],
+		[{ shearEndAsDouble: true }, "exact ShrS/ShrE long"],
+		[{ shearStartIndex: 3 }, "ordered nonempty interval"],
+		[{ shearEndIndex: 4 }, "ordered nonempty interval"],
+		[{ shearOmitPoints: true }, "exactly one ShrP descriptor list"],
+		[{ shearOmitUndefinedAreas: true }, "exactly one UndA enum"],
+		[{ shearOmitStart: true }, "exact ShrS/ShrE long"],
+		[{ shearOmitEnd: true }, "exact ShrS/ShrE long"],
+		[{ shearDuplicatePoints: true }, "duplicate key"],
+		[{ shearUnknownKey: true }, "unsupported key"],
+		[{ filterIdOverride: 1 }, "filterID 1399353888"],
+	] as const)("preserves malformed Shear descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed Shear",
+				id: 5943,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "shear", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "shear",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-monotone-cubic-shear-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes exact Spherize amount and all three modes with complete shared MCP evidence", async () => {
+		const sourcePath = join(directory, "assets/live-spherize-smart-filter.psd");
+		const rgba = Array.from({ length: 99 }, (_, index) => [index * 17, 255 - index * 11, index * 23, index === 0 ? 0 : index === 49 ? 128 : 255]).flat();
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Spherize",
+						id: 5952,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 11, 0, 11, 9, 0, 9],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "spherize", spherizeAmount: 70, spherizeMode: "normal" }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 11, height: 9 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "spherize-source.psd", fileType: "PSD", data: createCompositePsd(11, 9, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-spherize-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "spherize",
+			filterClassId: "Sphr",
+			filterId: 1399875698,
+			spherize: { amountPercent: 70, mode: "normal" },
+			algorithmExecutionModel: "bounded-axis-selective-spherical-spherize-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		for (const settings of [
+			{ spherizeAmount: -70, spherizeMode: "normal" as const },
+			{ spherizeAmount: 70, spherizeMode: "horizontalOnly" as const },
+			{ spherizeAmount: 70, spherizeMode: "verticalOnly" as const },
+		]) {
+			const variant = inspectPsdLayers(
+				createLayeredPsd([
+					layer({
+						name: "Spherize variant",
+						id: 5954,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "spherize", ...settings }] }))],
+					}),
+				])
+			).layers[0].smartObject?.smartFilters[0];
+			expect(variant).toMatchObject({
+				type: "spherize",
+				spherize: { amountPercent: settings.spherizeAmount, mode: settings.spherizeMode },
+				algorithmExecutionModel: "bounded-axis-selective-spherical-spherize-smart-filter-v1",
+				bakeSupported: true,
+			});
+		}
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-spherize-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("4fefe8ab76a32d5acda1c4b10ee5e8425fb9f9cee5a53d1f78af77ec37cdeed4");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ spherizeAmountAsDouble: true }, "exactly one Amnt long"],
+		[{ spherizeAmount: 101 }, "-100 to 100"],
+		[{ spherizeAmount: -101 }, "-100 to 100"],
+		[{ spherizeOmitAmount: true }, "exactly one Amnt long"],
+		[{ spherizeModeEntryType: "TEXT" as const }, "exactly one SphM enum"],
+		[{ spherizeMode: "unsupported" as const }, "Normal, Horizontal Only, or Vertical Only"],
+		[{ spherizeModeEnumType: "Nope" }, "enum type must be SphM"],
+		[{ spherizeOmitMode: true }, "exactly one SphM enum"],
+		[{ spherizeDuplicateAmount: true }, "duplicate key"],
+		[{ spherizeDuplicateMode: true }, "duplicate key"],
+		[{ spherizeUnknownKey: true }, "unsupported key"],
+		[{ filterIdOverride: 1 }, "filterID 1399875698"],
+	] as const)("preserves malformed Spherize descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed Spherize",
+				id: 5953,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "spherize", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "spherize",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-axis-selective-spherical-spherize-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes exact signed Twirl angles with complete shared MCP evidence", async () => {
+		const sourcePath = join(directory, "assets/live-twirl-smart-filter.psd");
+		const rgba = Array.from({ length: 99 }, (_, index) => [index * 17, 255 - index * 11, index * 23, index === 0 ? 0 : index === 49 ? 128 : 255]).flat();
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Twirl",
+						id: 5962,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 11, 0, 11, 9, 0, 9],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "twirl", twirlAngle: 420 }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 11, height: 9 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "twirl-source.psd", fileType: "PSD", data: createCompositePsd(11, 9, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-twirl-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "twirl",
+			filterClassId: "Twrl",
+			filterId: 1417114220,
+			twirl: { angleDegrees: 420 },
+			algorithmExecutionModel: "bounded-radial-falloff-twirl-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		for (const angleDegrees of [-420, 0, 999]) {
+			const variant = inspectPsdLayers(
+				createLayeredPsd([
+					layer({
+						name: "Twirl variant",
+						id: 5964,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "twirl", twirlAngle: angleDegrees }] }))],
+					}),
+				])
+			).layers[0].smartObject?.smartFilters[0];
+			expect(variant).toMatchObject({
+				type: "twirl",
+				twirl: { angleDegrees },
+				algorithmExecutionModel: "bounded-radial-falloff-twirl-smart-filter-v1",
+				bakeSupported: true,
+			});
+		}
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-twirl-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("d2ada68e80696a5a71aeb4143db9565f0954a824816c72ebd47273b0d0b2bc8a");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ twirlAngleAsDouble: true }, "exactly one Angl long"],
+		[{ twirlAngle: 1000 }, "-999 through 999"],
+		[{ twirlAngle: -1000 }, "-999 through 999"],
+		[{ twirlOmitAngle: true }, "exactly one Angl long"],
+		[{ twirlDuplicateAngle: true }, "duplicate key"],
+		[{ twirlUnknownKey: true }, "unsupported key"],
+		[{ filterIdOverride: 1 }, "filterID 1417114220"],
+	] as const)("preserves malformed Twirl descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed Twirl",
+				id: 5963,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "twirl", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "twirl",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-radial-falloff-twirl-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes exact seeded Wave controls with complete shared MCP evidence", async () => {
+		const sourcePath = join(directory, "assets/live-wave-smart-filter.psd");
+		const rgba = Array.from({ length: 99 }, (_, index) => [index * 17, 255 - index * 11, index * 23, index === 0 ? 0 : index === 49 ? 128 : 255]).flat();
+		const smartFilter = {
+			type: "wave" as const,
+			waveNumberOfGenerators: 3,
+			waveType: "sine" as const,
+			waveMinimumWavelength: 3,
+			waveMaximumWavelength: 9,
+			waveMinimumAmplitude: 1,
+			waveMaximumAmplitude: 4,
+			waveHorizontalScale: 75,
+			waveVerticalScale: 55,
+			waveRandomSeed: 123456,
+			waveUndefinedAreas: "wrapAround" as const,
+		};
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Wave",
+						id: 5972,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 11, 0, 11, 9, 0, 9],
+									nonAffineTransform: null,
+									smartFilters: [smartFilter],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 11, height: 9 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "wave-source.psd", fileType: "PSD", data: createCompositePsd(11, 9, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-wave-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "wave",
+			filterClassId: "Wave",
+			filterId: 1466005093,
+			wave: {
+				numberOfGenerators: 3,
+				type: "sine",
+				wavelength: { minimum: 3, maximum: 9 },
+				amplitude: { minimum: 1, maximum: 4 },
+				scale: { horizontalPercent: 75, verticalPercent: 55 },
+				randomSeed: 123456,
+				undefinedAreas: "wrapAround",
+			},
+			algorithmExecutionModel: "bounded-seeded-multi-generator-wave-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		for (const settings of [{ waveType: "triangle" as const }, { waveType: "square" as const }, { waveUndefinedAreas: "repeatEdgePixels" as const }]) {
+			const variant = inspectPsdLayers(
+				createLayeredPsd([
+					layer({
+						name: "Wave variant",
+						id: 5974,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ ...smartFilter, ...settings }] }))],
+					}),
+				])
+			).layers[0].smartObject?.smartFilters[0];
+			expect(variant).toMatchObject({ type: "wave", bakeSupported: true, algorithmExecutionModel: "bounded-seeded-multi-generator-wave-smart-filter-v1" });
+		}
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-wave-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("7c85e26ad646f16c128a01516954e408538f40f35965d101b5e6acba6968ecb4");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ waveLongAsDouble: "NmbG" as const }, "exactly one NmbG long"],
+		[{ waveNumberOfGenerators: 0 }, "1 through 999"],
+		[{ waveNumberOfGenerators: 1000 }, "1 through 999"],
+		[{ waveMinimumWavelength: 0 }, "wavelength"],
+		[{ waveMaximumWavelength: 1000 }, "wavelength"],
+		[{ waveMinimumWavelength: 9, waveMaximumWavelength: 9 }, "wavelength"],
+		[{ waveMinimumAmplitude: 0 }, "amplitude"],
+		[{ waveMaximumAmplitude: 1000 }, "amplitude"],
+		[{ waveMinimumAmplitude: 4, waveMaximumAmplitude: 4 }, "amplitude"],
+		[{ waveHorizontalScale: 0 }, "horizontal and vertical scale"],
+		[{ waveVerticalScale: 101 }, "horizontal and vertical scale"],
+		[{ waveTypeEntryType: "TEXT" as const }, "exactly one Wvtp enum"],
+		[{ waveTypeEnumType: "Nope" }, "enum type must be Wvtp"],
+		[{ waveType: "unsupported" as const }, "Sine, Triangle, or Square"],
+		[{ waveUndefinedAreaEntryType: "TEXT" as const }, "exactly one UndA enum"],
+		[{ waveUndefinedAreaEnumType: "Nope" }, "enum type must be UndA"],
+		[{ waveUndefinedAreas: "unsupported" as const }, "Wrap Around or Repeat Edge Pixels"],
+		[{ waveOmitKey: "WLMn" as const }, "exactly one WLMn long"],
+		[{ waveOmitKey: "UndA" as const }, "exactly one UndA enum"],
+		[{ waveDuplicateKey: "RndS" as const }, "duplicate key"],
+		[{ waveUnknownKey: true }, "unsupported key"],
+		[{ filterIdOverride: 1 }, "filterID 1466005093"],
+	] as const)("preserves malformed Wave descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed Wave",
+				id: 5973,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "wave", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "wave",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-seeded-multi-generator-wave-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes exact signed ZigZag controls and all three styles with complete shared MCP evidence", async () => {
+		const sourcePath = join(directory, "assets/live-zigzag-smart-filter.psd");
+		const rgba = Array.from({ length: 99 }, (_, index) => [index * 17, 255 - index * 11, index * 23, index === 0 ? 0 : index === 49 ? 128 : 255]).flat();
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "ZigZag",
+						id: 5982,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 11, 0, 11, 9, 0, 9],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "zigzag", zigZagAmount: 65, zigZagRidges: 5, zigZagStyle: "aroundCenter" }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 11, height: 9 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "zigzag-source.psd", fileType: "PSD", data: createCompositePsd(11, 9, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-zigzag-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "zigzag",
+			filterClassId: "ZgZg",
+			filterId: 1516722791,
+			zigzag: { amountPercent: 65, ridges: 5, style: "aroundCenter" },
+			algorithmExecutionModel: "bounded-aspect-correct-radial-zigzag-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		for (const settings of [
+			{ zigZagAmount: -65, zigZagRidges: 5, zigZagStyle: "aroundCenter" as const },
+			{ zigZagAmount: 65, zigZagRidges: 5, zigZagStyle: "outFromCenter" as const },
+			{ zigZagAmount: 65, zigZagRidges: 5, zigZagStyle: "pondRipples" as const },
+			{ zigZagAmount: 0, zigZagRidges: 20, zigZagStyle: "pondRipples" as const },
+		]) {
+			const variant = inspectPsdLayers(
+				createLayeredPsd([
+					layer({
+						name: "ZigZag variant",
+						id: 5984,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "zigzag", ...settings }] }))],
+					}),
+				])
+			).layers[0].smartObject?.smartFilters[0];
+			expect(variant).toMatchObject({
+				type: "zigzag",
+				zigzag: { amountPercent: settings.zigZagAmount, ridges: settings.zigZagRidges, style: settings.zigZagStyle },
+				algorithmExecutionModel: "bounded-aspect-correct-radial-zigzag-smart-filter-v1",
+				bakeSupported: true,
+			});
+		}
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-zigzag-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("70730b49d85e549912dbf23d0e0fe15187b988c44b9d072c8210e6c9ae87ba7b");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ zigZagAmountAsDouble: true }, "exactly one Amnt long"],
+		[{ zigZagRidgesAsDouble: true }, "one NmbR long"],
+		[{ zigZagAmount: 101 }, "-100 through 100"],
+		[{ zigZagAmount: -101 }, "-100 through 100"],
+		[{ zigZagRidges: -1 }, "0 through 20"],
+		[{ zigZagRidges: 21 }, "0 through 20"],
+		[{ zigZagOmitAmount: true }, "exactly one Amnt long"],
+		[{ zigZagOmitRidges: true }, "one NmbR long"],
+		[{ zigZagStyleEntryType: "TEXT" as const }, "exactly one ZZTy enum"],
+		[{ zigZagStyleEnumType: "Nope" }, "enum type must be ZZTy"],
+		[{ zigZagStyle: "unsupported" as const }, "Around Center, Out From Center, or Pond Ripples"],
+		[{ zigZagOmitStyle: true }, "exactly one ZZTy enum"],
+		[{ zigZagDuplicateAmount: true }, "duplicate key"],
+		[{ zigZagDuplicateRidges: true }, "duplicate key"],
+		[{ zigZagDuplicateStyle: true }, "duplicate key"],
+		[{ zigZagUnknownKey: true }, "unsupported key"],
+		[{ filterIdOverride: 1 }, "filterID 1516722791"],
+	] as const)("preserves malformed ZigZag descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed ZigZag",
+				id: 5983,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "zigzag", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "zigzag",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-aspect-correct-radial-zigzag-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes exact RGB, HSB, and HSL channel-model conversions with complete shared MCP evidence", async () => {
+		const sourcePath = join(directory, "assets/live-hsb-hsl-smart-filter.psd");
+		const rgba = Array.from({ length: 35 }, (_, index) => [index * 37, 255 - index * 19, index * 53, index === 0 ? 0 : index === 17 ? 128 : 255]).flat();
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "HSB/HSL",
+						id: 5992,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 7, 0, 7, 5, 0, 5],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "hsbHsl", hsbHslInputMode: "rgb", hsbHslRowOrder: "hsb" }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 7, height: 5 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "hsb-hsl-source.psd", fileType: "PSD", data: createCompositePsd(7, 5, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-hsb-hsl-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "hsbHsl",
+			filterClassId: "HsbP",
+			filterId: 1215521360,
+			hsbHsl: { inputMode: "rgb", rowOrder: "hsb" },
+			algorithmExecutionModel: "bounded-channel-model-hsb-hsl-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		for (const settings of [
+			{ hsbHslInputMode: "rgb" as const, hsbHslRowOrder: "hsl" as const },
+			{ hsbHslInputMode: "hsb" as const, hsbHslRowOrder: "rgb" as const },
+			{ hsbHslInputMode: "hsl" as const, hsbHslRowOrder: "rgb" as const },
+			{ hsbHslInputMode: "hsb" as const, hsbHslRowOrder: "hsl" as const },
+			{ hsbHslInputMode: "hsl" as const, hsbHslRowOrder: "hsb" as const },
+			{ hsbHslInputMode: "rgb" as const, hsbHslRowOrder: "rgb" as const },
+		]) {
+			const variant = inspectPsdLayers(
+				createLayeredPsd([
+					layer({
+						name: "HSB/HSL variant",
+						id: 5994,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "hsbHsl", ...settings }] }))],
+					}),
+				])
+			).layers[0].smartObject?.smartFilters[0];
+			expect(variant).toMatchObject({
+				type: "hsbHsl",
+				hsbHsl: { inputMode: settings.hsbHslInputMode, rowOrder: settings.hsbHslRowOrder },
+				algorithmExecutionModel: "bounded-channel-model-hsb-hsl-smart-filter-v1",
+				bakeSupported: true,
+			});
+		}
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-hsb-hsl-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("4101413ed4898e487c5d586f90de83407634b1bb951404a9ea3dc59913d56ca1");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ hsbHslInputEntryType: "TEXT" as const }, "exactly one Inpt ClrS enum"],
+		[{ hsbHslRowOrderEntryType: "TEXT" as const }, "exactly one Otpt ClrS enum"],
+		[{ hsbHslInputEnumType: "Nope" }, "Inpt enum type must be ClrS"],
+		[{ hsbHslRowOrderEnumType: "Nope" }, "Otpt enum type must be ClrS"],
+		[{ hsbHslInputMode: "unsupported" as const }, "input mode LbCl is unsupported"],
+		[{ hsbHslRowOrder: "unsupported" as const }, "row order LbCl is unsupported"],
+		[{ hsbHslOmitInput: true }, "exactly one Inpt ClrS enum"],
+		[{ hsbHslOmitRowOrder: true }, "exactly one Otpt ClrS enum"],
+		[{ hsbHslDuplicateInput: true }, "duplicate key"],
+		[{ hsbHslDuplicateRowOrder: true }, "duplicate key"],
+		[{ hsbHslUnknownKey: true }, "unsupported key"],
+		[{ filterIdOverride: 1 }, "filterID 1215521360"],
+	] as const)("preserves malformed HSB/HSL descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed HSB/HSL",
+				id: 5993,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "hsbHsl", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "hsbHsl",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-channel-model-hsb-hsl-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes exact single and connected-plane Perspective Warp descriptors end to end", async () => {
+		const sourcePath = join(directory, "assets/live-perspective-warp-smart-filter.psd");
+		const rgba = Array.from({ length: 63 }, (_, index) => {
+			const x = index % 9;
+			const y = Math.floor(index / 9);
+			return [x * 29, y * 37, (x * 17 + y * 23) % 256, x === 0 && y === 0 ? 0 : x === 4 && y === 3 ? 128 : 255];
+		}).flat();
+		const vertices = [
+			{ x: 1, y: 1 },
+			{ x: 7, y: 1 },
+			{ x: 7, y: 5 },
+			{ x: 1, y: 5 },
+		];
+		const warpedVertices = [
+			{ x: 0.5, y: 1.5 },
+			{ x: 7.5, y: 0.5 },
+			{ x: 6.5, y: 5.5 },
+			{ x: 1.5, y: 5 },
+		];
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Perspective Warp",
+						id: 6000,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 9, 0, 9, 7, 0, 7],
+									nonAffineTransform: null,
+									smartFilters: [
+										{
+											type: "perspectiveWarp",
+											perspectiveWarpVertices: vertices,
+											perspectiveWarpWarpedVertices: warpedVertices,
+											perspectiveWarpQuads: [[0, 1, 2, 3]],
+										},
+									],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 9, height: 7 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "perspective-warp-source.psd", fileType: "PSD", data: createCompositePsd(9, 7, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-perspective-warp-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "perspectiveWarp",
+			filterClassId: "perspectiveWarpTransform",
+			filterId: 442,
+			perspectiveWarp: { vertices, warpedVertices, quads: [[0, 1, 2, 3]], connectedEdgeCount: 0 },
+			algorithmExecutionModel: "bounded-piecewise-projective-perspective-warp-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		const connectedVertices = [
+			{ x: 0, y: 0 },
+			{ x: 4.5, y: 0 },
+			{ x: 9, y: 0 },
+			{ x: 0, y: 7 },
+			{ x: 4.5, y: 7 },
+			{ x: 9, y: 7 },
+		];
+		const connectedWarpedVertices = [
+			{ x: 0, y: 0 },
+			{ x: 3.5, y: 0.75 },
+			{ x: 9, y: 0 },
+			{ x: 0, y: 7 },
+			{ x: 5.5, y: 6.25 },
+			{ x: 9, y: 7 },
+		];
+		const connected = inspectPsdLayers(
+			createLayeredPsd([
+				layer({
+					name: "Connected Perspective Warp",
+					id: 6001,
+					left: 0,
+					top: 0,
+					width: 1,
+					height: 1,
+					visible: true,
+					opacity: 255,
+					rgba: [1, 2, 3, 255],
+					additionalInfo: [
+						additional(
+							"SoLd",
+							smartObjectLayer({
+								smartFilters: [
+									{
+										type: "perspectiveWarp",
+										perspectiveWarpVertices: connectedVertices,
+										perspectiveWarpWarpedVertices: connectedWarpedVertices,
+										perspectiveWarpQuads: [
+											[0, 1, 4, 3],
+											[1, 2, 5, 4],
+										],
+									},
+								],
+							})
+						),
+					],
+				}),
+			])
+		).layers[0].smartObject?.smartFilters[0];
+		expect(connected).toMatchObject({
+			type: "perspectiveWarp",
+			perspectiveWarp: {
+				vertices: connectedVertices,
+				warpedVertices: connectedWarpedVertices,
+				quads: [
+					[0, 1, 4, 3],
+					[1, 2, 5, 4],
+				],
+				connectedEdgeCount: 1,
+			},
+			bakeSupported: true,
+		});
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-perspective-warp-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("390af730e762612cb9094d476b7583eb0e448a9145e8588403ea6bb537cddc94");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ perspectiveWarpOmitVertices: true }, "exactly one vertices VlLs"],
+		[{ perspectiveWarpOmitWarpedVertices: true }, "exactly one warpedVertices VlLs"],
+		[{ perspectiveWarpOmitQuads: true }, "exactly one quads VlLs"],
+		[{ perspectiveWarpDuplicateVertices: true }, "duplicate key"],
+		[{ perspectiveWarpUnknownKey: true }, "unsupported key"],
+		[{ perspectiveWarpDescriptorClass: "Nope" }, "class/id Nope"],
+		[{ perspectiveWarpPointClass: "Nope" }, "class must be Pnt"],
+		[{ perspectiveWarpQuadClass: "Nope" }, "class must be null"],
+		[{ perspectiveWarpUnits: "#Prc" }, "finite #Pxl UntF coordinate"],
+		[
+			{
+				perspectiveWarpWarpedVertices: [
+					{ x: 0, y: 0 },
+					{ x: 1, y: 0 },
+					{ x: 1, y: 1 },
+					{ x: 0, y: 1 },
+					{ x: 2, y: 2 },
+				],
+			},
+			"must match the source vertex count",
+		],
+		[{ perspectiveWarpQuads: [[0, 1, 2, 4]] }, "in-range integers"],
+		[{ perspectiveWarpQuads: [[0, 1, 2, 2]] }, "four distinct vertices"],
+		[
+			{
+				perspectiveWarpVertices: [
+					{ x: 1, y: 1 },
+					{ x: 7, y: 1 },
+					{ x: 7, y: 5 },
+					{ x: 1, y: 5 },
+					{ x: 8, y: 6 },
+				],
+				perspectiveWarpWarpedVertices: [
+					{ x: 1, y: 1 },
+					{ x: 7, y: 1 },
+					{ x: 7, y: 5 },
+					{ x: 1, y: 5 },
+					{ x: 8, y: 6 },
+				],
+			},
+			"every source and warped vertex must be referenced",
+		],
+		[
+			{
+				perspectiveWarpWarpedVertices: [
+					{ x: 0.5, y: 1.5 },
+					{ x: 6.5, y: 5.5 },
+					{ x: 7.5, y: 0.5 },
+					{ x: 1.5, y: 5 },
+				],
+			},
+			"simple convex plane",
+		],
+		[{ filterIdOverride: 1 }, "filterID 442"],
+	] as const)("preserves malformed Perspective Warp descriptors as explicit non-executable evidence", (settings, warning) => {
+		const bytes = createLayeredPsd([
+			layer({
+				name: "Malformed Perspective Warp",
+				id: 6002,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "perspectiveWarp", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: settings.perspectiveWarpDescriptorClass === "Nope" ? "unsupported" : "perspectiveWarp",
+			bakeSupported: false,
+		});
+		if (settings.perspectiveWarpDescriptorClass !== "Nope") {
+			expect(inspected?.algorithmExecutionModel).toBe("bounded-piecewise-projective-perspective-warp-v1");
+		}
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes exact point-curve and mapping-table Curves descriptors end to end", async () => {
+		const sourcePath = join(directory, "assets/live-curves-smart-filter.psd");
+		const rgba = Array.from({ length: 48 }, (_, index) => {
+			const x = index % 8;
+			const y = Math.floor(index / 8);
+			return [x * 36, y * 49, (x * 19 + y * 31) % 256, x === 0 && y === 0 ? 0 : x === 4 && y === 3 ? 128 : 255];
+		}).flat();
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Curves",
+						id: 6010,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 8, 0, 8, 6, 0, 6],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "curves" }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 8, height: 6 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "curves-source.psd", fileType: "PSD", data: createCompositePsd(8, 6, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-curves-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "curves",
+			filterClassId: "Crvs",
+			filterId: 1131574899,
+			curves: {
+				presetKind: "custom",
+				adjustments: [
+					{
+						channels: ["composite"],
+						mode: "curve",
+						points: [
+							{ input: 0, output: 0, curved: false },
+							{ input: 64, output: 48, curved: true },
+							{ input: 128, output: 176, curved: true },
+							{ input: 255, output: 255, curved: false },
+						],
+					},
+					{
+						channels: ["red"],
+						mode: "curve",
+						points: [
+							{ input: 0, output: 12, curved: false },
+							{ input: 96, output: 112, curved: false },
+							{ input: 255, output: 244, curved: false },
+						],
+					},
+					{ channels: ["green", "blue"], mode: "mapping", values: Array.from({ length: 256 }, (_, value) => 255 - value) },
+				],
+			},
+			algorithmExecutionModel: "bounded-authored-channel-curves-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		const defaultFilter = inspectPsdLayers(
+			createLayeredPsd([
+				layer({
+					name: "Default Curves",
+					id: 6011,
+					left: 0,
+					top: 0,
+					width: 1,
+					height: 1,
+					visible: true,
+					opacity: 255,
+					rgba: [1, 2, 3, 255],
+					additionalInfo: [
+						additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "curves", curvesDescriptor: { presetKind: "default", omitAdjustments: true } }] })),
+					],
+				}),
+			])
+		).layers[0].smartObject?.smartFilters[0];
+		expect(defaultFilter).toMatchObject({
+			type: "curves",
+			curves: { presetKind: "default", adjustments: [] },
+			algorithmExecutionModel: "bounded-authored-channel-curves-smart-filter-v1",
+			bakeSupported: true,
+		});
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-curves-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("4854cf06f3b98ca290d38de6f191fc1b623ca6b9ebc77f50960c9c605f7ff4cd");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ curvesDescriptor: { omitPreset: true } }, "presetKindType presetKind enum"],
+		[{ curvesDescriptor: { duplicatePreset: true } }, "duplicate key"],
+		[{ curvesDescriptor: { unknownKey: true } }, "unsupported key"],
+		[{ curvesDescriptor: { descriptorClass: "Nope" } }, "class/id Nope"],
+		[{ curvesDescriptor: { presetEntryType: "TEXT" } }, "presetKindType presetKind enum"],
+		[{ curvesDescriptor: { presetEnumType: "Nope" } }, "presetKindType presetKind enum"],
+		[{ curvesDescriptor: { presetKind: "unsupported" } }, "preset kind Nope"],
+		[{ curvesDescriptor: { omitAdjustments: true } }, "Custom preset requires"],
+		[{ curvesDescriptor: { presetKind: "default" } }, "Default preset cannot contain"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "curve", classId: "Nope" }] } }, "class must be CrvA"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "curve", channelsAsLong: true }] } }, "must be one Chnl enum"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "curve", channelEnumType: "Nope" }] } }, "must be one Chnl enum"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["unsupported"], mode: "curve" }] } }, "value Nope is unsupported"],
+		[
+			{
+				curvesDescriptor: {
+					adjustments: [
+						{ channels: ["red"], mode: "curve" },
+						{ channels: ["red"], mode: "mapping" },
+					],
+				},
+			},
+			"channel red is assigned more than once",
+		],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "both" }] } }, "exactly one Crv control-point list or Mpng"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "missing" }] } }, "exactly one Crv control-point list or Mpng"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "curve" }], pointClass: "Nope" } }, "class must be Pnt"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "curve" }], pointHorizontalAsLong: true } }, "must be one finite 0-255 double"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "curve" }], pointOmitVertical: true } }, "must be one finite 0-255 double"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "curve" }], pointDuplicateHorizontal: true } }, "duplicate key"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "curve" }], pointUnknownKey: true } }, "unsupported key"],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["red"], mode: "curve", points: [{ input: 0, output: 0 }] }] } }, "requires 2-16 control points"],
+		[
+			{
+				curvesDescriptor: {
+					adjustments: [
+						{
+							channels: ["red"],
+							mode: "curve",
+							points: [
+								{ input: 128, output: 0 },
+								{ input: 64, output: 255 },
+							],
+						},
+					],
+				},
+			},
+			"inputs must be strictly increasing",
+		],
+		[{ curvesDescriptor: { adjustments: [{ channels: ["blue"], mode: "mapping", values: Array.from({ length: 255 }, (_, value) => value) }] } }, "exactly 256 mapped values"],
+		[{ filterIdOverride: 1 }, "filterID 1131574899"],
+	] as Array<[{ curvesDescriptor?: CurvesFilterDescriptorOptions; filterIdOverride?: number }, string]>)(
+		"preserves malformed Curves descriptors as explicit non-executable evidence",
+		(settings, warning) => {
+			const bytes = createLayeredPsd([
+				layer({
+					name: "Malformed Curves",
+					id: 6012,
+					left: 0,
+					top: 0,
+					width: 1,
+					height: 1,
+					visible: true,
+					opacity: 255,
+					rgba: [1, 2, 3, 255],
+					additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "curves", ...settings }] }))],
+				}),
+			]);
+			const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+			expect(inspected).toMatchObject({
+				type: settings.curvesDescriptor?.descriptorClass === "Nope" ? "unsupported" : "curves",
+				bakeSupported: false,
+			});
+			if (settings.curvesDescriptor?.descriptorClass !== "Nope") {
+				expect(inspected?.algorithmExecutionModel).toBe("bounded-authored-channel-curves-smart-filter-v1");
+			}
+			expect(inspected?.warning).toContain(warning);
+		}
+	);
+
+	test("executes exact modern and legacy Brightness/Contrast descriptors end to end", async () => {
+		const sourcePath = join(directory, "assets/live-brightness-contrast-smart-filter.psd");
+		const rgba = Array.from({ length: 48 }, (_, index) => {
+			const x = index % 8;
+			const y = Math.floor(index / 8);
+			return [x * 36, y * 49, (x * 19 + y * 31) % 256, x === 0 && y === 0 ? 0 : x === 4 && y === 3 ? 128 : 255];
+		}).flat();
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Brightness Contrast",
+						id: 6020,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 8, 0, 8, 6, 0, 6],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "brightnessContrast", brightnessContrastDescriptor: { brightness: 42, contrast: 65, useLegacy: false } }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 8, height: 6 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({
+						type: "liFD",
+						id: "codex-smart-resource",
+						name: "brightness-contrast-source.psd",
+						fileType: "PSD",
+						data: createCompositePsd(8, 6, rgba),
+					})
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-brightness-contrast-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expected = {
+			type: "brightnessContrast",
+			filterClassId: "BrgC",
+			filterId: 1114793795,
+			brightnessContrast: { brightness: 42, contrast: 65, useLegacy: false },
+			algorithmExecutionModel: "bounded-modern-legacy-brightness-contrast-smart-filter-v1",
+			bakeSupported: true,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject(expected);
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject(expected);
+		const legacy = inspectPsdLayers(
+			createLayeredPsd([
+				layer({
+					name: "Legacy Brightness Contrast",
+					id: 6021,
+					left: 0,
+					top: 0,
+					width: 1,
+					height: 1,
+					visible: true,
+					opacity: 255,
+					rgba: [1, 2, 3, 255],
+					additionalInfo: [
+						additional(
+							"SoLd",
+							smartObjectLayer({ smartFilters: [{ type: "brightnessContrast", brightnessContrastDescriptor: { brightness: -35, contrast: 40, useLegacy: true } }] })
+						),
+					],
+				}),
+			])
+		).layers[0].smartObject?.smartFilters[0];
+		expect(legacy).toMatchObject({
+			type: "brightnessContrast",
+			brightnessContrast: { brightness: -35, contrast: 40, useLegacy: true },
+			algorithmExecutionModel: "bounded-modern-legacy-brightness-contrast-smart-filter-v1",
+			bakeSupported: true,
+		});
+		const engine = new NullEngine();
+		const scene = new Scene(engine);
+		expect(await inspectPsdLayerExtraction(scene, { path: "assets/live-brightness-contrast-smart-filter.psd", ...options })).toMatchObject({ fingerprint: plan.fingerprint });
+		scene.dispose();
+		engine.dispose();
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("8705f2ca75722b9b2e0ed4af172f268759256474041d78ec445d4836b8acf06f");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[{ brightnessContrastDescriptor: { omitBrightness: true } }, "Brgh must be exactly one long"],
+		[{ brightnessContrastDescriptor: { omitContrast: true } }, "Cntr must be exactly one long"],
+		[{ brightnessContrastDescriptor: { omitLegacy: true } }, "useLegacy must be exactly one bool"],
+		[{ brightnessContrastDescriptor: { duplicateBrightness: true } }, "duplicate key"],
+		[{ brightnessContrastDescriptor: { duplicateContrast: true } }, "duplicate key"],
+		[{ brightnessContrastDescriptor: { duplicateLegacy: true } }, "duplicate key"],
+		[{ brightnessContrastDescriptor: { unknownKey: true } }, "unsupported key"],
+		[{ brightnessContrastDescriptor: { descriptorClass: "Nope" } }, "class/id Nope"],
+		[{ brightnessContrastDescriptor: { brightnessEntryType: "doub" } }, "Brgh must be exactly one long"],
+		[{ brightnessContrastDescriptor: { contrastEntryType: "doub" } }, "Cntr must be exactly one long"],
+		[{ brightnessContrastDescriptor: { legacyEntryType: "long" } }, "useLegacy must be exactly one bool"],
+		[{ brightnessContrastDescriptor: { brightness: -151 } }, "Brgh must be an exact integer from -150 through 150"],
+		[{ brightnessContrastDescriptor: { brightness: 151 } }, "Brgh must be an exact integer from -150 through 150"],
+		[{ brightnessContrastDescriptor: { contrast: -51 } }, "Cntr must be an exact integer from -50 through 100"],
+		[{ brightnessContrastDescriptor: { contrast: 101 } }, "Cntr must be an exact integer from -50 through 100"],
+		[{ filterIdOverride: 1 }, "filterID 1114793795"],
+	] as Array<[{ brightnessContrastDescriptor?: BrightnessContrastFilterDescriptorOptions; filterIdOverride?: number }, string]>)(
+		"preserves malformed Brightness/Contrast descriptors as explicit non-executable evidence",
+		(settings, warning) => {
+			const bytes = createLayeredPsd([
+				layer({
+					name: "Malformed Brightness Contrast",
+					id: 6022,
+					left: 0,
+					top: 0,
+					width: 1,
+					height: 1,
+					visible: true,
+					opacity: 255,
+					rgba: [1, 2, 3, 255],
+					additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "brightnessContrast", ...settings }] }))],
+				}),
+			]);
+			const inspected = inspectPsdLayers(bytes).layers[0].smartObject?.smartFilters[0];
+			expect(inspected).toMatchObject({
+				type: settings.brightnessContrastDescriptor?.descriptorClass === "Nope" ? "unsupported" : "brightnessContrast",
+				bakeSupported: false,
+			});
+			if (settings.brightnessContrastDescriptor?.descriptorClass !== "Nope") {
+				expect(inspected?.algorithmExecutionModel).toBe("bounded-modern-legacy-brightness-contrast-smart-filter-v1");
+			}
+			expect(inspected?.warning).toContain(warning);
+		}
+	);
+
+	test("executes modern Oil Paint with complete controls and preserves legacy plug-in evidence", async () => {
+		const sourcePath = join(directory, "assets/live-oil-paint-smart-filter.psd");
+		const rgba = Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 5, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat();
+		const smartFilter = {
+			type: "oilPaint" as const,
+			oilPaintStylization: 6.5,
+			oilPaintCleanliness: 4,
+			oilPaintBrushScale: 7,
+			oilPaintBristleDetail: 3.5,
+			oilPaintLightDirection: 135,
+			oilPaintShine: 5,
+		};
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Oil Paint",
+						id: 5882,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ transform: [0, 0, 8, 0, 8, 6, 0, 6], nonAffineTransform: null, smartFilters: [smartFilter] }))],
+					}),
+				],
+				{ width: 8, height: 6 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "oil-paint.psd", fileType: "PSD", data: createCompositePsd(8, 6, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-oil-paint-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expectedParameters = {
+			descriptorVariant: "modern",
+			lightingOn: true,
+			stylization: 6.5,
+			cleanliness: 4,
+			brushScale: 7,
+			bristleDetail: 3.5,
+			lightDirectionDegrees: 135,
+			shine: 5,
+			legacyPlugin: null,
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject({
+			type: "oilPaint",
+			filterClassId: "oilPaint",
+			filterId: 1122,
+			oilPaint: expectedParameters,
+			algorithmExecutionModel: "bounded-anisotropic-kuwahara-oil-paint-smart-filter-v1",
+			bakeSupported: true,
+		});
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject({
+			type: "oilPaint",
+			oilPaint: expectedParameters,
+			algorithmExecutionModel: "bounded-anisotropic-kuwahara-oil-paint-smart-filter-v1",
+		});
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("0e52072438ef42703665e1b713080e57291e3e00a35c01c6caf5afb878a80390");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+
+		const legacySource = createLayeredPsd([
+			layer({
+				name: "Legacy Oil Paint",
+				id: 5883,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ ...smartFilter, oilPaintVariant: "legacyPlugin" }] }))],
+			}),
+		]);
+		const legacy = inspectPsdLayers(legacySource).layers[0].smartObject?.smartFilters[0];
+		expect(legacy).toMatchObject({
+			type: "oilPaint",
+			filterClassId: "PbPl",
+			filterId: 1348620396,
+			oilPaint: {
+				...expectedParameters,
+				descriptorVariant: "legacyPlugin",
+				legacyPlugin: {
+					kernelName: "Oil Paint Plugin",
+					gpuEnabled: true,
+					lightingEnabled: true,
+					filterPath: "1",
+					parameters: [
+						{ suffix: "aa", name: "Stylization", parameterType: 0, value: 6.5 },
+						{ suffix: "ab", name: "Cleanliness", parameterType: 0, value: 4 },
+						{ suffix: "ac", name: "Scale", parameterType: 0, value: 7 },
+						{ suffix: "ad", name: "Bristle Detail", parameterType: 0, value: 3.5 },
+						{ suffix: "ae", name: "Angle", parameterType: 0, value: 135 },
+						{ suffix: "af", name: "Shine", parameterType: 0, value: 5 },
+					],
+				},
+			},
+			bakeSupported: true,
+		});
+	});
+
+	test.each([
+		[{ oilPaintStylization: 11 }, "Stylization must be between 0 and 10"],
+		[{ oilPaintOmitControl: "cleanliness" as const }, "requires exactly one cleanliness"],
+		[{ oilPaintLightingAsLong: true }, "lightingOn must be an exact Boolean"],
+		[{ oilPaintLightDirection: 361 }, "light direction must be between -360 and 360"],
+		[{ oilPaintUnknownKey: true }, "contains unsupported key(s)"],
+		[{ oilPaintVariant: "legacyPlugin" as const, oilPaintOmitControl: "specularity" as const }, "requires 6-64 bounded named parameters"],
+	] as const)("preserves malformed Oil Paint descriptors as explicit non-executable evidence", (settings, warning) => {
+		const source = createLayeredPsd([
+			layer({
+				name: "Malformed Oil Paint",
+				id: 5884,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "oilPaint", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(source).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "oilPaint",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-anisotropic-kuwahara-oil-paint-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes version-3 Liquify RLE displacement and preserves version-2 raw mesh evidence", async () => {
+		const sourcePath = join(directory, "assets/live-liquify-smart-filter.psd");
+		const rgba = Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 5, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat();
+		const version3Mesh = liquifyMesh({
+			version: 3,
+			meshWidth: 2,
+			meshHeight: 2,
+			imageWidth: 8,
+			imageHeight: 6,
+			displacements: [
+				{ x: 0, y: 0 },
+				{ x: -1, y: 0.5 },
+				{ x: 0.75, y: -0.5 },
+				{ x: 0, y: 0 },
+			],
+		});
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Liquify",
+						id: 5892,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [
+							additional(
+								"SoLd",
+								smartObjectLayer({
+									transform: [0, 0, 8, 0, 8, 6, 0, 6],
+									nonAffineTransform: null,
+									smartFilters: [{ type: "liquify", liquifyMesh: version3Mesh }],
+								})
+							),
+						],
+					}),
+				],
+				{ width: 8, height: 6 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "liquify.psd", fileType: "PSD", data: createCompositePsd(8, 6, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-liquify-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const expectedVersion3 = {
+			meshVersion: 3,
+			signature: "yfqLhseM",
+			formatMarker: 2,
+			headerBytes: 64,
+			meshWidth: 2,
+			meshHeight: 2,
+			imageWidth: 8,
+			imageHeight: 6,
+			repeatedImageWidth: 8,
+			repeatedImageHeight: 6,
+			reservedHeaderWords: [0, 0, 0, 0, 0, 0],
+			meshByteLength: 100,
+			trailingPaddingBytes: 0,
+			displacementEncoding: "little-endian-zero-run-rle-float32-pairs",
+			displacementCount: 4,
+			nonzeroDisplacementCount: 2,
+			rlePacketCount: 5,
+			minimumDisplacement: { x: -1, y: -0.5 },
+			maximumDisplacement: { x: 0.75, y: 0.5 },
+		};
+		expect(plan.items[0].smartObjectLayer?.smartFilters[0]).toMatchObject({
+			type: "liquify",
+			filterClassId: "LqFy",
+			filterId: 1282492025,
+			liquify: expectedVersion3,
+			algorithmExecutionModel: "bounded-authored-displacement-liquify-smart-filter-v1",
+			bakeSupported: true,
+		});
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject({
+			type: "liquify",
+			liquify: expectedVersion3,
+			algorithmExecutionModel: "bounded-authored-displacement-liquify-smart-filter-v1",
+		});
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("97a38710f3a92c7d952a45f9da5ed93b1a0cdcc586eea8a23126fdb6749ccd22");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+
+		const version2Displacements = Array.from({ length: 48 }, (_, index) => (index === 9 ? { x: 1.25, y: -0.5 } : index === 27 ? { x: -0.75, y: 1 } : { x: 0, y: 0 }));
+		const version2Mesh = liquifyMesh({
+			version: 2,
+			meshWidth: 8,
+			meshHeight: 6,
+			displacements: version2Displacements,
+			trailingBytes: Buffer.alloc(8),
+		});
+		const version2 = inspectPsdLayers(
+			createLayeredPsd([
+				layer({
+					name: "Raw Liquify",
+					id: 5893,
+					left: 0,
+					top: 0,
+					width: 1,
+					height: 1,
+					visible: true,
+					opacity: 255,
+					rgba: [1, 2, 3, 255],
+					additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "liquify", liquifyMesh: version2Mesh }] }))],
+				}),
+			])
+		).layers[0].smartObject?.smartFilters[0];
+		expect(version2).toMatchObject({
+			type: "liquify",
+			liquify: {
+				meshVersion: 2,
+				headerBytes: 24,
+				meshWidth: 8,
+				meshHeight: 6,
+				imageWidth: 8,
+				imageHeight: 6,
+				repeatedImageWidth: null,
+				repeatedImageHeight: null,
+				reservedHeaderWords: [],
+				meshByteLength: 416,
+				trailingPaddingBytes: 8,
+				displacementEncoding: "little-endian-float32-pairs",
+				displacementCount: 48,
+				nonzeroDisplacementCount: 2,
+				rlePacketCount: null,
+				minimumDisplacement: { x: -0.75, y: -0.5 },
+				maximumDisplacement: { x: 1.25, y: 1 },
+			},
+			bakeSupported: true,
+		});
+	});
+
+	test.each([
+		[
+			{ liquifyMesh: liquifyMesh({ version: 3, meshWidth: 1, meshHeight: 1, imageWidth: 8, imageHeight: 6, signature: "badMesh!", displacements: [{ x: 0, y: 0 }] }) },
+			'exact "yfqLhseM" signature',
+		],
+		[
+			{ liquifyMesh: liquifyMesh({ version: 3, meshWidth: 1, meshHeight: 1, imageWidth: 8, imageHeight: 6, repeatedImageWidth: 9, displacements: [{ x: 0, y: 0 }] }) },
+			"exactly repeated",
+		],
+		[{ liquifyMesh: liquifyMesh({ version: 2, meshWidth: 1, meshHeight: 1, displacements: [{ x: Number.NaN, y: 0 }] }) }, "finite displacement"],
+		[
+			{
+				liquifyMesh: liquifyMesh({
+					version: 3,
+					meshWidth: 1,
+					meshHeight: 1,
+					imageWidth: 8,
+					imageHeight: 6,
+					displacements: [{ x: 0, y: 0 }],
+					trailingBytes: Buffer.from([1]),
+				}),
+			},
+			"unexpected trailing byte",
+		],
+		[{ liquifyDuplicateMesh: true }, "exactly one LqMe"],
+		[{ liquifyMeshEntryType: "TEXT" as const }, "LqMe tdta"],
+		[{ liquifyUnknownKey: true }, "contains unsupported key(s)"],
+	] as const)("preserves malformed Liquify descriptors as explicit non-executable evidence", (settings, warning) => {
+		const source = createLayeredPsd([
+			layer({
+				name: "Malformed Liquify",
+				id: 5894,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "liquify", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(source).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "liquify",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-authored-displacement-liquify-smart-filter-v1",
+		});
+		expect(inspected?.warning).toContain(warning);
+	});
+
+	test("executes an exact authored Puppet Warp solved triangle mesh with complete parameter evidence", async () => {
+		const sourcePath = join(directory, "assets/live-puppet-warp-smart-filter.psd");
+		const rgba = Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 5, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat();
+		const smartFilter = { type: "puppetWarp" as const };
+		await writeFile(
+			sourcePath,
+			createLayeredPsd(
+				[
+					layer({
+						name: "Puppet Warp",
+						id: 5872,
+						left: 0,
+						top: 0,
+						width: 1,
+						height: 1,
+						visible: true,
+						opacity: 255,
+						rgba: [1, 2, 3, 255],
+						additionalInfo: [additional("SoLd", smartObjectLayer({ transform: [0, 0, 8, 0, 8, 6, 0, 6], nonAffineTransform: null, smartFilters: [smartFilter] }))],
+					}),
+				],
+				{ width: 8, height: 6 },
+				globalAdditional(
+					"lnk2",
+					linkedResourceRecord({ type: "liFD", id: "codex-smart-resource", name: "puppet.psd", fileType: "PSD", data: createCompositePsd(8, 6, rgba) })
+				)
+			)
+		);
+		const options = { destinationFolder: "assets/live-puppet-warp-smart-filter-output", renderEmbeddedSmartObjects: true } as const;
+		const plan = await getPsdLayerExtractionStatus(sourcePath, options);
+		const semantic = plan.items[0].smartObjectLayer?.smartFilters[0];
+		expect(semantic).toMatchObject({
+			type: "puppetWarp",
+			filterClassId: "rigidTransform",
+			filterId: 991,
+			puppetWarp: {
+				rigidType: false,
+				bounds: [
+					{ x: 0, y: 0 },
+					{ x: 8, y: 0 },
+					{ x: 8, y: 6 },
+					{ x: 0, y: 6 },
+				],
+				vertexEncoding: "little-endian-float32-pairs",
+				indexEncoding: "little-endian-uint32-triangles",
+				shapes: [
+					{
+						meshVersionMajor: 1,
+						meshVersionMinor: 0,
+						originalVertices: [
+							{ x: 0, y: 0 },
+							{ x: 8, y: 0 },
+							{ x: 8, y: 6 },
+							{ x: 0, y: 6 },
+						],
+						deformedVertices: [
+							{ x: 0, y: 0 },
+							{ x: 8, y: 0 },
+							{ x: 6, y: 5 },
+							{ x: 0, y: 6 },
+						],
+						triangleIndices: [0, 1, 2, 0, 2, 3],
+						pinVertexIndices: [0, 2],
+						pinRotationsDegrees: [0, 15],
+						pinOverlays: [false, true],
+						pinDepths: [0, 1],
+						selectedPins: [1],
+						meshQuality: 2,
+						meshExpansion: 0,
+						meshRigidity: 1,
+						imageResolution: 72,
+						boundaryPath: { pathComponents: [{ shapeOperation: "xor", paths: [{ closed: true }] }] },
+					},
+				],
+			},
+			algorithmExecutionModel: "bounded-authored-triangle-mesh-puppet-warp-v1",
+			bakeSupported: true,
+		});
+		expect(plan.items[0].appliedSmartObjectRenders[0].appliedSmartFilters[0]).toMatchObject({
+			type: "puppetWarp",
+			puppetWarp: semantic?.puppetWarp,
+			algorithmExecutionModel: "bounded-authored-triangle-mesh-puppet-warp-v1",
+		});
+		const applied = await applyPsdLayerExtraction(sourcePath, options, plan.fingerprint);
+		const output = await sharp(join(directory, applied.items[0].path)).ensureAlpha().raw().toBuffer();
+		expect(createHash("sha256").update(output).digest("hex")).toBe("d8e4f130706ee7d1ba4852f8f97299109ddcd40603d32bd9299dee940de8ad72");
+		expect(await getPsdLayerExtractionStatus(sourcePath, options)).toMatchObject({ createdCount: 0, reusedCount: 1 });
+	});
+
+	test.each([
+		[
+			{
+				puppetDeformedVertices: [
+					{ x: 0, y: 0 },
+					{ x: 8, y: 0 },
+					{ x: 6, y: 5 },
+				],
+			},
+			"original/deformed vertex counts must match",
+		],
+		[{ puppetTriangleIndices: [0, 1, 4] }, "triangle indices must reference an authored vertex"],
+		[{ puppetTriangleIndices: [0, 1, 1] }, "triangle 0 is degenerate"],
+		[{ puppetPinVertexIndices: [0] }, "pin arrays must share one bounded count"],
+		[{ puppetOmitBoundaryPath: true }, "meshBoundaryPath"],
+	] as const)("preserves malformed Puppet Warp meshes as explicit non-executable evidence", (settings, warning) => {
+		const source = createLayeredPsd([
+			layer({
+				name: "Malformed Puppet Warp",
+				id: 5873,
+				left: 0,
+				top: 0,
+				width: 1,
+				height: 1,
+				visible: true,
+				opacity: 255,
+				rgba: [1, 2, 3, 255],
+				additionalInfo: [additional("SoLd", smartObjectLayer({ smartFilters: [{ type: "puppetWarp", ...settings }] }))],
+			}),
+		]);
+		const inspected = inspectPsdLayers(source).layers[0].smartObject?.smartFilters[0];
+		expect(inspected).toMatchObject({
+			type: "puppetWarp",
+			bakeSupported: false,
+			algorithmExecutionModel: "bounded-authored-triangle-mesh-puppet-warp-v1",
 		});
 		expect(inspected?.warning).toContain(warning);
 	});

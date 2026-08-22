@@ -5,7 +5,57 @@ import { z } from "zod";
 
 import { callTextTool } from "./helpers.mjs";
 
+const readOnly = { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false } as const;
+const transientMutation = { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false } as const;
+const destructiveMutation = { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: false } as const;
+const reportMutation = { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false } as const;
+const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
+const sourcePath = z
+	.string()
+	.min(6)
+	.max(1_024)
+	.regex(/^src\/(?!.*\.\.\/).+\.(?:ts|tsx)$/);
+const sceneNodeIdentity = {
+	nodeId: z.string().min(1).max(256).optional().describe("Id of the target node (preferred)."),
+	nodeName: z.string().min(1).max(256).optional().describe("Name of the target node."),
+};
+const exportedFieldKey = z
+	.string()
+	.regex(/^[A-Za-z_$][\w$]{0,127}$/)
+	.refine((value) => !["__proto__", "prototype", "constructor"].includes(value), "Unsafe exported-field key.");
+const debuggerLease = {
+	expectedManifestFingerprint: sha256.describe("Exact manifest fingerprint returned by get_script_debugger."),
+	expectedConfigurationRevision: z.number().int().min(1).describe("Exact debugger configuration revision returned by get_script_debugger."),
+};
+const sourceBreakpoint = z
+	.object({
+		id: z
+			.string()
+			.regex(/^[a-zA-Z0-9._:-]{1,128}$/)
+			.optional(),
+		path: sourcePath,
+		line: z.number().int().min(1).max(1_000_000),
+		column: z.number().int().min(1).max(1_000_000).optional(),
+		enabled: z.boolean().optional(),
+		hitCondition: z.number().int().min(1).max(1_000_000).optional(),
+	})
+	.strict();
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+	z.union([z.null(), z.boolean(), z.number().finite(), z.string().max(16_384), z.array(jsonValueSchema).max(256), z.record(z.string().min(1).max(128), jsonValueSchema)])
+);
+
 export function registerScriptTools(server: McpServer): void {
+	server.registerTool(
+		"get_inspector_collection_capabilities",
+		{
+			title: "Get Inspector collection capabilities",
+			description: "List typed visibleAsArray/visibleAsList authoring, bounded row operations, and DataTypeStyleMapper-compatible built-in or extension-registered styles.",
+			inputSchema: z.object({}).strict(),
+			annotations: readOnly,
+		},
+		async (): Promise<CallToolResult> => callTextTool("get_inspector_collection_capabilities", {})
+	);
 	server.registerTool(
 		"list_script_templates",
 		{
@@ -28,17 +78,155 @@ export function registerScriptTools(server: McpServer): void {
 	);
 	server.registerTool(
 		"list_custom_script_templates",
-		{ title: "List custom script templates", description: "List reusable project-local script templates.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
+		{
+			title: "List custom script templates",
+			description: "List bounded reusable project-local script-template metadata and exact fingerprints without returning source content.",
+			inputSchema: z.object({}).strict(),
+			annotations: readOnly,
+		},
 		async (args): Promise<CallToolResult> => callTextTool("list_custom_script_templates", args)
+	);
+	server.registerTool(
+		"get_custom_script_template",
+		{
+			title: "Get custom script template",
+			description: "Inspect exact source content and SHA-256 fingerprint for one project-local custom script template before replacing or deleting it.",
+			inputSchema: z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]+$/) }).strict(),
+			annotations: readOnly,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_custom_script_template", args)
 	);
 	server.registerTool(
 		"set_custom_script_template",
 		{
 			title: "Set custom script template",
-			description: "Create or replace a reusable project-local TypeScript script template.",
-			inputSchema: z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]+$/), description: z.string().optional(), content: z.string().min(1) }),
+			description: "Create a reusable project-local TypeScript template, or atomically replace an inspected template using its exact expectedFingerprint.",
+			inputSchema: z
+				.object({
+					id: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+					description: z.string().max(2_048).optional(),
+					content: z.string().min(1).max(262_144),
+					expectedFingerprint: sha256.optional(),
+				})
+				.strict(),
+			annotations: transientMutation,
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_custom_script_template", args)
+	);
+	server.registerTool(
+		"delete_custom_script_template",
+		{
+			title: "Delete custom script template",
+			description: "Permanently delete one exact inspected custom script template. Requires its fingerprint and explicit confirmation.",
+			inputSchema: z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]+$/), expectedFingerprint: sha256, confirm: z.literal(true) }).strict(),
+			annotations: destructiveMutation,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("delete_custom_script_template", args)
+	);
+
+	server.registerTool(
+		"get_script_debugger_capabilities",
+		{
+			title: "Get script debugger capabilities",
+			description: "Inspect Debug Play breakpoint, safe-boundary pause, variable snapshot, coverage, export, and explicit limitation contracts without starting Play.",
+			inputSchema: z.object({}).strict(),
+			annotations: readOnly,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_script_debugger_capabilities", args)
+	);
+	server.registerTool(
+		"prepare_script_debugger",
+		{
+			title: "Prepare script debugger",
+			description:
+				"Enable and compile source-instrumented Debug Play, or disable probes and rebuild a running Play scene. This affects only editor Play, never exported builds.",
+			inputSchema: z.object({ enabled: z.boolean() }).strict(),
+			annotations: transientMutation,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("prepare_script_debugger", args)
+	);
+	server.registerTool(
+		"get_script_debugger",
+		{
+			title: "Get script debugger",
+			description: "Read the exact instrumented manifest lease, resolved breakpoints, current hit, bounded trace, safe field snapshot, and attached-script pause state.",
+			inputSchema: z.object({ traceOffset: z.number().int().min(0).max(511).optional(), traceLimit: z.number().int().min(1).max(512).optional() }).strict(),
+			annotations: readOnly,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_script_debugger", args)
+	);
+	server.registerTool(
+		"set_script_breakpoints",
+		{
+			title: "Set script breakpoints",
+			description:
+				"Atomically replace up to 64 runtime breakpoints under an exact source-manifest and debugger-configuration lease; requested lines resolve to the next executable point in the same file.",
+			inputSchema: z.object({ ...debuggerLease, breakpoints: z.array(sourceBreakpoint).max(64), traceLimit: z.number().int().min(1).max(512).optional() }).strict(),
+			annotations: transientMutation,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_script_breakpoints", args)
+	);
+	server.registerTool(
+		"control_script_debugger",
+		{
+			title: "Control script debugger",
+			description:
+				"Pause/resume attached-script lifecycle delivery, advance one bounded fixed step while paused, or clear retained breakpoint-hit evidence under exact expected state.",
+			inputSchema: z
+				.object({
+					...debuggerLease,
+					expectedPaused: z.boolean(),
+					action: z.enum(["pause", "resume", "step", "clear-trace"]),
+					deltaSeconds: z.number().min(0.001).max(0.1).optional(),
+				})
+				.strict(),
+			annotations: transientMutation,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("control_script_debugger", args)
+	);
+	server.registerTool(
+		"get_script_source_coverage",
+		{
+			title: "Get script source coverage",
+			description: "Read source-level file/line/statement/function/branch coverage plus bounded exact source-point hits from instrumented Debug Play.",
+			inputSchema: z
+				.object({ path: sourcePath.optional(), offset: z.number().int().min(0).max(99_999).optional(), limit: z.number().int().min(1).max(2_000).optional() })
+				.strict(),
+			annotations: readOnly,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_script_source_coverage", args)
+	);
+	server.registerTool(
+		"set_script_source_coverage",
+		{
+			title: "Set script source coverage",
+			description: "Enable/disable source coverage and optionally clear accumulated hit counts under the exact debugger lease.",
+			inputSchema: z.object({ ...debuggerLease, enabled: z.boolean(), clear: z.boolean().optional() }).strict(),
+			annotations: transientMutation,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_script_source_coverage", args)
+	);
+	server.registerTool(
+		"export_script_source_coverage",
+		{
+			title: "Export script source coverage",
+			description:
+				"Atomically export an exact coverage revision as deterministic JSON or LCOV below .bjseditor/script-coverage/ without returning the potentially large report body.",
+			inputSchema: z
+				.object({
+					...debuggerLease,
+					expectedCoverageRevision: z.number().int().min(0),
+					format: z.enum(["json", "lcov"]),
+					path: z
+						.string()
+						.min(36)
+						.max(1_024)
+						.regex(/^\.bjseditor\/script-coverage\/(?!.*\.\.\/).+\.(?:json|lcov)$/),
+				})
+				.strict(),
+			annotations: reportMutation,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("export_script_source_coverage", args)
 	);
 
 	server.registerTool(
@@ -53,7 +241,10 @@ export function registerScriptTools(server: McpServer): void {
 			inputSchema: z.object({
 				path: z.string().describe("Project path for the new script under `src/`, e.g. `src/door.ts`."),
 				className: z.string().optional().describe("Optional class name to use in the skeleton."),
-				template: z.enum(["component", "empty", "animator-behaviour"]).optional().describe("Built-in script template. Defaults to component."),
+				template: z
+					.enum(["component", "empty", "animator-behaviour", "animation-rig-job", "grid-brush", "light2d-providers"])
+					.optional()
+					.describe("Built-in script template. Defaults to component."),
 				templatePath: z.string().optional().describe("Project-local custom template path from list_custom_script_templates; overrides template."),
 			}),
 		},
@@ -142,11 +333,13 @@ export function registerScriptTools(server: McpServer): void {
 		{
 			title: "Get script runtime diagnostics",
 			description:
-				"Read live lifecycle call counts and the latest error for behavior scripts currently running on a scene node. Start the preview/game first; an empty scripts array means no behavior is currently active on that node.",
-			inputSchema: z.object({
-				nodeId: z.string().optional().describe("Id of the target node (preferred)."),
-				nodeName: z.string().optional().describe("Name of the target node."),
-			}),
+				"Read live lifecycle, deterministic-manual-step call counts, exact last manual delta, and latest error for attached behavior scripts on a node. Automatically resolves the corresponding runtime node in a ready Play scene; an empty scripts array means no behavior is active.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().optional().describe("Id of the target node (preferred)."),
+					nodeName: z.string().optional().describe("Name of the target node."),
+				})
+				.strict(),
 			annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("get_script_runtime_diagnostics", args)
@@ -155,9 +348,10 @@ export function registerScriptTools(server: McpServer): void {
 		"get_script_exported_fields",
 		{
 			title: "Get script exported fields",
-			description: "Discover @visibleInInspector-decorated script fields and their declared types/defaults.",
-			inputSchema: z.object({ path: z.string() }),
-			annotations: { readOnlyHint: true },
+			description:
+				"Discover visibleAs*-decorated script fields, including typed visibleAsArray/visibleAsList declarations, their source types/defaults, and bounded decorator text.",
+			inputSchema: z.object({ path: sourcePath }).strict(),
+			annotations: readOnly,
 		},
 		async (args): Promise<CallToolResult> => callTextTool("get_script_exported_fields", args)
 	);
@@ -199,14 +393,15 @@ export function registerScriptTools(server: McpServer): void {
 			title: "Set script exported value",
 			description:
 				"Set an exported/inspector value of a script attached to a node. This lets you configure the same reusable script differently per object (e.g. open distance, speed).",
-			inputSchema: z.object({
-				nodeId: z.string().optional().describe("Id of the target node (preferred)."),
-				nodeName: z.string().optional().describe("Name of the target node."),
-				path: z.string().describe("Project path of the attached script."),
-				key: z.string().describe("Name of the exported value to set."),
-				value: z.any().describe("The new value."),
-			}),
-			annotations: { idempotentHint: true },
+			inputSchema: z
+				.object({
+					...sceneNodeIdentity,
+					path: sourcePath.describe("Project path of the attached script."),
+					key: exportedFieldKey.describe("Name of the exported value to set."),
+					value: jsonValueSchema.describe("The new bounded JSON value, including typed list/array contents."),
+				})
+				.strict(),
+			annotations: reportMutation,
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_script_exported_value", args)
 	);

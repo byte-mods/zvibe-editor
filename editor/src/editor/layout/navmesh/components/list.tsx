@@ -1,4 +1,4 @@
-import { DragEvent, MouseEvent, useEffect, useState } from "react";
+import { DragEvent, MouseEvent, ReactNode, useEffect, useState } from "react";
 
 import { IoMdCube } from "react-icons/io";
 import { AiOutlineClose } from "react-icons/ai";
@@ -18,6 +18,7 @@ export interface INavMeshEditorListComponentProps<T> {
 
 	onCreateItem: (mesh: AbstractMesh) => T;
 	onItemsChange: (items: T[], updateNavMesh: boolean) => void;
+	renderItemEnd?: (mesh: AbstractMesh, item: T) => ReactNode;
 }
 
 export function NavMeshEditorListComponent<T extends INavMeshStaticMeshConfiguration | INavMeshObstacleConfiguration>(props: INavMeshEditorListComponentProps<T>) {
@@ -157,7 +158,8 @@ export function NavMeshEditorListComponent<T extends INavMeshStaticMeshConfigura
 									<IoMdCube className={`w-4 h-4 ${props.items.find((m) => m.id === mesh.id)?.enabled ? "" : "opacity-35"}`} />
 								</div>
 
-								{mesh.name}
+								<div className="min-w-0 flex-1 truncate">{mesh.name}</div>
+								{props.renderItemEnd?.(mesh, props.items.find((item) => item.id === mesh.id)!)}
 							</div>
 						</ContextMenuTrigger>
 

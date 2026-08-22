@@ -3,9 +3,16 @@ import { createHash, randomUUID } from "crypto";
 import { AbstractMesh, Node, Quaternion, Scene, TransformNode, Vector3 } from "babylonjs";
 import {
 	configureGameObjectComponents,
+	configureLighting2D,
 	gameObjectComponentStackVersion,
+	getECSRuntime,
+	getSceneECSConfiguration,
 	normalizeEntityComponentData,
 	normalizeNetworkComponentData,
+	normalizeLight2DComponentData,
+	normalizeShadowCaster2DComponentData,
+	validateLight2DComponentData,
+	validateShadowCaster2DComponentData,
 	type GameObjectComponentType,
 	type ISerializedGameObjectComponent,
 	type ISerializedGameObjectComponentStack,
@@ -25,6 +32,7 @@ import { resolveNode, toNodeSummary } from "../tools/resolve";
 const maxComponents = 128;
 const maxJsonBytes = 64 * 1024;
 const componentIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const networkComponentKeys = new Set(["networkId", "authority", "syncTransform", "syncAnimation", "sendRateHz", "interpolate"]);
 
 type ComponentType = "transform" | GameObjectComponentType;
 
@@ -110,8 +118,7 @@ const componentDefinitions: Record<ComponentType, IComponentDefinition> = {
 	entity: {
 		type: "entity",
 		label: "Entity (ECS)",
-		description:
-			"Marks the node for data-oriented baking: an archetype name plus numeric fields that bake into struct-of-arrays chunks a data-oriented runtime can iterate without touching Babylon nodes.",
+		description: "Marks the node for typed data-oriented baking, incremental section streaming, compiled system scheduling, Worker execution, and Entities debugging.",
 		allowMultiple: false,
 		duplicateRule: "At most one Entity component may define a node's archetype.",
 		removable: true,
@@ -122,9 +129,29 @@ const componentDefinitions: Record<ComponentType, IComponentDefinition> = {
 		type: "network",
 		label: "Network Replication",
 		description:
-			"Marks the node as replicated and authors its multiplayer contract: authority, transform/animation sync, send rate and interpolation. The editor authors the contract; a project-provided transport consumes it at runtime through babylonjs-editor-tools.",
+			"Marks the node as replicated and authors its multiplayer contract: authority, transform/animation sync, send rate and interpolation. The first-party scene networking runtime consumes this contract in compiled Play and exported games.",
 		allowMultiple: false,
 		duplicateRule: "At most one Network Replication component may own a node's replication contract.",
+		removable: true,
+		canToggle: true,
+		requiredTypes: ["transform"],
+	},
+	light2d: {
+		type: "light2d",
+		label: "Light 2D",
+		description: "A sortable 2D light with global, point, freeform, sprite-bounds, or project-registered provider geometry.",
+		allowMultiple: false,
+		duplicateRule: "At most one Light 2D component may illuminate from a node.",
+		removable: true,
+		canToggle: true,
+		requiredTypes: ["transform"],
+	},
+	shadowcaster2d: {
+		type: "shadowcaster2d",
+		label: "Shadow Caster 2D",
+		description: "A hard-shadow polygon sourced from an authored path, node bounds, or a project-registered shape provider.",
+		allowMultiple: false,
+		duplicateRule: "At most one Shadow Caster 2D component may own a node's caster shape.",
 		removable: true,
 		canToggle: true,
 		requiredTypes: ["transform"],
@@ -205,6 +232,33 @@ function validateJsonObject(value: unknown, path: string): Record<string, unknow
 	return clone;
 }
 
+function validateNetworkComponentPatch(value: unknown, path: string): Record<string, unknown> {
+	const patch = validateJsonObject(value, path);
+	const unknownKey = Object.keys(patch).find((key) => !networkComponentKeys.has(key));
+	if (unknownKey) {
+		throw new Error(`${path}.${unknownKey} is not a supported Network Replication field.`);
+	}
+	if (patch.networkId !== undefined && (typeof patch.networkId !== "string" || !componentIdPattern.test(patch.networkId))) {
+		throw new Error(`${path}.networkId must match ${componentIdPattern.source}.`);
+	}
+	if (patch.authority !== undefined && patch.authority !== "server" && patch.authority !== "owner") {
+		throw new Error(`${path}.authority must be server or owner.`);
+	}
+	for (const key of ["syncTransform", "syncAnimation", "interpolate"] as const) {
+		if (patch[key] !== undefined && typeof patch[key] !== "boolean") {
+			throw new Error(`${path}.${key} must be a boolean.`);
+		}
+	}
+	if (patch.sendRateHz !== undefined && (!Number.isSafeInteger(patch.sendRateHz) || (patch.sendRateHz as number) < 1 || (patch.sendRateHz as number) > 120)) {
+		throw new Error(`${path}.sendRateHz must be an integer between 1 and 120.`);
+	}
+	return patch;
+}
+
+function getDefaultNetworkId(node: Node): string {
+	return componentIdPattern.test(node.id) ? node.id : `node-${hash(node.id).slice(0, 32)}`;
+}
+
 function createComponentId(): string {
 	return randomUUID();
 }
@@ -213,7 +267,15 @@ function validateSerializedComponent(component: ISerializedGameObjectComponent, 
 	if (!componentIdPattern.test(component.id)) {
 		throw new Error(`Component ${index} has an invalid stable id.`);
 	}
-	if (component.type !== "data" && component.type !== "script" && component.type !== "physics3d" && component.type !== "network" && component.type !== "entity") {
+	if (
+		component.type !== "data" &&
+		component.type !== "script" &&
+		component.type !== "physics3d" &&
+		component.type !== "network" &&
+		component.type !== "entity" &&
+		component.type !== "light2d" &&
+		component.type !== "shadowcaster2d"
+	) {
 		throw new Error(`Component ${index} has unsupported type "${String(component.type)}".`);
 	}
 	if (typeof component.enabled !== "boolean") {
@@ -226,6 +288,10 @@ function validateSerializedComponent(component: ISerializedGameObjectComponent, 
 			throw new Error(`Data component ${index} must have a name between 1 and 80 characters.`);
 		}
 		validateJsonObject(component.data.values ?? {}, `components[${index}].data.values`);
+	} else if (component.type === "light2d") {
+		validateLight2DComponentData(component.data);
+	} else if (component.type === "shadowcaster2d") {
+		validateShadowCaster2DComponentData(component.data);
 	}
 }
 
@@ -249,7 +315,7 @@ function getStack(node: Node, persist: boolean): ISerializedGameObjectComponentS
 	}
 	const ids = new Set<string>();
 	const scriptAttachmentIds = new Set<string>();
-	let physicsCount = 0;
+	const singletonCounts = new Map<GameObjectComponentType, number>();
 	existing.components.forEach((component, index) => {
 		validateSerializedComponent(component, index);
 		if (ids.has(component.id)) {
@@ -263,8 +329,12 @@ function getStack(node: Node, persist: boolean): ISerializedGameObjectComponentS
 			}
 			scriptAttachmentIds.add(attachmentId);
 		}
-		if (component.type === "physics3d" && ++physicsCount > 1) {
-			throw new Error(`Node "${node.name}" has multiple Physics Body 3D rows, but only one PhysicsAggregate is supported.`);
+		if (!componentDefinitions[component.type].allowMultiple) {
+			const count = (singletonCounts.get(component.type) ?? 0) + 1;
+			singletonCounts.set(component.type, count);
+			if (count > 1) {
+				throw new Error(`Node "${node.name}" has multiple ${componentDefinitions[component.type].label} rows, but only one is supported.`);
+			}
 		}
 	});
 	return persist ? existing : jsonClone(existing);
@@ -377,6 +447,12 @@ function componentPayload(node: Node, descriptor: ISerializedGameObjectComponent
 		// Always report the normalized contract, so the Inspector and MCP show
 		// the exact values a runtime transport will observe.
 		return normalizeNetworkComponentData(descriptor.data);
+	}
+	if (descriptor.type === "light2d") {
+		return normalizeLight2DComponentData(descriptor.data);
+	}
+	if (descriptor.type === "shadowcaster2d") {
+		return normalizeShadowCaster2DComponentData(descriptor.data);
 	}
 	if (descriptor.type === "script") {
 		const script = getScript(node, descriptor);
@@ -556,8 +632,10 @@ function restoreSnapshot(node: Node, snapshot: INodeComponentSnapshot): void {
 
 function refresh(node: Node, options: IMCPActionOptions): void {
 	configureGameObjectComponents(node.getScene() as any);
+	configureLighting2D(node.getScene() as any);
 	options.editor.layout.inspector.setEditedObject(node);
 	options.editor.layout.inspector.forceUpdate();
+	void options.editor.layout.graph?.refresh();
 	onNodeModifiedObservable.notifyObservers(node);
 }
 
@@ -566,8 +644,16 @@ function mutate(node: Node, options: IMCPActionOptions, mutation: () => void): v
 	try {
 		mutation();
 		synchronizeAdapters(node, true);
+		const ecs = getECSRuntime(node.getScene() as any);
+		if (ecs) {
+			ecs.rebake(getSceneECSConfiguration(node.getScene() as any, false), { expectedGeneration: ecs.world.generation });
+		}
 	} catch (error) {
 		restoreSnapshot(node, before);
+		const ecs = getECSRuntime(node.getScene() as any);
+		if (ecs) {
+			ecs.rebake(getSceneECSConfiguration(node.getScene() as any, false));
+		}
 		throw error;
 	}
 	const after = captureSnapshot(node);
@@ -623,6 +709,26 @@ function resetComponentValues(node: Node, component: ReturnType<typeof resolveCo
 		descriptor.enabled = true;
 		return;
 	}
+	if (descriptor.type === "entity") {
+		descriptor.enabled = true;
+		descriptor.data = normalizeEntityComponentData({});
+		return;
+	}
+	if (descriptor.type === "network") {
+		descriptor.enabled = true;
+		descriptor.data = normalizeNetworkComponentData({ networkId: getDefaultNetworkId(node) });
+		return;
+	}
+	if (descriptor.type === "light2d") {
+		descriptor.enabled = true;
+		descriptor.data = normalizeLight2DComponentData({});
+		return;
+	}
+	if (descriptor.type === "shadowcaster2d") {
+		descriptor.enabled = true;
+		descriptor.data = normalizeShadowCaster2DComponentData({});
+		return;
+	}
 	setMeshPhysics(node.getScene(), { nodeId: node.id, enabled: false }, options);
 	setMeshPhysics(node.getScene(), { nodeId: node.id, enabled: true, shapeType: "box", motionType: "dynamic", mass: 1, friction: 0.2, restitution: 0.2 }, options);
 }
@@ -650,6 +756,26 @@ function applyClipboardValues(node: Node, component: ReturnType<typeof resolveCo
 		script.executionOrder = clipboard.payload.executionOrder;
 		script.values = jsonClone(clipboard.payload.values);
 		descriptor.enabled = script.enabled;
+		return;
+	}
+	if (descriptor.type === "entity") {
+		descriptor.enabled = clipboard.payload.enabled;
+		descriptor.data = normalizeEntityComponentData(clipboard.payload.data);
+		return;
+	}
+	if (descriptor.type === "network") {
+		descriptor.enabled = clipboard.payload.enabled;
+		descriptor.data = normalizeNetworkComponentData(clipboard.payload.data);
+		return;
+	}
+	if (descriptor.type === "light2d") {
+		descriptor.enabled = clipboard.payload.enabled;
+		descriptor.data = validateLight2DComponentData(clipboard.payload.data);
+		return;
+	}
+	if (descriptor.type === "shadowcaster2d") {
+		descriptor.enabled = clipboard.payload.enabled;
+		descriptor.data = validateShadowCaster2DComponentData(clipboard.payload.data);
 		return;
 	}
 	setMeshPhysics(node.getScene(), { nodeId: node.id, enabled: false }, options);
@@ -687,6 +813,9 @@ function copyPayload(node: Node, component: ReturnType<typeof resolveComponent>)
 			executionOrder: script.executionOrder ?? 0,
 			values: jsonClone(script.values ?? {}),
 		};
+	}
+	if (descriptor.type === "entity" || descriptor.type === "network" || descriptor.type === "light2d" || descriptor.type === "shadowcaster2d") {
+		return { enabled: descriptor.enabled, data: jsonClone(componentPayload(node, descriptor)) };
 	}
 	if (!isAbstractMesh(node) || !node.physicsAggregate) {
 		throw new Error("The physics body no longer exists.");
@@ -734,8 +863,8 @@ export function addGameObjectComponent(scene: Scene, data: any, options: IMCPAct
 	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
 	assertFingerprint(node, data.expectedFingerprint);
 	const type = data.type as GameObjectComponentType;
-	if (type !== "data" && type !== "script" && type !== "physics3d" && type !== "network" && type !== "entity") {
-		throw new Error("type must be data, script, physics3d, network, or entity.");
+	if (type !== "data" && type !== "script" && type !== "physics3d" && type !== "network" && type !== "entity" && type !== "light2d" && type !== "shadowcaster2d") {
+		throw new Error("type must be data, script, physics3d, network, entity, light2d, or shadowcaster2d.");
 	}
 	const stack = synchronizeAdapters(node);
 	if (stack.components.length >= maxComponents) {
@@ -744,6 +873,9 @@ export function addGameObjectComponent(scene: Scene, data: any, options: IMCPAct
 	if (!componentDefinitions[type].allowMultiple && stack.components.some((component) => component.type === type)) {
 		throw new Error(`${componentDefinitions[type].label} does not allow duplicates.`);
 	}
+	const networkPatch = type === "network" ? validateNetworkComponentPatch(data.data ?? {}, "data") : null;
+	const light2DData = type === "light2d" ? validateLight2DComponentData(validateJsonObject(data.data ?? {}, "data")) : null;
+	const shadowCaster2DData = type === "shadowcaster2d" ? validateShadowCaster2DComponentData(validateJsonObject(data.data ?? {}, "data")) : null;
 	mutate(node, options, () => {
 		const mutableStack = synchronizeAdapters(node, true);
 		if (type === "data") {
@@ -771,8 +903,12 @@ export function addGameObjectComponent(scene: Scene, data: any, options: IMCPAct
 			// Seed the replication contract from the shared normalizer so a
 			// freshly added component is already valid, and default the stable
 			// network id to the node's own id rather than leaving it blank.
-			const seeded = normalizeNetworkComponentData({ networkId: node.id, ...validateJsonObject(data.data ?? {}, "data") });
+			const seeded = normalizeNetworkComponentData({ networkId: getDefaultNetworkId(node), ...networkPatch! });
 			mutableStack.components.push({ id: createComponentId(), type, enabled: data.enabled ?? true, data: seeded });
+		} else if (type === "light2d") {
+			mutableStack.components.push({ id: createComponentId(), type, enabled: data.enabled ?? true, data: light2DData! });
+		} else if (type === "shadowcaster2d") {
+			mutableStack.components.push({ id: createComponentId(), type, enabled: data.enabled ?? true, data: shadowCaster2DData! });
 		} else {
 			if (!isAbstractMesh(node)) {
 				throw new Error("Physics Body 3D can only be added to a mesh.");
@@ -787,7 +923,10 @@ export function addGameObjectComponent(scene: Scene, data: any, options: IMCPAct
 export function setGameObjectComponent(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
 	assertFingerprint(node, data.expectedFingerprint);
-	resolveComponent(node, data.componentId);
+	const currentComponent = resolveComponent(node, data.componentId);
+	const networkPatch = currentComponent.descriptor?.type === "network" && data.data !== undefined ? validateNetworkComponentPatch(data.data, "data") : null;
+	const light2DPatch = currentComponent.descriptor?.type === "light2d" && data.data !== undefined ? validateJsonObject(data.data, "data") : null;
+	const shadowCaster2DPatch = currentComponent.descriptor?.type === "shadowcaster2d" && data.data !== undefined ? validateJsonObject(data.data, "data") : null;
 	mutate(node, options, () => {
 		const mutableComponent = resolveComponent(node, data.componentId, true);
 		if (mutableComponent.type === "transform") {
@@ -840,7 +979,11 @@ export function setGameObjectComponent(scene: Scene, data: any, options: IMCPAct
 		} else if (descriptor.type === "network" && data.data !== undefined) {
 			// Merge onto the existing contract and re-normalize, so a partial
 			// update can never persist an out-of-range or wrong-typed field.
-			descriptor.data = normalizeNetworkComponentData({ ...descriptor.data, ...validateJsonObject(data.data, "data") });
+			descriptor.data = normalizeNetworkComponentData({ ...descriptor.data, ...networkPatch! });
+		} else if (descriptor.type === "light2d" && data.data !== undefined) {
+			descriptor.data = validateLight2DComponentData({ ...descriptor.data, ...light2DPatch! });
+		} else if (descriptor.type === "shadowcaster2d" && data.data !== undefined) {
+			descriptor.data = validateShadowCaster2DComponentData({ ...descriptor.data, ...shadowCaster2DPatch! });
 		} else if (descriptor.type === "physics3d" && data.physics !== undefined) {
 			setMeshPhysics(scene, { nodeId: node.id, enabled: true, ...data.physics }, options);
 		}
@@ -970,6 +1113,16 @@ export function pasteGameObjectComponent(scene: Scene, data: any, options: IMCPA
 					executionOrder: componentClipboard!.payload.executionOrder,
 					values: jsonClone(componentClipboard!.payload.values),
 				});
+			} else if (type === "entity" || type === "network" || type === "light2d" || type === "shadowcaster2d") {
+				const data =
+					type === "entity"
+						? normalizeEntityComponentData(componentClipboard!.payload.data)
+						: type === "network"
+							? normalizeNetworkComponentData(componentClipboard!.payload.data)
+							: type === "light2d"
+								? validateLight2DComponentData(componentClipboard!.payload.data)
+								: validateShadowCaster2DComponentData(componentClipboard!.payload.data);
+				mutableStack.components.push({ id: createComponentId(), type, enabled: componentClipboard!.payload.enabled, data });
 			} else {
 				if (!isAbstractMesh(node)) {
 					throw new Error("Physics Body 3D can only be pasted onto a mesh.");

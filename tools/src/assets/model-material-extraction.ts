@@ -1,4 +1,4 @@
-import { basename, extname, join } from "path/posix";
+import { basenamePortablePath as basename, extnamePortablePath as extname, joinPortablePath as join } from "./portable-path";
 
 const MAX_EXTRACTED_MODEL_MATERIALS = 128;
 const MAX_EXTRACTION_PATH_LENGTH = 1024;

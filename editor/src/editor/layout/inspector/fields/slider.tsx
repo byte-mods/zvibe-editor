@@ -6,9 +6,9 @@ import { Slider } from "../../../../ui/shadcn/ui/slider";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../../ui/shadcn/ui/tooltip";
 
 import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
-import { getInspectorPropertyValue } from "../../../../tools/property";
+import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
-import { IEditorInspectorFieldProps } from "./field";
+import { IEditorInspectorFieldProps, matchesInspectorSearch } from "./field";
 import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorSliderFieldProps extends IEditorInspectorFieldProps {
@@ -28,6 +28,9 @@ export function EditorInspectorSliderField(props: IEditorInspectorSliderFieldPro
 		setValue(v);
 		setOldValue(v);
 	}, [props.object, props.property, prefab.refreshVersion]);
+	if (!matchesInspectorSearch(props.label, props.property, props.tooltip)) {
+		return null;
+	}
 
 	return (
 		<div className={`flex gap-2 px-2 ${prefab.entry ? "border-l-2 border-blue-500 bg-blue-500/5" : ""}`}>
@@ -57,7 +60,7 @@ export function EditorInspectorSliderField(props: IEditorInspectorSliderFieldPro
 				className="flex-1 px-5 py-2"
 				onDoubleClick={() => {
 					if (props.defaultValue !== undefined) {
-						props.object[props.property] = props.defaultValue;
+						setInspectorEffectivePropertyValue(props.object, props.property, props.defaultValue);
 						setValue(props.defaultValue);
 						setOldValue(props.defaultValue);
 						prefab.notifyChanged();
@@ -65,13 +68,13 @@ export function EditorInspectorSliderField(props: IEditorInspectorSliderFieldPro
 				}}
 				onValueChange={(result) => {
 					const value = result[0];
-					props.object[props.property] = value;
+					setInspectorEffectivePropertyValue(props.object, props.property, value);
 					setValue(value);
 					prefab.notifyChanged();
 				}}
 				onValueCommit={(result) => {
 					const value = result[0];
-					props.object[props.property] = value;
+					setInspectorEffectivePropertyValue(props.object, props.property, value);
 
 					if (value !== oldValue) {
 						registerSimpleUndoRedo({

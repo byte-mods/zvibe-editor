@@ -18,6 +18,19 @@ export function registerSortingLayerTools(server: McpServer): void {
 		async (args): Promise<CallToolResult> => callTextTool("create_sorting_layer", args)
 	);
 	server.registerTool(
+		"delete_sorting_layer",
+		{
+			title: "Delete sorting layer",
+			description: "Delete one named/id sorting layer after confirm=true and reset every assigned renderable node to the default render order.",
+			inputSchema: z
+				.object({ layerId: z.string().min(1).optional(), layerName: z.string().min(1).optional(), confirm: z.literal(true) })
+				.strict()
+				.refine((value) => Boolean(value.layerId || value.layerName), "Provide layerId or layerName."),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("delete_sorting_layer", args)
+	);
+	server.registerTool(
 		"set_node_sorting_layer",
 		{
 			title: "Set node sorting layer",

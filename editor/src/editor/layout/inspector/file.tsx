@@ -8,9 +8,13 @@ import { EditorInspectorVideoComponent } from "./file/video";
 import { EditorInspectorFontComponent } from "./file/font";
 import { EditorInspectorMaterialComponent } from "./file/material";
 import { EditorInspectorModelComponent } from "./file/model";
-import { EditorInspectorAnimationComponent } from "./file/animation";
+import { EditorInspectorAnimationComponent, IEditorAnimationClipTargetOption } from "./file/animation";
 import { EditorInspectorImageComponent } from "./file/image";
 import { EditorInspectorMarkdownComponent } from "./file/markdown";
+import { EditorInspectorDiffusionProfileComponent } from "./file/diffusion-profile";
+import { EditorInspectorRuntimeAiComponent } from "./file/runtime-ai";
+import { EditorInspectorAlembicComponent } from "./file/alembic";
+import { EditorInspectorAsepriteComponent } from "./file/aseprite";
 
 import { IEditorInspectorImplementationProps } from "./inspector";
 import { Button } from "../../../ui/shadcn/ui/button";
@@ -32,6 +36,8 @@ import { applyMaterialImporterArtifact, getMaterialImporterArtifactStatus, IMate
 import { applyModelImporterArtifact, getModelImporterArtifactStatus, IModelImporterArtifactStatus } from "../../../mcp/assets/model-importer";
 import { applyAnimationImporterArtifact, getAnimationImporterArtifactStatus, IAnimationImporterArtifactStatus } from "../../../mcp/assets/animation-importer";
 import { applyTextureImporterArtifact, getTextureImporterArtifactStatus, ITextureImporterArtifactStatus } from "../../../mcp/assets/texture-importer";
+import { applyAlembicImporterArtifact, getAlembicImporterArtifactStatus, IAlembicImporterArtifactStatus } from "../../../mcp/assets/alembic-importer";
+import { applyAsepriteImporterArtifact, getAsepriteImporterArtifactStatus, IAsepriteImporterArtifactStatus } from "../../../mcp/assets/aseprite-importer";
 import { getAutoReimportStatus, inspectAutoReimport, runAutoReimport, setAutoReimportSettings } from "../../../mcp/assets/auto-reimport";
 
 export class FileInspectorObject {
@@ -73,7 +79,10 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 		fontArtifact: IFontImporterArtifactStatus | null;
 		materialArtifact: IMaterialImporterArtifactStatus | null;
 		modelArtifact: IModelImporterArtifactStatus | null;
+		alembicArtifact: IAlembicImporterArtifactStatus | null;
+		asepriteArtifact: IAsepriteImporterArtifactStatus | null;
 		animationArtifact: IAnimationImporterArtifactStatus | null;
+		animatorImportPlan: any | null;
 		autoReimportStatus: Awaited<ReturnType<typeof getAutoReimportStatus>> | null;
 		error: string | null;
 		loading: boolean;
@@ -88,7 +97,10 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 		fontArtifact: null,
 		materialArtifact: null,
 		modelArtifact: null,
+		alembicArtifact: null,
+		asepriteArtifact: null,
 		animationArtifact: null,
+		animatorImportPlan: null,
 		autoReimportStatus: null,
 		error: null,
 		loading: true,
@@ -124,6 +136,50 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 		);
 	}
 
+	/** Keeps type-specific Texture Importer controls visible only while their owning alpha, mip, normal, sprite, or sampling workflow is active. */
+	private _isImporterFieldVisible(kind: IAssetImporterConfiguration["kind"], fieldKey: string, draft: Record<string, boolean | number | string>): boolean {
+		if (kind === "aiModel") {
+			if (
+				this._extension === ".tflite" &&
+				["graphOptimizationLevel", "executionMode", "enableCpuMemArena", "enableMemPattern", "webgpuPreferredLayout", "webgpuValidationMode"].includes(fieldKey)
+			) {
+				return false;
+			}
+			if (fieldKey === "wasmNumThreads") {
+				return draft.backend === "automatic" || draft.backend === "wasm";
+			}
+			if (fieldKey === "webgpuPreferredLayout" || fieldKey === "webgpuValidationMode") {
+				return draft.backend === "automatic" || draft.backend === "webgpu";
+			}
+			return true;
+		}
+		if (kind !== "texture") {
+			return true;
+		}
+		if (fieldKey === "alphaIsTransparency") {
+			return draft.alphaSource !== "none";
+		}
+		if (fieldKey === "mipmapFilter" || fieldKey === "mipmapPreserveCoverage") {
+			return draft.generateMipmaps === true;
+		}
+		if (fieldKey === "mipmapAlphaTestReference") {
+			return draft.generateMipmaps === true && draft.mipmapPreserveCoverage === true;
+		}
+		if (fieldKey === "anisoLevel") {
+			return draft.filterMode !== "point";
+		}
+		if (fieldKey === "normalMapSource") {
+			return draft.textureType === "normalMap";
+		}
+		if (fieldKey === "normalMapStrength") {
+			return draft.textureType === "normalMap" && draft.normalMapSource === "height";
+		}
+		if (fieldKey === "spritePixelsPerUnit" || fieldKey === "spriteMeshType" || fieldKey === "spriteExtrude") {
+			return draft.textureType === "sprite";
+		}
+		return true;
+	}
+
 	private _getImporterInspector(): ReactNode {
 		const importer = this.state.assetData?.importer;
 		const draft = this.state.importerDraft;
@@ -144,7 +200,8 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 							field.key !== "materialRemaps" &&
 							field.key !== "authoredLods" &&
 							field.key !== "generatedLods" &&
-							field.key !== "platformOverrides"
+							field.key !== "platformOverrides" &&
+							this._isImporterFieldVisible(importer.kind, field.key, draft)
 					)
 					.map((field) => (
 						<label key={field.key} className="grid grid-cols-[1fr_140px] gap-2 items-center" title={field.description}>
@@ -262,7 +319,22 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 	}
 
 	private _getSpecializedInspector(): ReactNode {
+		if (this.props.object.absolutePath.toLowerCase().endsWith(".diffusionprofile.json")) {
+			return <EditorInspectorDiffusionProfileComponent object={this.props.object} editor={this.props.editor} />;
+		}
 		switch (this._extension) {
+			case ".abc":
+				return <EditorInspectorAlembicComponent artifact={this.state.alembicArtifact} onInstantiate={() => this._instantiateAlembic()} />;
+
+			case ".ase":
+			case ".aseprite":
+				return <EditorInspectorAsepriteComponent artifact={this.state.asepriteArtifact} onInstantiate={(options) => this._instantiateAseprite(options)} />;
+
+			case ".onnx":
+			case ".tflite":
+			case ".pt2":
+				return <EditorInspectorRuntimeAiComponent object={this.props.object} editor={this.props.editor} />;
+
 			case ".png":
 			case ".webp":
 			case ".jpg":
@@ -318,6 +390,9 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 						object={this.props.object}
 						importedPath={this.state.videoArtifact?.artifactPath}
 						importedCurrent={this.state.videoArtifact?.current}
+						result={this.state.videoArtifact?.result}
+						settings={this.state.importerDraft}
+						onPlatformOverridesChange={(value) => this._setImporterDraftValue("platformOverrides", value)}
 					/>
 				);
 
@@ -355,25 +430,103 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 
 			case ".animation":
 			case ".animations":
+			case ".anim":
 			case ".animator":
 			case ".controller":
 				return (
 					<EditorInspectorAnimationComponent
 						object={this.props.object}
 						artifact={this.state.animationArtifact}
+						controllerImportPlan={this.state.animatorImportPlan}
 						animationGroups={this.props.editor.layout.preview.scene.animationGroups.map((group) => group.name).sort()}
+						clipTargets={this._getAnimationClipTargets()}
 						avatarMasks={((this.props.editor.layout.preview.scene.metadata?.babylonEditorHumanoidAvatarMasks ?? []) as Array<{ id: string; name: string }>).map(
 							(mask) => ({ id: mask.id, name: mask.name })
 						)}
-						onImportController={(motionBindings, avatarMaskBindings, ignoreUnresolvedAvatarMasks, replaceExisting) =>
-							this._importAnimatorController(motionBindings, avatarMaskBindings, ignoreUnresolvedAvatarMasks, replaceExisting)
+						onImportClip={(targetBindings, objectReferenceBindings, replaceExisting) =>
+							this._importAnimationClip(targetBindings, objectReferenceBindings, replaceExisting)
 						}
+						onImportController={(motionBindings, avatarMaskBindings, behaviourBindings, targetNodeId, ignoreUnresolvedAvatarMasks, replaceExisting) =>
+							this._importAnimatorController(motionBindings, avatarMaskBindings, behaviourBindings, targetNodeId, ignoreUnresolvedAvatarMasks, replaceExisting)
+						}
+						onSelectControllerTarget={(targetNodeId) => this._inspectAnimatorController(targetNodeId)}
 					/>
 				);
 
 			default:
 				return <div className="text-lg font-semibold break-all">{basename(this.props.object.absolutePath)}</div>;
 		}
+	}
+
+	private _getAnimationClipTargets(): IEditorAnimationClipTargetOption[] {
+		const scene = this.props.editor.layout.preview.scene;
+		const targets: IEditorAnimationClipTargetOption[] = scene.getNodes().map((node) => ({
+			key: `node:${node.uniqueId}`,
+			label: `${node.name} · ${node.id}`,
+			binding: { kind: "node", nodeId: node.id },
+		}));
+		for (const mesh of scene.meshes) {
+			const manager = mesh.morphTargetManager;
+			if (!manager) {
+				continue;
+			}
+			for (let index = 0; index < manager.numTargets; index++) {
+				const target = manager.getTarget(index);
+				targets.push({
+					key: `morph:${mesh.uniqueId}:${index}`,
+					label: `${target.name} · ${mesh.name}`,
+					binding: { kind: "morphTarget", meshId: mesh.id, morphTargetName: target.name },
+				});
+			}
+		}
+		for (const manager of scene.spriteManagers ?? []) {
+			for (const sprite of manager.sprites) {
+				targets.push({
+					key: `sprite:${manager.name}:${sprite.name}`,
+					label: `${sprite.name} · ${manager.name}`,
+					binding: { kind: "sprite", spriteName: sprite.name, managerName: manager.name },
+				});
+			}
+		}
+		return targets.sort((left, right) => left.label.localeCompare(right.label));
+	}
+
+	private async _instantiateAlembic(): Promise<string> {
+		const { instantiateAlembicAsset } = await import("../../../mcp/assets/alembic");
+		const result = await instantiateAlembicAsset(this.props.editor.layout.preview.scene, { path: this.props.object.absolutePath }, { editor: this.props.editor });
+		return `Instantiated "${result.configuration.name}" with ${result.cache.objects.length} sampled object(s) and ${result.cache.sampleCount} frame(s).`;
+	}
+
+	private async _instantiateAseprite(options: { mode: "composite" | "layers"; animationName?: string; playOnAwake: boolean; speed: number }): Promise<string> {
+		const { instantiateAsepriteAsset } = await import("../../../mcp/assets/aseprite");
+		const result = await instantiateAsepriteAsset(this.props.editor.layout.preview.scene, { path: this.props.object.absolutePath, ...options }, { editor: this.props.editor });
+		return `Instantiated "${result.root.name}" as ${result.mode} with ${result.managerCount} SpriteManager(s).`;
+	}
+
+	private async _importAnimationClip(
+		targetBindings: Array<Record<string, string>>,
+		objectReferenceBindings: Array<Record<string, unknown>>,
+		replaceExisting: boolean
+	): Promise<string> {
+		const artifact = this.state.animationArtifact;
+		if (!artifact?.current || !artifact.result || artifact.result.sourceKind !== "unity-animation-clip") {
+			throw new Error("Apply a current Unity AnimationClip importer artifact first.");
+		}
+		const { importAnimationGroup } = await import("../../../mcp/animations/animations");
+		const result = await importAnimationGroup(
+			this.props.editor.layout.preview.scene,
+			{
+				path: artifact.result.outputPath,
+				targetBindings,
+				objectReferenceBindings,
+				replaceExisting,
+				preserveInspectorSelection: true,
+				unitySourceAssetPath: this.props.object.absolutePath,
+				unityFileId: "7400000",
+			},
+			{ editor: this.props.editor }
+		);
+		return `${result.replaced ? "Replaced" : "Imported"} AnimationGroup "${result.name}" with ${result.tracks.length} track(s) and ${result.objectReferenceBindingCount} object-reference binding(s).`;
 	}
 
 	private async _extractModelMaterials(): Promise<string> {
@@ -431,6 +584,8 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 	private async _importAnimatorController(
 		motionBindings: Record<string, string>,
 		avatarMaskBindings: Record<string, string>,
+		behaviourBindings: Record<string, string>,
+		targetNodeId: string | null,
 		ignoreUnresolvedAvatarMasks: boolean,
 		replaceExisting: boolean
 	): Promise<string> {
@@ -439,20 +594,35 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 			throw new Error("Apply the current Animation Importer artifact first.");
 		}
 		const { importAnimatorControllerAsset } = await import("../../../mcp/assets/assets");
+		if (!this.state.animatorImportPlan?.fingerprint) {
+			throw new Error("Inspect the current Unity dependency binding plan first.");
+		}
 		const result = await importAnimatorControllerAsset(
 			this.props.editor.layout.preview.scene,
 			{
 				path: this.props.object.absolutePath,
-				expectedFingerprint: artifact.fingerprint,
+				expectedFingerprint: this.state.animatorImportPlan.fingerprint,
 				motionBindings,
 				avatarMaskBindings,
+				behaviourBindings,
+				...(targetNodeId ? { targetNodeId } : {}),
 				ignoreUnresolvedAvatarMasks,
 				replaceExisting,
 				confirm: true,
 			},
 			{ editor: this.props.editor }
 		);
-		return `${result.replaced ? "Replaced" : "Imported"} Animator controller "${result.controller.name}" with ${Object.keys(result.motionBindings).length} Motion binding(s).`;
+		await this._loadDependencies();
+		return `${result.replaced ? "Replaced" : "Imported"} Animator controller "${result.controller.name}" with ${Object.keys(result.motionBindings).length} Motion and ${Object.keys(result.behaviourBindings).length} behaviour binding(s).`;
+	}
+
+	private async _inspectAnimatorController(targetNodeId: string | null): Promise<void> {
+		const { getAnimatorControllerAssetImport } = await import("../../../mcp/assets/assets");
+		const animatorImportPlan = await getAnimatorControllerAssetImport(this.props.editor.layout.preview.scene, {
+			path: this.props.object.absolutePath,
+			...(targetNodeId ? { targetNodeId } : {}),
+		});
+		this.setState({ animatorImportPlan });
 	}
 
 	private _getDependencyInspector(): ReactNode {
@@ -550,7 +720,14 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 			const fontArtifact = assetData.importer.kind === "font" ? await getFontImporterArtifactStatus(this.props.object.absolutePath) : null;
 			const materialArtifact = assetData.importer.kind === "material" ? await getMaterialImporterArtifactStatus(this.props.object.absolutePath) : null;
 			const modelArtifact = assetData.importer.kind === "model" ? await getModelImporterArtifactStatus(this.props.object.absolutePath) : null;
+			const alembicArtifact = assetData.importer.kind === "alembic" ? await getAlembicImporterArtifactStatus(this.props.object.absolutePath) : null;
+			const asepriteArtifact = assetData.importer.kind === "aseprite" ? await getAsepriteImporterArtifactStatus(this.props.object.absolutePath) : null;
 			const animationArtifact = assetData.importer.kind === "animation" ? await getAnimationImporterArtifactStatus(this.props.object.absolutePath) : null;
+			let animatorImportPlan: any | null = null;
+			if (animationArtifact?.current && animationArtifact.result?.sourceKind === "animator-controller" && animationArtifact.result.controllerFormat === "unity-yaml") {
+				const { getAnimatorControllerAssetImport } = await import("../../../mcp/assets/assets");
+				animatorImportPlan = await getAnimatorControllerAssetImport(this.props.editor.layout.preview.scene, { path: this.props.object.absolutePath });
+			}
 			this.setState({
 				dependencyData,
 				assetData,
@@ -562,7 +739,10 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 				fontArtifact,
 				materialArtifact,
 				modelArtifact,
+				alembicArtifact,
+				asepriteArtifact,
 				animationArtifact,
+				animatorImportPlan,
 				autoReimportStatus,
 				loading: false,
 			});
@@ -577,7 +757,10 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 				fontArtifact: null,
 				materialArtifact: null,
 				modelArtifact: null,
+				alembicArtifact: null,
+				asepriteArtifact: null,
 				animationArtifact: null,
+				animatorImportPlan: null,
 				autoReimportStatus: null,
 				error: error instanceof Error ? error.message : String(error),
 				loading: false,
@@ -628,6 +811,14 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 				const planned = await getModelImporterArtifactStatus(this.props.object.absolutePath);
 				const applied = await applyModelImporterArtifact(this.props.object.absolutePath, planned.fingerprint);
 				importerMessage = `Model importer applied: ${applied.result?.valid ? "valid" : applied.result?.supported ? "errors" : "legacy format unsupported headlessly"}, ${applied.result?.meshCount ?? 0} mesh(es), ${applied.result?.triangleCount ?? 0} triangle(s).`;
+			} else if (metadata.importer.kind === "alembic") {
+				const planned = await getAlembicImporterArtifactStatus(this.props.object.absolutePath);
+				const applied = await applyAlembicImporterArtifact(this.props.object.absolutePath, planned.fingerprint);
+				importerMessage = `Alembic importer applied: ${applied.result?.manifest.sampleCount ?? 0} sample(s), ${applied.result?.manifest.objects.length ?? 0} object(s), ${applied.result?.manifest.statistics.variableTopologyCount ?? 0} variable-topology object(s).`;
+			} else if (metadata.importer.kind === "aseprite") {
+				const planned = await getAsepriteImporterArtifactStatus(this.props.object.absolutePath);
+				const applied = await applyAsepriteImporterArtifact(this.props.object.absolutePath, planned.fingerprint);
+				importerMessage = `Aseprite importer applied: ${applied.result?.document.frameCount ?? 0} frame(s), ${applied.result?.document.layers.length ?? 0} layer(s), ${applied.result?.atlas.frames.length ?? 0} atlas entry(s).`;
 			} else if (metadata.importer.kind === "animation") {
 				const planned = await getAnimationImporterArtifactStatus(this.props.object.absolutePath);
 				const applied = await applyAnimationImporterArtifact(this.props.object.absolutePath, planned.fingerprint);

@@ -18,9 +18,9 @@ async function getDevelopmentExecutable() {
 	}
 
 	const sourceBundle = dirname(dirname(dirname(electronExecutable)));
-	const cacheDirectory = join(editorDirectory, "..", "node_modules", ".cache", "zvibe-editor", `${electronVersion}-${editorPackage.version}`);
+	const cacheDirectory = join(editorDirectory, "..", "node_modules", ".cache", "zvibe-editor", `${electronVersion}-${editorPackage.version}-launcher-v2`);
 	const brandedBundle = join(cacheDirectory, "Zvibe Editor.app");
-	const brandedExecutable = join(brandedBundle, "Contents", "MacOS", "Zvibe Editor");
+	const brandedExecutable = join(brandedBundle, "Contents", "MacOS", "Electron");
 
 	try {
 		require("node:fs").accessSync(brandedExecutable);
@@ -36,16 +36,14 @@ async function getDevelopmentExecutable() {
 	// APFS clone-copy keeps the 250+ MB Electron framework cheap while preserving the upstream installation.
 	execFileSync("cp", ["-cR", sourceBundle, temporaryBundle], { stdio: "inherit" });
 
-	const temporaryExecutable = join(temporaryBundle, "Contents", "MacOS", "Electron");
-	const renamedExecutable = join(temporaryBundle, "Contents", "MacOS", "Zvibe Editor");
-	await rename(temporaryExecutable, renamedExecutable);
-
 	const plistPath = join(temporaryBundle, "Contents", "Info.plist");
 	const plistBuddy = "/usr/libexec/PlistBuddy";
 	for (const [key, value] of [
 		["CFBundleDisplayName", "Zvibe Editor"],
 		["CFBundleName", "Zvibe Editor"],
-		["CFBundleExecutable", "Zvibe Editor"],
+		// Electron detects development launches from the executable name. Renaming this
+		// entry makes it load default_app.asar instead of the editor directory argument.
+		["CFBundleExecutable", "Electron"],
 		["CFBundleIdentifier", "com.zvibe.editor.development"],
 		["CFBundleIconFile", "zvibe_icon.icns"],
 	]) {

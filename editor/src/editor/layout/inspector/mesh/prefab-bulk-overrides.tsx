@@ -11,7 +11,7 @@ import {
 	PrefabInstanceOverrideCategory,
 	revertPrefabInstancesOverrides,
 } from "../../../../mcp/prefabs/prefabs";
-import { showAlert, showConfirm } from "../../../../ui/dialog";
+import { DialogReturnType, showAlert, showConfirm } from "../../../../ui/dialog";
 import { Button } from "../../../../ui/shadcn/ui/button";
 import { Input } from "../../../../ui/shadcn/ui/input";
 
@@ -151,9 +151,29 @@ export function PrefabBulkOverridesPresentation(props: IPrefabBulkOverridesPrese
 	);
 }
 
+let activePrefabBulkOverridesDialog: DialogReturnType | null = null;
+
 /** Opens one shared multi-instance Overrides window for all, one asset, or explicit boundaries. */
 export function openPrefabBulkOverrides(editor: Editor, selector: PrefabBulkOverridesSelector = { all: true }): void {
-	showAlert("Prefab Overrides — Multiple Instances", <PrefabBulkOverridesWindow editor={editor} selector={selector} />, true);
+	activePrefabBulkOverridesDialog?.close();
+	const dialog = showAlert("Prefab Overrides — Multiple Instances", <PrefabBulkOverridesWindow editor={editor} selector={selector} />, true);
+	activePrefabBulkOverridesDialog = dialog;
+	void dialog.wait().finally(() => {
+		if (activePrefabBulkOverridesDialog === dialog) {
+			activePrefabBulkOverridesDialog = null;
+		}
+	});
+}
+
+/** Closes the active multi-instance Prefab Overrides dialog, if one is open. */
+export function closePrefabBulkOverrides(): boolean {
+	const dialog = activePrefabBulkOverridesDialog;
+	if (!dialog) {
+		return false;
+	}
+	activePrefabBulkOverridesDialog = null;
+	dialog.close();
+	return true;
 }
 
 function PrefabBulkOverridesWindow(props: { editor: Editor; selector: PrefabBulkOverridesSelector }): ReactNode {

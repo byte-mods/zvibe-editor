@@ -1,66 +1,42 @@
-import { IObstacle } from "@babylonjs/core/Navigation/INavigationEngine";
-
 import { CreateNavigationPluginAsync } from "@babylonjs/addons/navigation/factory/factory.single-thread";
 
-import { getNodeById } from "../../../../tools/scene";
-import { isAbstractMesh } from "../../../../tools/guards";
 import { RecastNavigationHelper } from "../../../../tools/navmesh";
+import { createNavMeshSurfaceMeshProcess, NavMeshRecastRuntime } from "../../../../tools/navmesh-surfaces";
 import { loadFile, loadJsonFile } from "../../../../tools/request";
+import { DynamicNavMeshObstacleManager } from "../../../nav-obstacles";
 
 import { IScriptAssetParserParameters, registerScriptAssetParser } from "../../preload";
 
 export async function preloadNavMeshScriptAsset(parameters: IScriptAssetParserParameters) {
-	const [config, navmeshData, tilesData] = await Promise.all([
+	const [config, tilesData] = await Promise.all([
 		loadJsonFile<any>(`${parameters.rootUrl}${parameters.key}/config.json`),
-		loadFile(`${parameters.rootUrl}${parameters.key}/navmesh.bin`, "arraybuffer"),
 		loadFile(`${parameters.rootUrl}${parameters.key}/tilecache.bin`, "arraybuffer"),
 	]);
 
 	const [recastCore, recastGenerators] = await Promise.all([import("@recast-navigation/core"), import("@recast-navigation/generators")]);
 
+	const recastRuntime = { ...recastCore, ...recastGenerators } as NavMeshRecastRuntime;
+	await recastRuntime.init();
 	const recast = (await CreateNavigationPluginAsync({
-		instance: {
-			...recastCore,
-			...recastGenerators,
-		},
+		instance: recastRuntime,
 	})) as RecastNavigationHelper;
-	recast.buildFromNavmeshData(new Uint8Array(navmeshData));
-	recast.buildFromTileCacheData(new Uint8Array(tilesData));
+	const offMeshConnections = (config.offMeshLinks ?? []).map((link: any) => ({
+		startPosition: { x: link.start[0], y: link.start[1], z: link.start[2] },
+		endPosition: { x: link.end[0], y: link.end[1], z: link.end[2] },
+		radius: link.radius,
+		bidirectional: link.bidirectional,
+		area: link.area,
+		flags: link.flags,
+		userId: link.userId,
+	}));
+	recast.buildFromTileCacheData(new Uint8Array(tilesData), createNavMeshSurfaceMeshProcess(recastRuntime, config.surfaceAreaEncoding ?? [], offMeshConnections));
 
-	const createdObstacles: IObstacle[] = [];
-
-	recast.refreshObstacles = function () {
-		createdObstacles.forEach((obstacle) => recast.removeObstacle(obstacle));
-		createdObstacles.splice(0, createdObstacles.length);
-
-		config.obstacleMeshes.forEach((obstacle: any) => {
-			const node = getNodeById(obstacle.id, parameters.scene);
-			if (!isAbstractMesh(node)) {
-				return;
-			}
-
-			const position = node.getAbsolutePosition();
-			const boundingBox = node.getBoundingInfo().boundingBox;
-
-			switch (obstacle.type) {
-				case "box":
-					const boxObstacle = recast.addBoxObstacle(position, boundingBox.extendSizeWorld, obstacle.angle);
-					if (boxObstacle) {
-						createdObstacles.push(boxObstacle);
-					}
-					break;
-
-				case "cylinder":
-					const cylinderObstacle = recast.addCylinderObstacle(position, boundingBox.extendSizeWorld.x, boundingBox.extendSizeWorld.y);
-					if (cylinderObstacle) {
-						createdObstacles.push(cylinderObstacle);
-					}
-					break;
-			}
-		});
+	const obstacleManager = new DynamicNavMeshObstacleManager(recast, parameters.scene, config.obstacleMeshes ?? []);
+	(recast as any).obstacleManager = obstacleManager;
+	(recast as any).defaultAreaCosts = Object.fromEntries((config.areas ?? [{ id: 0, cost: 1 }]).map((area: any) => [String(area.id), area.cost]));
+	recast.refreshObstacles = () => {
+		obstacleManager.refresh(true);
 	};
-
-	recast.refreshObstacles();
 
 	return recast;
 }

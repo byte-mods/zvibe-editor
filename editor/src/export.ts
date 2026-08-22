@@ -1,12 +1,16 @@
 export { Editor, createEditor } from "./editor/main";
 export { EditorLayout } from "./editor/layout";
+// Extension packages receive the versioned public contracts; discovery, trust, and host ownership intentionally stay editor-private.
+export * from "./extensions/types";
 
 export { EditorGraph } from "./editor/layout/graph";
 export { EditorToolbar } from "./editor/layout/toolbar";
 export { EditorConsole } from "./editor/layout/console";
 export { EditorTerminal } from "./editor/layout/terminal";
+export * from "./editor/layout/cinematic/serialization/document";
 
 export { EditorPreview } from "./editor/layout/preview";
+export { SpriteMapNode } from "./editor/nodes/sprite-map";
 export * from "./editor/layout/preview/import/import";
 export * from "./editor/layout/preview/import/material";
 export * from "./editor/layout/preview/import/texture";
@@ -14,6 +18,8 @@ export * from "./editor/layout/preview/import/sound";
 
 export { EditorInspector } from "./editor/layout/inspector";
 export * from "./editor/layout/inspector/inspector";
+export * from "./editor/layout/inspector/fields/array";
+export * from "./editor/layout/inspector/fields/collection-style";
 
 export { EditorAssetsBrowser } from "./editor/layout/assets-browser";
 export * from "./editor/layout/assets-browser/items/item";

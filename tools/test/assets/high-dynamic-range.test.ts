@@ -7,11 +7,13 @@ import {
 	defaultCubeFaceSize,
 	encodeOpenExr,
 	encodeRadianceHdr,
+	executeHighDynamicRangeTextureImport,
 	IHighDynamicRangeImage,
 	isEquirectangularPanorama,
 	resizeHighDynamicRange,
 	toneMapHighDynamicRange,
 } from "../../src/assets/high-dynamic-range";
+import { normalizeTextureImporterSettings } from "../../src/assets/texture-importer";
 
 function image(width: number, height: number): IHighDynamicRangeImage {
 	const pixels = new Float32Array(width * height * 4);
@@ -65,6 +67,34 @@ describe("high-dynamic-range assets", () => {
 		expect(resized.height).toBe(2);
 		expect(resized.pixels).toHaveLength(32);
 		expect(resized.statistics.maximum[0]).toBeGreaterThan(resized.statistics.minimum[0]);
+	});
+
+	it("executes NPOT, height-normal, alpha-edge, and complete-mip policies without leaving float precision", async () => {
+		const source = image(3, 2);
+		for (let offset = 3; offset < source.pixels.length; offset += 4) {
+			source.pixels[offset] = offset === 3 ? 1 : 0;
+		}
+		const executed = await executeHighDynamicRangeTextureImport(
+			encodeOpenExr(source),
+			"exr",
+			normalizeTextureImporterSettings({
+				textureType: "normalMap",
+				normalMapSource: "height",
+				alphaIsTransparency: true,
+				nonPowerOfTwo: "toLarger",
+				generateMipmaps: true,
+			})
+		);
+		expect(executed).toMatchObject({
+			output: { width: 4, height: 2, pixelType: "float32" },
+			resized: true,
+			transparentColorsDilated: true,
+			normalMapGenerated: true,
+		});
+		expect(executed.mipmaps.map((mipmap) => [mipmap.image.width, mipmap.image.height])).toEqual([
+			[2, 1],
+			[1, 1],
+		]);
 	});
 
 	it("creates six finite cubemap faces from a 2:1 panorama", () => {

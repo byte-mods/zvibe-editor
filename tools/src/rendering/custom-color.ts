@@ -69,7 +69,9 @@ function applyConfiguration(effect: Effect, configuration: ICustomColorPostProce
 }
 
 export function serializeCustomColorPostProcess(): ICustomColorPostProcessConfiguration | null {
-	if (!customColorPostProcess) return null;
+	if (!customColorPostProcess) {
+		return null;
+	}
 	return structuredClone((customColorPostProcess as any)._babylonEditorConfiguration as ICustomColorPostProcessConfiguration);
 }
 

@@ -8,8 +8,12 @@ import { getCustomRenderPassGpuProfiling, getCustomRenderPassGraphDiagnostics, l
 function computePass(scene: Scene, data: any): ICustomRenderPassDefinition {
 	const passes = listCustomRenderPasses(scene).passes as ICustomRenderPassDefinition[];
 	const pass = passes.find((candidate) => candidate.id === data.id || candidate.name === data.name);
-	if (!pass) throw new Error("Compute pass not found. Provide id (preferred) or name.");
-	if (pass.passType !== "compute") throw new Error(`Custom render pass "${pass.name}" is not a compute pass.`);
+	if (!pass) {
+		throw new Error("Compute pass not found. Provide id (preferred) or name.");
+	}
+	if (pass.passType !== "compute") {
+		throw new Error(`Custom render pass "${pass.name}" is not a compute pass.`);
+	}
 	return pass;
 }
 
@@ -42,7 +46,9 @@ function compileOptions(pass: ICustomRenderPassDefinition): any {
 export function previewCustomComputeNodeGraph(scene: Scene, data: any): any {
 	const pass = computePass(scene, data);
 	const graph = getCustomComputeNodeGraph(scene, { id: pass.id }).graph;
-	if (!graph) throw new Error(`Compute pass "${pass.name}" has no node graph.`);
+	if (!graph) {
+		throw new Error(`Compute pass "${pass.name}" has no node graph.`);
+	}
 	const result = evaluateComputeNodeGraphPreview(graph, previewOptions(scene, pass, data));
 	const nodeIds = data.nodeIds ? new Set<string>(data.nodeIds) : null;
 	return { passId: pass.id, passName: pass.name, ...result, entries: nodeIds ? result.entries.filter((entry) => nodeIds.has(entry.nodeId)) : result.entries };
@@ -52,7 +58,9 @@ export function previewCustomComputeNodeGraph(scene: Scene, data: any): any {
 export function debugCustomComputeNodeGraph(scene: Scene, data: any): any {
 	const pass = computePass(scene, data);
 	const graph = getCustomComputeNodeGraph(scene, { id: pass.id }).graph;
-	if (!graph) throw new Error(`Compute pass "${pass.name}" has no node graph.`);
+	if (!graph) {
+		throw new Error(`Compute pass "${pass.name}" has no node graph.`);
+	}
 	const analysis = analyzeComputeNodeGraph(graph);
 	let compilation: any = null;
 	let compilerError: string | null = null;

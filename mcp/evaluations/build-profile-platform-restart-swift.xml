@@ -1,0 +1,42 @@
+<evaluation>
+	<qa_pair>
+		<question>Inspect the editor extension SDK. Which capability must an extension declare before contributing Build Profile footer actions?</question>
+		<answer>buildProfiles</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect Build Profile footer action declarations. What does an empty targets list mean?</question>
+		<answer>The action supports every Build Profile target.</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect Build Profile footer execution limits. What is the maximum action timeout in seconds?</question>
+		<answer>30</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect installed-platform restart planning. How long does an unapplied restart lease remain valid?</question>
+		<answer>5 minutes</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect installed-platform restart safety. Is a restart lease reusable after one execution attempt? Respond True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the restart workflow. Does the renderer save the open project before requesting Electron relaunch? Respond True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect iOS project generation capabilities. Which iOS project type is marked experimental?</question>
+		<answer>swift</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the experimental Swift iOS project type. What is its minimum supported iOS version?</question>
+		<answer>16.0</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the experimental Swift host. Which Apple UI framework and Web view class host the game?</question>
+		<answer>SwiftUI and WKWebView</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the generated Swift project contract. What shared Xcode scheme name is generated?</question>
+		<answer>ZvibeGame</answer>
+	</qa_pair>
+</evaluation>

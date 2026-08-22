@@ -42,6 +42,18 @@ export const lightCommandItems = {
 		key: "add-hemispheric-light",
 		ipcRendererChannelKey: "hemispheric-light",
 	} as CommandItem,
+	rectangleAreaLight: {
+		text: "Rectangle Area Light",
+		label: "Add a new one-sided rectangle area light to the scene",
+		key: "add-rectangle-area-light",
+		ipcRendererChannelKey: "rectangle-area-light",
+	} as CommandItem,
+	discAreaLight: {
+		text: "Disc Area Light",
+		label: "Add a new one-sided disc area light to the scene",
+		key: "add-disc-area-light",
+		ipcRendererChannelKey: "disc-area-light",
+	} as CommandItem,
 };
 
 export const nodeCommandItems = {
@@ -140,5 +152,11 @@ export const spriteCommandItems = {
 		label: "Add a new sprite-map node to the scene",
 		key: "add-sprite-map-node",
 		ipcRendererChannelKey: "sprite-map-node",
+	} as CommandItem,
+	spriteShape: {
+		text: "Sprite Shape",
+		label: "Add a new editable 2D Sprite Shape spline with generated rendering and collision",
+		key: "add-sprite-shape",
+		ipcRendererChannelKey: "sprite-shape",
 	} as CommandItem,
 };

@@ -1,4 +1,4 @@
-import { extname, isAbsolute, normalize } from "path/posix";
+import { extnamePortablePath as extname, isAbsolutePortablePath as isAbsolute, normalizePortablePath as normalize } from "./portable-path";
 
 export interface IModelMaterialRemapDefinition {
 	sourceMaterial: string;

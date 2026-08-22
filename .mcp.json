@@ -1,0 +1,9 @@
+{
+	"mcpServers": {
+		"zvibe-editor": {
+			"type": "stdio",
+			"command": "node",
+			"args": ["mcp/server/index.mjs"]
+		}
+	}
+}

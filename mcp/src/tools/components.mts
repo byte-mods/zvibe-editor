@@ -26,6 +26,77 @@ const exactNodeSelector = <T extends z.ZodRawShape>(shape: T) =>
 
 const jsonObject = z.record(z.string().min(1).max(128), z.unknown());
 const vector3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
+const componentIdentifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/);
+const ecsIdentifier = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/);
+const ecsFieldValue = z.union([
+	z.number().finite(),
+	z.boolean(),
+	z.tuple([z.number().finite(), z.number().finite()]),
+	z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+	z.tuple([z.number().finite(), z.number().finite(), z.number().finite(), z.number().finite()]),
+]);
+const entityComponentData = z
+	.object({
+		version: z.union([z.literal(2), z.literal(3)]).optional(),
+		archetype: z.string().min(1).max(120).optional(),
+		sectionId: ecsIdentifier.optional(),
+		values: z.record(ecsIdentifier, z.number().finite()).optional(),
+		components: z.record(ecsIdentifier, z.record(ecsIdentifier, ecsFieldValue)).optional(),
+		bakingEnabled: z.boolean().optional(),
+		hiddenInHierarchy: z.boolean().optional(),
+	})
+	.strict();
+const networkComponentData = z
+	.object({
+		networkId: componentIdentifier.optional(),
+		authority: z.enum(["server", "owner"]).optional(),
+		syncTransform: z.boolean().optional(),
+		syncAnimation: z.boolean().optional(),
+		sendRateHz: z.number().int().min(1).max(120).optional(),
+		interpolate: z.boolean().optional(),
+	})
+	.strict();
+const point2D = z.tuple([z.number().finite().min(-1_000_000).max(1_000_000), z.number().finite().min(-1_000_000).max(1_000_000)]);
+const providerId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$/);
+const sortingLayerIds = z.array(z.string().min(1).max(128)).max(32);
+const light2DComponentData = z
+	.object({
+		model: z.literal("unity-light2d-v1").optional(),
+		version: z.literal(1).optional(),
+		lightType: z.enum(["global", "point", "freeform", "sprite", "provider"]).optional(),
+		providerId: providerId.optional(),
+		providerVersion: z.number().int().min(1).max(100_000).optional(),
+		providerData: jsonObject.optional(),
+		color: z.tuple([z.number().finite().min(0).max(16), z.number().finite().min(0).max(16), z.number().finite().min(0).max(16), z.number().finite().min(0).max(1)]).optional(),
+		intensity: z.number().finite().min(0).max(64).optional(),
+		falloffIntensity: z.number().finite().min(0).max(1).optional(),
+		innerRadius: z.number().finite().min(0).max(1_000_000).optional(),
+		outerRadius: z.number().finite().min(0.001).max(1_000_000).optional(),
+		innerAngleDegrees: z.number().finite().min(0).max(360).optional(),
+		outerAngleDegrees: z.number().finite().min(0.001).max(360).optional(),
+		shapePath: z.array(point2D).min(3).max(32).optional(),
+		overlapOperation: z.enum(["additive", "alpha-blend"]).optional(),
+		lightOrder: z.number().int().min(-32_000).max(32_000).optional(),
+		shadowsEnabled: z.boolean().optional(),
+		shadowIntensity: z.number().finite().min(0).max(1).optional(),
+		targetSortingLayerIds: sortingLayerIds.optional(),
+	})
+	.strict();
+const shadowCaster2DComponentData = z
+	.object({
+		model: z.literal("unity-shadow-caster2d-v1").optional(),
+		version: z.literal(1).optional(),
+		sourceType: z.enum(["shape-editor", "node-bounds", "provider"]).optional(),
+		providerId: providerId.optional(),
+		providerVersion: z.number().int().min(1).max(100_000).optional(),
+		providerData: jsonObject.optional(),
+		shapePath: z.array(point2D).min(3).max(64).optional(),
+		castingOption: z.enum(["cast-shadow", "self-shadow", "cast-and-self-shadow", "no-shadow"]).optional(),
+		priority: z.number().int().min(-32_000).max(32_000).optional(),
+		targetSortingLayerIds: sortingLayerIds.optional(),
+	})
+	.strict();
+const componentData = z.union([networkComponentData, entityComponentData, light2DComponentData, shadowCaster2DComponentData]);
 
 export function registerComponentTools(server: McpServer): void {
 	server.registerTool(
@@ -33,7 +104,7 @@ export function registerComponentTools(server: McpServer): void {
 		{
 			title: "List GameObject component types",
 			description:
-				"List the closed first-class component registry, duplicate/dependency rules, and optional node-specific availability. Transform is required; data, behavior script, and real Physics Body 3D adapters are authorable.",
+				"List the closed first-class component registry, duplicate/dependency rules, and optional node-specific availability. Includes runtime Light2D and ShadowCaster2D provider components.",
 			inputSchema: z
 				.object(nodeSelectorShape)
 				.strict()
@@ -60,16 +131,16 @@ export function registerComponentTools(server: McpServer): void {
 		{
 			title: "Add GameObject component",
 			description:
-				"Add one custom data component, existing src/ behavior script, real Havok Physics Body 3D, Entity (ECS) archetype, or Network Replication contract under the exact inspected stack fingerprint. Duplicate and target-support rules are enforced atomically with editor Undo/Redo.",
+				"Add one data, behavior, Physics Body 3D, Entity, Network Replication, Light2D, or ShadowCaster2D component under the exact inspected stack fingerprint. Duplicate and target-support rules are enforced atomically with editor Undo/Redo.",
 			inputSchema: exactNodeSelector({
 				expectedFingerprint: fingerprint,
-				type: z.enum(["data", "script", "physics3d", "entity", "network"]),
+				type: z.enum(["data", "script", "physics3d", "entity", "network", "light2d", "shadowcaster2d"]),
 				name: z.string().min(1).max(80).optional(),
 				values: jsonObject.optional(),
 				path: z.string().min(1).max(512).optional(),
 				enabled: z.boolean().optional(),
-				/** Seed payload for `entity` (archetype/values) and `network` (replication) components. */
-				data: jsonObject.optional(),
+				/** Seed payload for Entity, Network, Light2D, and ShadowCaster2D components. */
+				data: componentData.optional(),
 				shapeType: z.enum(["box", "sphere", "capsule", "cylinder", "mesh"]).optional(),
 				motionType: z.enum(["static", "dynamic", "animated"]).optional(),
 				mass: z.number().finite().min(0).max(1_000_000).optional(),
@@ -91,8 +162,8 @@ export function registerComponentTools(server: McpServer): void {
 				enabled: z.boolean().optional(),
 				name: z.string().min(1).max(80).optional(),
 				values: jsonObject.optional(),
-				/** Partial update for `entity` (archetype/values) and `network` (replication) components; merged then re-normalized. */
-				data: jsonObject.optional(),
+				/** Partial update for Entity, Network, Light2D, and ShadowCaster2D components; merged then re-normalized. */
+				data: componentData.optional(),
 				transform: z.object({ position: vector3.optional(), rotation: vector3.optional(), scaling: vector3.optional() }).strict().optional(),
 				script: z
 					.object({ executionOrder: z.number().int().min(-32000).max(32000).optional(), values: jsonObject.optional() })

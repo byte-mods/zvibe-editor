@@ -7,7 +7,7 @@ import { NodeParticleSystemSetMesh } from "../../editor/nodes/node-particle-syst
  * @param object defines the reference to the object to test its class name.
  */
 export function isParticleSystem(object: any): object is ParticleSystem {
-	return object.getClassName?.() === "ParticleSystem";
+	return object?.getClassName?.() === "ParticleSystem";
 }
 
 /**
@@ -15,7 +15,7 @@ export function isParticleSystem(object: any): object is ParticleSystem {
  * @param object defines the reference to the object to test its class name.
  */
 export function isGPUParticleSystem(object: any): object is GPUParticleSystem {
-	return object.getClassName?.() === "GPUParticleSystem";
+	return object?.getClassName?.() === "GPUParticleSystem";
 }
 
 /**
@@ -23,7 +23,7 @@ export function isGPUParticleSystem(object: any): object is GPUParticleSystem {
  * @param object defines the reference to the object to test its class name.
  */
 export function isNodeParticleSystemSetMesh(object: any): object is NodeParticleSystemSetMesh {
-	return object.getClassName?.() === "NodeParticleSystemSetMesh";
+	return object?.getClassName?.() === "NodeParticleSystemSetMesh";
 }
 
 /**
@@ -31,7 +31,7 @@ export function isNodeParticleSystemSetMesh(object: any): object is NodeParticle
  * @param object defines the reference to the object to test its class name.
  */
 export function isAnyParticleSystem(object: any): object is IParticleSystem {
-	switch (object.getClassName?.()) {
+	switch (object?.getClassName?.()) {
 		case "ParticleSystem":
 		case "GPUParticleSystem":
 			return true;

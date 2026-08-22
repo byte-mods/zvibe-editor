@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "crypto";
-import { spawn } from "child_process";
 import { createReadStream } from "fs";
 import { basename, dirname, join } from "path/posix";
 import { copyFile, ensureDir, move, pathExists, readJSON, remove, stat, writeJSON } from "fs-extra";
@@ -17,6 +16,8 @@ import {
 
 import { Editor } from "../../editor/main";
 import { projectConfiguration } from "../../project/configuration";
+import { applyImporterArtifactWithAccelerator } from "./import-accelerator";
+import { resolveMediaExecutable, runMediaProcess } from "./media-executables";
 import { readAssetMetadata } from "./registry";
 
 export interface IAudioImporterArtifactStatus {
@@ -36,53 +37,6 @@ function projectDirectory(): string {
 	return dirname(projectConfiguration.path);
 }
 
-function executableName(name: "ffmpeg" | "ffprobe"): string {
-	return process.platform === "win32" ? `${name}.exe` : name;
-}
-
-async function resolveMediaExecutable(editor: Editor | undefined, name: "ffmpeg" | "ffprobe"): Promise<string> {
-	const environment = process.env[name === "ffmpeg" ? "BABYLONJS_EDITOR_FFMPEG_PATH" : "BABYLONJS_EDITOR_FFPROBE_PATH"];
-	const candidates = [environment, editor?.path ? join(editor.path, process.env.DEBUG ? "bin" : "../../bin", executableName(name)) : null, executableName(name)].filter(
-		(candidate): candidate is string => Boolean(candidate)
-	);
-	for (const candidate of candidates) {
-		if (!candidate.includes("/") || (await pathExists(candidate))) {
-			return candidate;
-		}
-	}
-	throw new Error(`${name} is unavailable. Install it or set ${name === "ffmpeg" ? "BABYLONJS_EDITOR_FFMPEG_PATH" : "BABYLONJS_EDITOR_FFPROBE_PATH"}.`);
-}
-
-async function runProcess(command: string, args: string[], maximumOutputBytes = 2 * 1024 * 1024): Promise<string> {
-	return new Promise<string>((resolve, reject) => {
-		const child = spawn(command, args, { shell: false, windowsHide: true });
-		const output: Buffer[] = [];
-		const errors: Buffer[] = [];
-		let bytes = 0;
-		const collect = (target: Buffer[], value: Buffer): void => {
-			bytes += value.length;
-			if (bytes <= maximumOutputBytes) {
-				target.push(value);
-			}
-		};
-		child.stdout.on("data", (value: Buffer) => collect(output, value));
-		child.stderr.on("data", (value: Buffer) => collect(errors, value));
-		child.on("error", (error) => reject(new Error(`Failed to start ${command}: ${error.message}`)));
-		child.on("close", (code) => {
-			if (code === 0 && bytes <= maximumOutputBytes) {
-				resolve(Buffer.concat(output).toString("utf-8"));
-			} else {
-				const message = Buffer.concat(errors).toString("utf-8").trim().slice(0, 4096);
-				reject(
-					new Error(
-						bytes > maximumOutputBytes ? `${command} output exceeded the 2 MiB diagnostic limit.` : `${command} exited with code ${code}: ${message || "no diagnostic"}`
-					)
-				);
-			}
-		});
-	});
-}
-
 async function contentHash(path: string): Promise<string> {
 	const hash = createHash("sha256");
 	await new Promise<void>((resolve, reject) => {
@@ -96,7 +50,7 @@ async function contentHash(path: string): Promise<string> {
 
 async function probeAudio(path: string, editor?: Editor): Promise<IAudioImportProbe> {
 	const executable = await resolveMediaExecutable(editor, "ffprobe");
-	const output = await runProcess(executable, createAudioProbeArguments(path));
+	const output = await runMediaProcess(executable, createAudioProbeArguments(path));
 	try {
 		return parseAudioProbe(JSON.parse(output));
 	} catch {
@@ -142,6 +96,16 @@ export async function getAudioImporterArtifactStatus(path: string): Promise<IAud
 
 /** Applies one exact-fingerprint audio importer and atomically publishes its project-local preview artifact. */
 export async function applyAudioImporterArtifact(path: string, expectedFingerprint: string, editor?: Editor): Promise<IAudioImporterArtifactStatus> {
+	return applyImporterArtifactWithAccelerator({
+		kind: "audio",
+		sourcePath: path,
+		expectedFingerprint,
+		inspect: () => getAudioImporterArtifactStatus(path),
+		applyLocal: () => applyAudioImporterArtifactLocally(path, expectedFingerprint, editor),
+	});
+}
+
+async function applyAudioImporterArtifactLocally(path: string, expectedFingerprint: string, editor?: Editor): Promise<IAudioImporterArtifactStatus> {
 	const status = await getAudioImporterArtifactStatus(path);
 	if (status.fingerprint !== expectedFingerprint) {
 		throw new Error(`Audio importer plan changed. Inspect again and use current fingerprint ${status.fingerprint}.`);
@@ -155,7 +119,7 @@ export async function applyAudioImporterArtifact(path: string, expectedFingerpri
 	try {
 		if (audioImportRequiresTranscode(settings)) {
 			const executable = await resolveMediaExecutable(editor, "ffmpeg");
-			await runProcess(executable, createAudioTranscodeArguments(path, temporary, settings));
+			await runMediaProcess(executable, createAudioTranscodeArguments(path, temporary, settings));
 		} else {
 			await copyFile(path, temporary);
 		}
@@ -188,7 +152,7 @@ export async function processAudioImporterOutput(sourcePath: string, outputPath:
 	try {
 		if (audioImportRequiresTranscode(settings)) {
 			const executable = await resolveMediaExecutable(editor, "ffmpeg");
-			await runProcess(executable, createAudioTranscodeArguments(sourcePath, temporary, settings));
+			await runMediaProcess(executable, createAudioTranscodeArguments(sourcePath, temporary, settings));
 		} else {
 			await copyFile(sourcePath, temporary);
 		}

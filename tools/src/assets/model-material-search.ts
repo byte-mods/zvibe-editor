@@ -1,4 +1,10 @@
-import { basename, dirname, extname, join, normalize } from "path/posix";
+import {
+	basenamePortablePath as basename,
+	dirnamePortablePath as dirname,
+	extnamePortablePath as extname,
+	joinPortablePath as join,
+	normalizePortablePath as normalize,
+} from "./portable-path";
 
 import { IModelMaterialRemapDefinition } from "./model-material-remaps";
 

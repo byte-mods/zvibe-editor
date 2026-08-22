@@ -2,9 +2,15 @@ import { Node } from "@babylonjs/core/node";
 import { Scene } from "@babylonjs/core/scene";
 import { AssetContainer } from "@babylonjs/core/assetContainer";
 
+import { normalizeEntityComponentData } from "../ecs/model";
+import { normalizeLight2DComponentData, normalizeShadowCaster2DComponentData } from "./lighting-2d";
+
+export type { IEntityComponentData } from "../ecs/model";
+export { normalizeEntityComponentData } from "../ecs/model";
+
 export const gameObjectComponentStackVersion = 1;
 
-export type GameObjectComponentType = "data" | "script" | "physics3d" | "network" | "entity";
+export type GameObjectComponentType = "data" | "script" | "physics3d" | "network" | "entity" | "light2d" | "shadowcaster2d";
 
 /** Who owns the authoritative state of a replicated node. */
 export type NetworkAuthority = "server" | "owner";
@@ -13,9 +19,8 @@ export type NetworkAuthority = "server" | "owner";
  * Authored replication settings for one networked node.
  *
  * This is the first-party multiplayer component model: it is pure authored
- * data, so it round-trips through the normal component stack and is readable
- * at runtime by whichever transport/netcode layer the project uses. The editor
- * does not ship a transport — it authors the contract that one consumes.
+ * data, so it round-trips through the normal component stack and is consumed
+ * by the first-party scene networking runtime or by a project adapter.
  */
 export interface INetworkComponentData extends Record<string, unknown> {
 	/** Stable replication id, unique per scene. */
@@ -27,23 +32,6 @@ export interface INetworkComponentData extends Record<string, unknown> {
 	sendRateHz: number;
 	/** Smooth remote transforms between snapshots. */
 	interpolate: boolean;
-}
-
-/**
- * Authored entity (ECS) settings for one node.
- *
- * This is the authoring + baking half of an entities workflow: the scene graph
- * stays the authoring surface, and marked nodes bake into a flat,
- * struct-of-arrays buffer that a data-oriented runtime can iterate without
- * touching Babylon nodes. The editor does not ship a job scheduler.
- */
-export interface IEntityComponentData extends Record<string, unknown> {
-	/** Archetype name grouping entities that share a component layout. */
-	archetype: string;
-	/** Numeric fields baked into parallel arrays, in stable key order. */
-	values: Record<string, number>;
-	/** Exclude from baking without removing the authored component. */
-	bakingEnabled: boolean;
 }
 
 /** One baked archetype chunk: parallel arrays, not an array of objects. */
@@ -60,24 +48,6 @@ export interface IBakedEntityWorld {
 	version: 1;
 	archetypes: IBakedEntityArchetype[];
 	entityCount: number;
-}
-
-/** Normalizes authored entity data, never throwing on malformed input. */
-export function normalizeEntityComponentData(data: Readonly<Record<string, unknown>>): IEntityComponentData {
-	const rawValues = data.values;
-	const values: Record<string, number> = {};
-	if (rawValues && typeof rawValues === "object" && !Array.isArray(rawValues)) {
-		Object.entries(rawValues as Record<string, unknown>)
-			.filter(([, value]) => typeof value === "number" && Number.isFinite(value))
-			.forEach(([key, value]) => (values[key] = value as number));
-	}
-
-	return {
-		...data,
-		archetype: typeof data.archetype === "string" && data.archetype.trim() ? data.archetype.trim() : "Default",
-		values,
-		bakingEnabled: data.bakingEnabled !== false,
-	};
 }
 
 /**
@@ -160,7 +130,13 @@ function isSerializedComponent(value: unknown): value is ISerializedGameObjectCo
 	return (
 		typeof component.id === "string" &&
 		component.id.length > 0 &&
-		(component.type === "data" || component.type === "script" || component.type === "physics3d" || component.type === "network" || component.type === "entity") &&
+		(component.type === "data" ||
+			component.type === "script" ||
+			component.type === "physics3d" ||
+			component.type === "network" ||
+			component.type === "entity" ||
+			component.type === "light2d" ||
+			component.type === "shadowcaster2d") &&
 		typeof component.enabled === "boolean" &&
 		Boolean(component.data) &&
 		typeof component.data === "object" &&
@@ -178,7 +154,6 @@ export function normalizeNetworkComponentData(data: Readonly<Record<string, unkn
 	const rawRate = typeof data.sendRateHz === "number" && Number.isFinite(data.sendRateHz) ? data.sendRateHz : 20;
 
 	return {
-		...data,
 		networkId: typeof data.networkId === "string" && data.networkId.length > 0 ? data.networkId : "",
 		authority: data.authority === "owner" ? "owner" : "server",
 		syncTransform: data.syncTransform !== false,
@@ -235,13 +210,25 @@ export function configureGameObjectComponents(scene: Scene | AssetContainer): vo
 		const components =
 			stack?.components
 				.map((component, order) => ({ component, order }))
-				.filter(({ component }) => (component.type === "data" || component.type === "network" || component.type === "entity") && component.enabled)
+				.filter(
+					({ component }) =>
+						(component.type === "data" ||
+							component.type === "network" ||
+							component.type === "entity" ||
+							component.type === "light2d" ||
+							component.type === "shadowcaster2d") &&
+						component.enabled
+				)
 				.map(({ component, order }) => {
 					let data: Record<string, unknown>;
 					if (component.type === "network") {
 						data = normalizeNetworkComponentData(component.data);
 					} else if (component.type === "entity") {
 						data = normalizeEntityComponentData(component.data);
+					} else if (component.type === "light2d") {
+						data = normalizeLight2DComponentData(component.data);
+					} else if (component.type === "shadowcaster2d") {
+						data = normalizeShadowCaster2DComponentData(component.data);
 					} else {
 						data = cloneJsonObject(component.data);
 					}

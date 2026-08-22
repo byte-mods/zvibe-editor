@@ -1,4 +1,4 @@
-import { basename, extname } from "path/posix";
+import { basenamePortablePath as basename, extnamePortablePath as extname } from "./portable-path";
 
 import { parseAllDocuments } from "yaml";
 
@@ -31,6 +31,23 @@ export interface IAnimatorControllerAvatarMaskBinding {
 	usedBy: string[];
 }
 
+export interface IAnimatorControllerBehaviourBinding {
+	key: string;
+	behaviourFileId: string;
+	behaviourGuid: string | null;
+	behaviourType: number | null;
+	scriptFileId: string | null;
+	scriptGuid: string | null;
+	scriptType: number | null;
+	behaviourName: string;
+	editorClassIdentifier: string;
+	scriptClassHint: string;
+	enabled: boolean;
+	serializedFieldsJson: string;
+	usedBy: string[];
+	diagnostics: string[];
+}
+
 export interface IAnimatorControllerImportedLayer extends IAnimatorGraphMachine {
 	name: string;
 	weight?: number;
@@ -61,7 +78,16 @@ export interface IImportedAnimatorControllerDocument {
 	controller: IAnimatorControllerImportedData;
 	motionBindings: IAnimatorControllerMotionBinding[];
 	avatarMaskBindings: IAnimatorControllerAvatarMaskBinding[];
+	behaviourBindings: IAnimatorControllerBehaviourBinding[];
+	compatibility?: IUnityAnimatorControllerCompatibility;
 	unsupportedFeatures: string[];
+}
+
+export interface IUnityAnimatorControllerCompatibility {
+	yamlVersion: string | null;
+	stateSerializationProfile: "unversioned" | "legacy-v5-or-earlier" | "modern-v6-or-later" | "mixed";
+	serializedObjects: Array<{ classId: number; typeName: string; serializedVersions: number[]; unversionedCount: number; count: number }>;
+	fieldVariants: string[];
 }
 
 export interface IUnityAnimatorControllerConversion {
@@ -102,6 +128,8 @@ const MAX_TRANSITIONS = 4096;
 const MAX_BLEND_TREES = 1024;
 const MAX_BLEND_CHILDREN = 64;
 const MAX_NESTING_DEPTH = 6;
+const MAX_BEHAVIOURS_PER_OWNER = 16;
+const MAX_BEHAVIOUR_SERIALIZED_BYTES = 64 * 1024;
 
 function record(value: unknown): Record<string, unknown> | null {
 	return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -188,8 +216,92 @@ function parseUnityObjects(source: string): IUnitySerializedObject[] {
 	});
 }
 
-function bindingKey(kind: "motion" | "mask", value: IUnityObjectReference): string {
+function compatibilityEvidence(source: string, objects: IUnitySerializedObject[]): IUnityAnimatorControllerCompatibility {
+	const grouped = new Map<string, { classId: number; typeName: string; serializedVersions: Set<number>; unversionedCount: number; count: number }>();
+	for (const object of objects) {
+		const key = `${object.classId}:${object.typeName}`;
+		const current = grouped.get(key) ?? { classId: object.classId, typeName: object.typeName, serializedVersions: new Set<number>(), unversionedCount: 0, count: 0 };
+		const serializedVersion = numberValue(object.data.serializedVersion, Number.NaN);
+		if (Number.isSafeInteger(serializedVersion) && serializedVersion >= 0) {
+			current.serializedVersions.add(serializedVersion);
+		} else {
+			current.unversionedCount++;
+		}
+		current.count++;
+		grouped.set(key, current);
+	}
+	const stateVersions = objects
+		.filter((object) => object.typeName === "AnimatorState")
+		.map((object) => numberValue(object.data.serializedVersion, Number.NaN))
+		.filter((version) => Number.isSafeInteger(version) && version >= 0);
+	const legacy = stateVersions.some((version) => version <= 5);
+	const modern = stateVersions.some((version) => version >= 6);
+	const stateSerializationProfile = !stateVersions.length ? "unversioned" : legacy && modern ? "mixed" : legacy ? "legacy-v5-or-earlier" : "modern-v6-or-later";
+	const fieldVariants = new Set<string>();
+	for (const object of objects) {
+		if (object.typeName === "AnimatorState") {
+			if (Object.prototype.hasOwnProperty.call(object.data, "m_IKOnFeet")) {
+				fieldVariants.add("AnimatorState.m_IKOnFeet");
+			}
+			if (Object.prototype.hasOwnProperty.call(object.data, "m_FootIK")) {
+				fieldVariants.add("AnimatorState.m_FootIK");
+			}
+			if (Object.prototype.hasOwnProperty.call(object.data, "m_WriteDefaultValues")) {
+				fieldVariants.add("AnimatorState.m_WriteDefaultValues");
+			}
+			if (Object.prototype.hasOwnProperty.call(object.data, "m_TimeParameterActive")) {
+				fieldVariants.add("AnimatorState.m_TimeParameterActive");
+			}
+		}
+		for (const condition of entries(object.data.m_Conditions)) {
+			if (Object.prototype.hasOwnProperty.call(condition, "m_EventTreshold")) {
+				fieldVariants.add("AnimatorCondition.m_EventTreshold");
+			}
+			if (Object.prototype.hasOwnProperty.call(condition, "m_EventThreshold")) {
+				fieldVariants.add("AnimatorCondition.m_EventThreshold");
+			}
+		}
+	}
+	const yamlVersion = source.match(/^%YAML\s+([^\s]+)\s*$/m)?.[1] ?? null;
+	return {
+		yamlVersion,
+		stateSerializationProfile,
+		serializedObjects: [...grouped.values()]
+			.map((entry) => ({
+				classId: entry.classId,
+				typeName: entry.typeName,
+				serializedVersions: [...entry.serializedVersions].sort((left, right) => left - right),
+				unversionedCount: entry.unversionedCount,
+				count: entry.count,
+			}))
+			.sort((left, right) => left.classId - right.classId || left.typeName.localeCompare(right.typeName)),
+		fieldVariants: [...fieldVariants].sort(),
+	};
+}
+
+function bindingKey(kind: "motion" | "mask" | "behaviour", value: IUnityObjectReference): string {
 	return `@unity-${kind}:${value.guid ?? "local"}:${value.fileId}`;
+}
+
+function behaviourSerializedFields(data: Record<string, unknown>): { json: string; error: string | null } {
+	const ignored = new Set([
+		"m_ObjectHideFlags",
+		"m_CorrespondingSourceObject",
+		"m_PrefabInstance",
+		"m_PrefabAsset",
+		"m_GameObject",
+		"m_Enabled",
+		"m_EditorHideFlags",
+		"m_Script",
+		"m_Name",
+		"m_EditorClassIdentifier",
+	]);
+	const fields = Object.fromEntries(Object.entries(data).filter(([key]) => !ignored.has(key)));
+	const json = JSON.stringify(fields);
+	if (Buffer.byteLength(json, "utf8") > MAX_BEHAVIOUR_SERIALIZED_BYTES) {
+		return { json: "{}", error: `serialized fields exceed ${MAX_BEHAVIOUR_SERIALIZED_BYTES.toLocaleString()} UTF-8 bytes` };
+	}
+	return { json, error: null };
 }
 
 function conditionFromUnity(value: Record<string, unknown>, unsupported: Set<string>): NonNullable<IAnimatorGraphTransition["conditions"]>[number] | null {
@@ -222,6 +334,7 @@ function conditionFromUnity(value: Record<string, unknown>, unsupported: Set<str
 /** Converts Unity's multi-document YAML AnimatorController serialization into a portable editor controller plus explicit external-reference bindings. */
 export function convertUnityAnimatorController(source: string, sourcePath: string): IUnityAnimatorControllerConversion {
 	const objects = parseUnityObjects(source);
+	const compatibility = compatibilityEvidence(source, objects);
 	const byId = new Map(objects.map((object) => [object.fileId, object]));
 	const controllerObject = objects.find((object) => object.typeName === "AnimatorController");
 	if (!controllerObject) {
@@ -232,12 +345,82 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 	const unsupported = new Set<string>();
 	const motionBindings = new Map<string, IAnimatorControllerMotionBinding>();
 	const maskBindings = new Map<string, IAnimatorControllerAvatarMaskBinding>();
+	const behaviourBindings = new Map<string, IAnimatorControllerBehaviourBinding>();
 	const subgraphs = new Map<string, IAnimatorSubgraphDefinition>();
 	const convertingMachines = new Set<string>();
 	let stateCount = 0;
 	let transitionCount = 0;
 	let blendTreeCount = 0;
 
+	const addBehaviourBinding = (value: IUnityObjectReference, owner: string): { key: string; enabled: boolean } => {
+		const key = bindingKey("behaviour", value);
+		const existing = behaviourBindings.get(key);
+		if (existing) {
+			if (!existing.usedBy.includes(owner)) {
+				existing.usedBy.push(owner);
+			}
+			return { key, enabled: existing.enabled };
+		}
+		const diagnostics: string[] = [];
+		const local = value.guid ? null : byId.get(value.fileId);
+		if (!local) {
+			diagnostics.push(
+				value.guid
+					? "The referenced MonoBehaviour is external to this controller; bind it explicitly when exact MonoScript provenance is unavailable."
+					: "The local MonoBehaviour object is missing."
+			);
+		} else if (local.typeName !== "MonoBehaviour" || local.classId !== 114) {
+			diagnostics.push(`Expected a class-114 MonoBehaviour but found ${local.typeName} (!u!${local.classId}).`);
+		}
+		const data = local?.typeName === "MonoBehaviour" && local.classId === 114 ? local.data : null;
+		const script = data ? reference(data.m_Script) : null;
+		if (data && !script) {
+			diagnostics.push("The MonoBehaviour does not reference a valid MonoScript in m_Script.");
+		}
+		const serialized = data ? behaviourSerializedFields(data) : { json: "{}", error: null };
+		if (serialized.error) {
+			errors.push(`Unity behaviour ${value.fileId} used by ${owner} ${serialized.error}.`);
+			diagnostics.push(serialized.error);
+		}
+		const behaviourName = data ? textValue(data.m_Name).trim() : "";
+		const editorClassIdentifier = data ? textValue(data.m_EditorClassIdentifier).trim() : "";
+		const classHint = editorClassIdentifier.split("::").at(-1)?.split(".").at(-1)?.trim() || behaviourName || `Behaviour ${value.fileId}`;
+		behaviourBindings.set(key, {
+			key,
+			behaviourFileId: value.fileId,
+			behaviourGuid: value.guid,
+			behaviourType: value.type,
+			scriptFileId: script?.fileId ?? null,
+			scriptGuid: script?.guid ?? null,
+			scriptType: script?.type ?? null,
+			behaviourName,
+			editorClassIdentifier,
+			scriptClassHint: classHint,
+			enabled: data ? data.m_Enabled === undefined || booleanValue(data.m_Enabled) : true,
+			serializedFieldsJson: serialized.json,
+			usedBy: [owner],
+			diagnostics,
+		});
+		return { key, enabled: behaviourBindings.get(key)!.enabled };
+	};
+
+	const convertBehaviours = (value: unknown, owner: string): NonNullable<IAnimatorGraphState["behaviours"]> => {
+		const raw = Array.isArray(value) ? value : [];
+		if (raw.length > MAX_BEHAVIOURS_PER_OWNER) {
+			errors.push(`${owner} cannot contain more than ${MAX_BEHAVIOURS_PER_OWNER} StateMachineBehaviour references.`);
+		}
+		const converted: NonNullable<IAnimatorGraphState["behaviours"]> = [];
+		for (const [index, entry] of raw.slice(0, MAX_BEHAVIOURS_PER_OWNER).entries()) {
+			const valueReference = reference(entry);
+			if (!valueReference) {
+				errors.push(`${owner} behaviour ${index} does not contain a valid object reference.`);
+				continue;
+			}
+			const binding = addBehaviourBinding(valueReference, owner);
+			converted.push({ id: `${binding.key}:${index}`, scriptKey: binding.key, ...(binding.enabled ? {} : { enabled: false }) });
+		}
+		return converted;
+	};
 	const addMotionBinding = (value: IUnityObjectReference, suggestion: string, owner: string): string => {
 		const key = bindingKey("motion", value);
 		const existing = motionBindings.get(key);
@@ -478,11 +661,44 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 				continue;
 			}
 			const rawSpeed = numberValue(stateObject.data.m_Speed, 1);
+			const cycleOffset = numberValue(stateObject.data.m_CycleOffset, 0);
+			const speedParameter = booleanValue(stateObject.data.m_SpeedParameterActive) ? textValue(stateObject.data.m_SpeedParameter).trim() : "";
+			const mirrorParameter = booleanValue(stateObject.data.m_MirrorParameterActive) ? textValue(stateObject.data.m_MirrorParameter).trim() : "";
+			const cycleOffsetParameter = booleanValue(stateObject.data.m_CycleOffsetParameterActive) ? textValue(stateObject.data.m_CycleOffsetParameter).trim() : "";
+			const timeParameter = booleanValue(stateObject.data.m_TimeParameterActive) ? textValue(stateObject.data.m_TimeParameter).trim() : "";
+			const footIKField = Object.prototype.hasOwnProperty.call(stateObject.data, "m_IKOnFeet")
+				? "m_IKOnFeet"
+				: Object.prototype.hasOwnProperty.call(stateObject.data, "m_FootIK")
+					? "m_FootIK"
+					: null;
+			const footIK = footIKField ? booleanValue(stateObject.data[footIKField]) : false;
+			const serializedVersion = numberValue(stateObject.data.serializedVersion, Number.NaN);
 			const state: IAnimatorGraphState = {
 				name: stateName,
 				...convertedMotion,
 				loop: true,
-				speed: rawSpeed > 0 ? rawSpeed : 1,
+				speed: rawSpeed === 0 || !Number.isFinite(rawSpeed) ? 1 : rawSpeed,
+				...(cycleOffset !== 0 ? { cycleOffset } : {}),
+				...(booleanValue(stateObject.data.m_Mirror) ? { mirror: true } : {}),
+				...(speedParameter ? { speedParameter } : {}),
+				...(mirrorParameter ? { mirrorParameter } : {}),
+				...(cycleOffsetParameter ? { cycleOffsetParameter } : {}),
+				...(timeParameter ? { timeParameter } : {}),
+				...(textValue(stateObject.data.m_Tag).trim() ? { tag: textValue(stateObject.data.m_Tag).trim() } : {}),
+				...(footIKField ? { footIK } : {}),
+				...(stateObject.data.m_WriteDefaultValues !== undefined ? { writeDefaultValues: booleanValue(stateObject.data.m_WriteDefaultValues) } : {}),
+				unitySource: {
+					fileId: stateRef.fileId,
+					serializedVersion: Number.isSafeInteger(serializedVersion) && serializedVersion >= 0 ? serializedVersion : null,
+					footIKField,
+					speedParameter: speedParameter || null,
+					mirrorParameter: mirrorParameter || null,
+					cycleOffsetParameter: cycleOffsetParameter || null,
+					timeParameter: timeParameter || null,
+				},
+				...(Array.isArray(stateObject.data.m_StateMachineBehaviours)
+					? { behaviours: convertBehaviours(stateObject.data.m_StateMachineBehaviours, `${owner}/${stateName}`) }
+					: {}),
 				...(graphPosition(child.m_Position) ? { graphPosition: graphPosition(child.m_Position) } : {}),
 			};
 			states.push(state);
@@ -494,16 +710,27 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 					transitions.push(converted);
 				}
 			}
-			if (rawSpeed <= 0 || booleanValue(stateObject.data.m_Mirror) || booleanValue(stateObject.data.m_FootIK) || entries(stateObject.data.m_StateMachineBehaviours).length) {
-				unsupported.add("Negative/zero state speed, state mirroring, Foot IK, and StateMachineBehaviour callbacks are not executed yet.");
+			if (!Number.isFinite(rawSpeed) || rawSpeed === 0) {
+				unsupported.add("Zero or malformed Animator state speed is normalized to 1 because Babylon Animation Groups require non-zero playback speed.");
 			}
-			if (
-				booleanValue(stateObject.data.m_SpeedParameterActive) ||
-				booleanValue(stateObject.data.m_MirrorParameterActive) ||
-				booleanValue(stateObject.data.m_CycleOffsetParameterActive) ||
-				booleanValue(stateObject.data.m_TimeParameterActive)
-			) {
-				unsupported.add("Animator state speed, mirror, cycle-offset, and time parameter bindings are not executed yet.");
+			if (cycleOffset < 0 || cycleOffset > 1) {
+				errors.push(`Animator state "${owner}/${stateName}" cycle offset must be normalized between 0 and 1.`);
+			}
+			for (const [label, parameter, expectedType] of [
+				["speed", speedParameter, 1],
+				["mirror", mirrorParameter, 4],
+				["cycle-offset", cycleOffsetParameter, 1],
+				["time", timeParameter, 1],
+			] as const) {
+				if (!parameter) {
+					continue;
+				}
+				const parameterEntry = entries(controllerObject.data.m_AnimatorParameters).find((entry) => textValue(entry.m_Name).trim() === parameter);
+				if (!parameterEntry) {
+					errors.push(`Animator state "${owner}/${stateName}" ${label} parameter binding "${parameter}" does not reference a controller parameter.`);
+				} else if (numberValue(parameterEntry.m_Type, Number.NaN) !== expectedType) {
+					errors.push(`Animator state "${owner}/${stateName}" ${label} parameter binding "${parameter}" has an incompatible Unity parameter type.`);
+				}
 			}
 		}
 		for (const transitionEntry of entries(serialized.data.m_AnyStateTransitions)) {
@@ -558,6 +785,7 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 				subgraphs.set(id, {
 					id,
 					name,
+					behaviours: converted.behaviours,
 					states: converted.states,
 					transitions: converted.transitions,
 					subStateMachines: converted.subStateMachines,
@@ -570,13 +798,13 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 			}
 			subStateMachines.push({ name, subgraphId: id, ...(graphPosition(child.m_Position) ? { graphPosition: graphPosition(child.m_Position) } : {}) });
 		}
-		if (entries(serialized.data.m_StateMachineBehaviours).length) {
-			unsupported.add("State-machine behaviour callbacks are preserved only as import diagnostics and are not executed.");
-		}
+		const behaviours = Array.isArray(serialized.data.m_StateMachineBehaviours)
+			? convertBehaviours(serialized.data.m_StateMachineBehaviours, `${owner} state machine`)
+			: undefined;
 		const defaultState = reference(serialized.data.m_DefaultState);
 		const entryState = (defaultState && stateNames.get(defaultState.fileId)) || states[0]?.name || subStateMachines[0]?.name;
 		convertingMachines.delete(machineId);
-		return { states, transitions, entryTransitions, subStateMachines, entryState, stateNames, statePaths, childMachineNames };
+		return { behaviours, states, transitions, entryTransitions, subStateMachines, entryState, stateNames, statePaths, childMachineNames };
 	};
 
 	const parameters: IAnimatorControllerImportedData["parameters"] = {};
@@ -640,6 +868,7 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 		const syncedLayerIndex = Math.trunc(numberValue(layer.m_SyncedLayerIndex, -1));
 		const maskRef = reference(layer.m_Mask);
 		const synchronizedMotionOverrides: NonNullable<IAnimatorControllerImportedLayer["synchronizedMotionOverrides"]> = {};
+		const synchronizedBehaviourOverrides: NonNullable<IAnimatorControllerImportedLayer["synchronizedBehaviourOverrides"]> = {};
 		if (syncedLayerIndex >= 0 && syncedLayerIndex < index) {
 			const sourceMachine = convertedMachines[syncedLayerIndex];
 			for (const [overrideIndex, override] of entries(layer.m_Motions).entries()) {
@@ -658,9 +887,25 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 					synchronizedMotionOverrides[statePath] = convertedMotion;
 				}
 			}
+			for (const [overrideIndex, override] of entries(layer.m_Behaviours).entries()) {
+				const stateRef = reference(override.m_State ?? override.first);
+				const statePath = stateRef ? sourceMachine?.statePaths.get(stateRef.fileId) : null;
+				if (!stateRef || !statePath) {
+					errors.push(`Animator synchronized layer "${layerNames[index]}" behaviour override ${overrideIndex} references a missing source state.`);
+					continue;
+				}
+				const second = record(override.second);
+				const rawBehaviours = override.m_Behaviours ?? (Array.isArray(override.second) ? override.second : second?.m_Behaviours);
+				if (!Array.isArray(rawBehaviours)) {
+					errors.push(`Animator synchronized layer "${layerNames[index]}" behaviour override ${overrideIndex} has no m_Behaviours list.`);
+					continue;
+				}
+				synchronizedBehaviourOverrides[statePath] = convertBehaviours(rawBehaviours, `${layerNames[index]} behaviour override ${statePath}`);
+			}
 		}
 		convertedLayers.push({
 			name: layerNames[index],
+			behaviours: converted.behaviours,
 			weight: Math.min(1, Math.max(0, numberValue(layer.m_DefaultWeight, 1))),
 			blendingMode: numberValue(layer.m_BlendingMode, 0) === 1 ? "additive" : "override",
 			...(numberValue(layer.m_BlendingMode, 0) === 1 ? { referencePose: { normalizedTime: 0 } } : {}),
@@ -668,6 +913,7 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 			...(syncedLayerIndex >= 0 && syncedLayerIndex < index ? { synchronizedLayer: syncedLayerIndex === 0 ? "$base" : layerNames[syncedLayerIndex] } : {}),
 			...(syncedLayerIndex >= 0 ? { synchronizedTiming: booleanValue(layer.m_SyncedLayerAffectsTiming) } : {}),
 			...(Object.keys(synchronizedMotionOverrides).length ? { synchronizedMotionOverrides } : {}),
+			...(Object.keys(synchronizedBehaviourOverrides).length ? { synchronizedBehaviourOverrides } : {}),
 			ikPass: booleanValue(layer.m_IKPass),
 			states: converted.states,
 			transitions: syncedLayerIndex >= 0 ? [] : converted.transitions,
@@ -675,11 +921,6 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 			subStateMachines: converted.subStateMachines,
 			entryState: converted.entryState,
 		});
-		if (Array.isArray(layer.m_Behaviours) && layer.m_Behaviours.length) {
-			unsupported.add(
-				"Unity MonoBehaviour references used by synchronized-layer behaviour overrides require explicit Babylon script bindings and are not imported automatically."
-			);
-		}
 	}
 	if (!baseMachine) {
 		throw new Error("Unity Animator Controller base layer could not be converted.");
@@ -701,6 +942,7 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 	const controller: IAnimatorControllerImportedData = {
 		name: controllerName,
 		baseIKPass: booleanValue(layerEntries[0]?.m_IKPass),
+		behaviours: baseMachine.behaviours,
 		parameters,
 		parameterTypes,
 		states: baseMachine.states,
@@ -719,6 +961,12 @@ export function convertUnityAnimatorController(source: string, sourcePath: strin
 			controller,
 			motionBindings: [...motionBindings.values()].map((binding) => ({ ...binding, usedBy: [...binding.usedBy].sort() })),
 			avatarMaskBindings: [...maskBindings.values()].map((binding) => ({ ...binding, usedBy: [...binding.usedBy].sort() })),
+			behaviourBindings: [...behaviourBindings.values()].map((binding) => ({
+				...binding,
+				usedBy: [...binding.usedBy].sort(),
+				diagnostics: [...binding.diagnostics],
+			})),
+			compatibility,
 			unsupportedFeatures,
 		},
 		stateCount,
@@ -738,6 +986,7 @@ export function isImportedAnimatorControllerDocument(value: unknown): value is I
 		valueRecord.version === 1 &&
 		record(valueRecord.controller) !== null &&
 		Array.isArray(valueRecord.motionBindings) &&
-		Array.isArray(valueRecord.avatarMaskBindings)
+		Array.isArray(valueRecord.avatarMaskBindings) &&
+		(valueRecord.behaviourBindings === undefined || Array.isArray(valueRecord.behaviourBindings))
 	);
 }

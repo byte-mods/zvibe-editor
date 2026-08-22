@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect the Tile Grid layout contract. Which four projection values can rendering, picking, painting, and collider authoring share?</question>
+      <answer>rectangular, isometric, hexagonal-point-top, hexagonal-flat-top</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect set_tile_grid_configuration. Which exact field prevents a stale layout write?</question>
+      <answer>expectedRevision</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect a version-2 Tile Palette. Which field holds its editable palette-canvas content?</question>
+      <answer>cells</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect set_tile_palette. Which three values identify a project GridBrush configuration beyond its JSON data?</question>
+      <answer>type, dataVersion, transform</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect list_grid_brush_types. Does the result expose executable project callbacks? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect apply_tile_palette_operation. Which two edit targets separate level content from the reusable palette canvas?</question>
+      <answer>map, palette</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect apply_tile_palette_operation. Which four operations transform an existing selection without creating a parallel scene format?</question>
+      <answer>move, rotate, flip-x, flip-y</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect flood-fill safety. What is the maximum explicit maxCells value accepted by the external contract?</question>
+      <answer>4096</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect map or palette mutation leases for apply_tile_palette_operation. Which three revisions must the caller provide?</question>
+      <answer>expectedRevision, expectedMapRevision, expectedPaletteRevision</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the Tile Palette MCP schemas. Are unknown top-level and tile-transform fields rejected before editor contact? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+</evaluation>

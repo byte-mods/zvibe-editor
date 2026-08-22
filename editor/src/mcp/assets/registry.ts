@@ -2,12 +2,19 @@ import { createHash, randomUUID } from "crypto";
 import { createReadStream } from "fs";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from "path/posix";
 import { gunzipSync } from "zlib";
-import { mkdir, move, pathExists, readFile, readJSON, rename, stat, writeJSON } from "fs-extra";
+import { mkdir, move, pathExists, readFile, readJSON, realpath, remove, rename, stat, writeJSON } from "fs-extra";
 import StreamZip from "node-stream-zip";
 
 import { normalizedGlob } from "../../tools/fs";
 import { projectConfiguration } from "../../project/configuration";
-import { getDefaultAssetImporterConfiguration, IAssetImporterConfiguration, normalizeAssetImporterConfiguration } from "babylonjs-editor-tools";
+import {
+	getDefaultAssetImporterConfiguration,
+	getScriptableAudioDependencyPaths,
+	IAssetImporterConfiguration,
+	normalizeAssetImporterConfiguration,
+	parseUnityAssetMeta,
+	serializeScriptableAudioRuntimeFingerprintInput,
+} from "babylonjs-editor-tools";
 import {
 	analyzeAssetFilesWithWorkers,
 	assetIndexingWorkerRuntime,
@@ -20,9 +27,10 @@ import { AssetDependencyGraphDirection, IAssetDependencyGraph, IAssetDependencyG
 import { extractB3dReferences, extractBlendReferences, extractDxfReferences, extractLwoReferences, extractMs3dReferences, extractXReferences } from "./binary-model-rewrite";
 
 export const ASSET_META_SUFFIX = ".bjsmeta.json";
-export const ASSET_REGISTRY_VERSION = 12;
+export const ASSET_REGISTRY_VERSION = 14;
 
 const ASSET_REGISTRY_PATH = ".bjseditor/asset-registry.json";
+const SCRIPTABLE_AUDIO_GRAPH_SUFFIX = ".audio-generator.json";
 const MAX_HASH_BYTES = 64 * 1024 * 1024;
 const MAX_TEXT_DEPENDENCY_BYTES = 8 * 1024 * 1024;
 const MAX_GLB_DEPENDENCY_BYTES = 64 * 1024 * 1024;
@@ -67,6 +75,7 @@ const TEXT_DEPENDENCY_EXTENSIONS = new Set([
 	".npss",
 	".animation",
 	".animations",
+	".anim",
 	".animator",
 	".controller",
 	".ts",
@@ -77,6 +86,7 @@ const TEXT_DEPENDENCY_EXTENSIONS = new Set([
 	".cts",
 	".html",
 	".css",
+	".uss",
 	".scss",
 	".glsl",
 	".wgsl",
@@ -88,6 +98,7 @@ const TEXT_DEPENDENCY_EXTENSIONS = new Set([
 	".mtl",
 	".dae",
 	".xml",
+	".uxml",
 	".yaml",
 	".yml",
 	".unity",
@@ -95,6 +106,7 @@ const TEXT_DEPENDENCY_EXTENSIONS = new Set([
 	".asset",
 	".meta",
 	".overridecontroller",
+	".mask",
 	".rendertexture",
 	".physicmaterial",
 	".lighting",
@@ -113,13 +125,17 @@ const ASSET_TYPE_EXTENSIONS: Record<string, string[]> = {
 	navmesh: ["navmesh"],
 	scene: ["scene", "bjseditor"],
 	prefab: ["prefab"],
-	animation: ["animation", "animations", "animator", "controller"],
+	animation: ["animation", "animations", "anim", "animator", "controller"],
+	"ai-model": ["onnx", "tflite", "pt2"],
+	alembic: ["abc"],
+	aseprite: ["ase", "aseprite"],
 	shader: ["glsl", "wgsl", "shader", "fx", "compute"],
+	"retained-ui": ["uxml", "uss"],
 	script: ["ts", "tsx", "js", "jsx", "mts", "cts"],
 	style: ["css", "scss", "sass", "less"],
 	markup: ["html", "htm", "xml"],
 	font: ["ttf", "otf", "woff", "woff2"],
-	data: ["json", "yaml", "yml", "csv", "txt", "md", "bin", "pdf", "dwg", "dwf", "dwfx", "dgn", "nwd", "nwc", "ies", "zip", "tar", "tgz", "gz", "unitypackage"],
+	data: ["json", "yaml", "yml", "csv", "txt", "md", "bin", "pdf", "dwg", "dwf", "dwfx", "dgn", "nwd", "nwc", "ies", "mask", "zip", "tar", "tgz", "gz", "unitypackage"],
 };
 
 export interface IAssetContainerEntry {
@@ -170,6 +186,8 @@ export interface IAssetRegistryEntry {
 	modifiedAt: string;
 	contentHash: string | null;
 	hashDeferred: boolean;
+	dependencyFingerprint: string | null;
+	dependencyHashDeferred: boolean;
 	labels: string[];
 	tags: string[];
 	favorite: boolean;
@@ -204,6 +222,25 @@ export interface IAssetRegistry {
 	duplicateGuids: Array<{ guid: string; paths: string[] }>;
 	dependencyEdgeCount: number;
 	missingDependencyCount: number;
+}
+
+export interface IUnityAssetGuidIndexEntry {
+	guid: string;
+	assetPath: string;
+	metaPath: string;
+	assetType: string;
+	assetExtension: string;
+	assetContentHash: string | null;
+	assetHashDeferred: boolean;
+	metaContentHash: string;
+	subAssets: Array<{ fileId: string; name: string }>;
+}
+
+export interface IUnityAssetGuidIndex {
+	entries: IUnityAssetGuidIndexEntry[];
+	duplicates: Array<{ guid: string; assetPaths: string[] }>;
+	malformed: Array<{ metaPath: string; error: string }>;
+	fingerprint: string;
 }
 
 let registryOperation: Promise<unknown> = Promise.resolve();
@@ -252,6 +289,24 @@ function resolveProjectPath(path: string): string {
 }
 
 export function getAssetTypeFromPath(path: string): string {
+	if (path.toLowerCase().endsWith(SCRIPTABLE_AUDIO_GRAPH_SUFFIX)) {
+		return "audio-generator";
+	}
+	if (path.toLowerCase().endsWith(".diffusionprofile.json")) {
+		return "diffusion-profile";
+	}
+	if (path.toLowerCase().endsWith(".rendererdata.json")) {
+		return "renderer-data";
+	}
+	if (path.toLowerCase().endsWith(".physicscontacts.json")) {
+		return "physics-contact-history";
+	}
+	if (path.toLowerCase().endsWith(".renderfeature.json")) {
+		return "renderer-feature";
+	}
+	if (path.toLowerCase().endsWith(".rendergraph.json")) {
+		return "render-graph";
+	}
 	const extension = extname(path).replace(".", "").toLowerCase();
 	for (const [type, extensions] of Object.entries(ASSET_TYPE_EXTENSIONS)) {
 		if (extensions.includes(extension)) {
@@ -262,6 +317,9 @@ export function getAssetTypeFromPath(path: string): string {
 }
 
 export async function readAssetMetadata(assetPath: string): Promise<IAssetRegistryMetadata> {
+	if (!(await pathExists(assetPath))) {
+		throw missingAssetError(assetPath);
+	}
 	const sidecar = `${assetPath}${ASSET_META_SUFFIX}`;
 	if (await pathExists(sidecar)) {
 		try {
@@ -317,6 +375,9 @@ export async function readAssetMetadata(assetPath: string): Promise<IAssetRegist
 }
 
 export async function writeAssetMetadata(assetPath: string, metadata: Partial<IAssetRegistryMetadata>): Promise<IAssetRegistryMetadata> {
+	if (!(await pathExists(assetPath))) {
+		throw missingAssetError(assetPath);
+	}
 	const value: IAssetRegistryMetadata = {
 		guid: metadata.guid ?? randomUUID(),
 		labels: [...new Set(metadata.labels ?? [])].sort(),
@@ -331,6 +392,10 @@ export async function writeAssetMetadata(assetPath: string, metadata: Partial<IA
 	const destination = `${assetPath}${ASSET_META_SUFFIX}`;
 	const temporary = `${destination}.${randomUUID()}.tmp`;
 	await writeJSON(temporary, value, { spaces: "\t" });
+	if (!(await pathExists(assetPath))) {
+		await remove(temporary);
+		throw missingAssetError(assetPath);
+	}
 	try {
 		await rename(temporary, destination);
 	} catch (error) {
@@ -340,7 +405,17 @@ export async function writeAssetMetadata(assetPath: string, metadata: Partial<IA
 		}
 		await move(temporary, destination, { overwrite: true });
 	}
+	if (!(await pathExists(assetPath))) {
+		await remove(destination);
+		throw missingAssetError(assetPath);
+	}
 	return value;
+}
+
+function missingAssetError(assetPath: string): NodeJS.ErrnoException {
+	const error = new Error(`Asset no longer exists: ${assetPath}`) as NodeJS.ErrnoException;
+	error.code = "ENOENT";
+	return error;
 }
 
 export function sanitizeAssetTags(value: unknown): string[] {
@@ -1325,6 +1400,26 @@ async function extractDependencyCandidates(
 		rawCandidates = result.values;
 		dependencyScanStatus = result.error ? "malformed" : "complete";
 		dependencyScanMessage = result.error;
+	} else if (absolutePath.toLowerCase().endsWith(SCRIPTABLE_AUDIO_GRAPH_SUFFIX)) {
+		dependencyScanKind = "text";
+		if (size > MAX_TEXT_DEPENDENCY_BYTES) {
+			return {
+				dependencyCandidates: [],
+				dependencyScanKind,
+				dependencyScanStatus: "deferred",
+				dependencyScanMessage: "Audio Generator asset exceeds the 8 MiB graph scan limit.",
+				dependencyScanDeferred: true,
+				containerEntries: [],
+				containerDependencies: [],
+			};
+		}
+		try {
+			rawCandidates = getScriptableAudioDependencyPaths(JSON.parse(await readFile(absolutePath, "utf-8")));
+			dependencyScanStatus = "complete";
+		} catch (error) {
+			dependencyScanStatus = "malformed";
+			dependencyScanMessage = `Audio Generator graph is invalid: ${error instanceof Error ? error.message : String(error)}`.slice(0, 2048);
+		}
 	} else if (TEXT_DEPENDENCY_EXTENSIONS.has(extension)) {
 		dependencyScanKind = "text";
 		if (size > MAX_TEXT_DEPENDENCY_BYTES) {
@@ -1366,9 +1461,23 @@ export async function analyzeAssetFile(absolutePath: string, root: string): Prom
 	};
 }
 
-async function makeEntry(analysis: IAssetFileWorkerAnalysis): Promise<IAssetRegistryEntry> {
+async function makeEntry(analysis: IAssetFileWorkerAnalysis): Promise<IAssetRegistryEntry | null> {
 	const absolutePath = analysis.absolutePath;
-	const metadata = await readAssetMetadata(absolutePath);
+	if (!(await pathExists(absolutePath))) {
+		return null;
+	}
+	let metadata: IAssetRegistryMetadata;
+	try {
+		metadata = await readAssetMetadata(absolutePath);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			return null;
+		}
+		throw error;
+	}
+	if (!(await pathExists(absolutePath))) {
+		return null;
+	}
 	return {
 		guid: metadata.guid,
 		path: relative(projectDirectory(), absolutePath).replace(/\\/g, "/"),
@@ -1379,6 +1488,8 @@ async function makeEntry(analysis: IAssetFileWorkerAnalysis): Promise<IAssetRegi
 		modifiedAt: analysis.modifiedAt,
 		contentHash: analysis.contentHash,
 		hashDeferred: analysis.hashDeferred,
+		dependencyFingerprint: null,
+		dependencyHashDeferred: false,
 		labels: metadata.labels,
 		tags: metadata.tags,
 		favorite: metadata.favorite,
@@ -1409,7 +1520,10 @@ async function makeEntries(files: string[], hooks: IAssetWorkerPoolOptions & { o
 		if (hooks.isCancelled?.()) {
 			throw new AssetIndexingCancelledError();
 		}
-		entries.push(await makeEntry(analysis));
+		const entry = await makeEntry(analysis);
+		if (entry) {
+			entries.push(entry);
+		}
 	}
 	return entries;
 }
@@ -1438,6 +1552,33 @@ async function saveRegistry(entries: IAssetRegistryEntry[]): Promise<IAssetRegis
 	}
 	for (const entry of entries) {
 		entry.referencedBy = [...new Set(reverse.get(entry.path) ?? [])].sort();
+	}
+	const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]));
+	for (const entry of entries) {
+		entry.dependencyFingerprint = null;
+		entry.dependencyHashDeferred = false;
+		if (entry.type !== "audio-generator") {
+			continue;
+		}
+		const dependencies = entry.dependencies.map((path) => entriesByPath.get(path)!);
+		entry.dependencyHashDeferred = entry.hashDeferred || entry.dependencyScanDeferred || dependencies.some((dependency) => dependency.hashDeferred);
+		if (
+			entry.dependencyHashDeferred ||
+			entry.dependencyScanStatus !== "complete" ||
+			entry.contentHash === null ||
+			entry.missingDependencies.length > 0 ||
+			dependencies.some((dependency) => dependency.contentHash === null)
+		) {
+			continue;
+		}
+		entry.dependencyFingerprint = createHash("sha256")
+			.update(
+				serializeScriptableAudioRuntimeFingerprintInput(
+					entry.contentHash,
+					dependencies.map((dependency) => ({ path: dependency.path, contentHash: dependency.contentHash!, sizeBytes: dependency.sizeBytes }))
+				)
+			)
+			.digest("hex");
 	}
 	const registry: IAssetRegistry = {
 		version: ASSET_REGISTRY_VERSION,
@@ -1553,6 +1694,8 @@ async function readRegistry(): Promise<IAssetRegistry | null> {
 							entry.dependencyScanMessage ?? (entry.dependencyScanDeferred ? "Scan was deferred by the previous registry's size limit." : undefined),
 						containerEntries: entry.containerEntries ?? [],
 						containerDependencies: entry.containerDependencies ?? [],
+						dependencyFingerprint: entry.dependencyFingerprint ?? null,
+						dependencyHashDeferred: entry.dependencyHashDeferred === true,
 					})
 				);
 			return saveRegistry(entries);
@@ -1568,6 +1711,67 @@ async function readRegistry(): Promise<IAssetRegistry | null> {
 
 export async function ensureAssetRegistry(): Promise<IAssetRegistry> {
 	return (await readRegistry()) ?? rebuildAssetRegistry();
+}
+
+/** Builds a bounded, content-aware Unity GUID-to-project-asset view from currently indexed .meta files. */
+export async function getUnityAssetGuidIndex(): Promise<IUnityAssetGuidIndex> {
+	const registry = await ensureAssetRegistry();
+	const rootRealPath = await realpath(projectDirectory());
+	const metaEntries = registry.entries.filter((entry) => entry.extension === ".meta").sort((left, right) => left.path.localeCompare(right.path));
+	if (metaEntries.length > 50_000) {
+		throw new Error("Unity dependency indexing supports at most 50,000 .meta files per project.");
+	}
+	const assetsByPath = new Map(registry.entries.map((entry) => [entry.path, entry]));
+	const entries: IUnityAssetGuidIndexEntry[] = [];
+	const malformed: Array<{ metaPath: string; error: string }> = [];
+	for (const metaEntry of metaEntries) {
+		const metaPath = resolveProjectPath(metaEntry.path);
+		try {
+			const metaRealPath = await realpath(metaPath);
+			if (metaRealPath !== rootRealPath && !metaRealPath.startsWith(`${rootRealPath}/`)) {
+				throw new Error("Unity .meta symlinks must resolve inside the open project directory.");
+			}
+			const details = await stat(metaPath);
+			if (!details.isFile() || details.size > 1024 * 1024) {
+				throw new Error("Unity .meta files must be regular files no larger than 1 MiB.");
+			}
+			const source = await readFile(metaPath, "utf-8");
+			const parsed = parseUnityAssetMeta(source);
+			const assetPath = metaEntry.path.slice(0, -".meta".length);
+			const asset = assetsByPath.get(assetPath);
+			if (!asset) {
+				throw new Error(`The paired Unity asset is not indexed: ${assetPath}.`);
+			}
+			const assetRealPath = await realpath(resolveProjectPath(assetPath));
+			if (assetRealPath !== rootRealPath && !assetRealPath.startsWith(`${rootRealPath}/`)) {
+				throw new Error("Paired Unity asset symlinks must resolve inside the open project directory.");
+			}
+			entries.push({
+				guid: parsed.guid,
+				assetPath,
+				metaPath: metaEntry.path,
+				assetType: asset.type,
+				assetExtension: asset.extension,
+				assetContentHash: asset.contentHash,
+				assetHashDeferred: asset.hashDeferred,
+				metaContentHash: createHash("sha256").update(source).digest("hex"),
+				subAssets: parsed.subAssets,
+			});
+		} catch (error) {
+			malformed.push({ metaPath: metaEntry.path, error: (error instanceof Error ? error.message : String(error)).slice(0, 1024) });
+		}
+	}
+	entries.sort((left, right) => left.guid.localeCompare(right.guid) || left.assetPath.localeCompare(right.assetPath));
+	const grouped = new Map<string, string[]>();
+	for (const entry of entries) {
+		grouped.set(entry.guid, [...(grouped.get(entry.guid) ?? []), entry.assetPath]);
+	}
+	const duplicates = [...grouped]
+		.filter(([, paths]) => paths.length > 1)
+		.map(([guid, assetPaths]) => ({ guid, assetPaths: assetPaths.sort() }))
+		.sort((left, right) => left.guid.localeCompare(right.guid));
+	const fingerprint = createHash("sha256").update(JSON.stringify({ entries, malformed })).digest("hex");
+	return { entries, duplicates, malformed, fingerprint };
 }
 
 export async function refreshAssetRegistryPaths(paths: string[]): Promise<IAssetRegistry> {
@@ -1808,6 +2012,8 @@ export async function getIndexedAssetDependencies(path: string): Promise<any> {
 		dependencyScanStatus: entry.dependencyScanStatus,
 		dependencyScanMessage: entry.dependencyScanMessage,
 		dependencyScanDeferred: entry.dependencyScanDeferred,
+		dependencyFingerprint: entry.dependencyFingerprint,
+		dependencyHashDeferred: entry.dependencyHashDeferred,
 		containerEntries: entry.containerEntries,
 		containerDependencies: entry.containerDependencies.map((dependency) => ({
 			...dependency,

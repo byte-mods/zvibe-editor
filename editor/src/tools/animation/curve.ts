@@ -16,12 +16,18 @@ export function cloneAnimationCurveKey(key: IAnimationKey): IAnimationKey {
 
 function getTangent(before: IAnimationKey, after: IAnimationKey): any {
 	const duration = after.frame - before.frame;
-	if (!Number.isFinite(duration) || duration <= 0) return 0;
-	if (typeof before.value === "number" && typeof after.value === "number") return (after.value - before.value) / duration;
+	if (!Number.isFinite(duration) || duration <= 0) {
+		return 0;
+	}
+	if (typeof before.value === "number" && typeof after.value === "number") {
+		return (after.value - before.value) / duration;
+	}
 	const beforeValues = before.value?.asArray?.();
 	const afterValues = after.value?.asArray?.();
 	const tangent = before.value?.clone?.();
-	if (!Array.isArray(beforeValues) || !Array.isArray(afterValues) || !tangent || typeof tangent.copyFromFloats !== "function") return 0;
+	if (!Array.isArray(beforeValues) || !Array.isArray(afterValues) || !tangent || typeof tangent.copyFromFloats !== "function") {
+		return 0;
+	}
 	tangent.copyFromFloats(...beforeValues.map((value: number, index: number) => (afterValues[index] - value) / duration));
 	return tangent;
 }
@@ -31,7 +37,9 @@ export function getAutoSmoothedAnimationKeys(keys: IAnimationKey[]): IAnimationK
 	const sorted = keys.slice().sort((first, second) => first.frame - second.frame);
 	return sorted.map((key, index) => {
 		const clone = cloneAnimationCurveKey(key);
-		if (key.interpolation === AnimationKeyInterpolation.STEP) return clone;
+		if (key.interpolation === AnimationKeyInterpolation.STEP) {
+			return clone;
+		}
 		const before = sorted[index - 1] ?? key;
 		const after = sorted[index + 1] ?? key;
 		const tangent = getTangent(before, after);

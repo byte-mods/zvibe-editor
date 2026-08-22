@@ -39,6 +39,8 @@ import {
 	IPsdNestedSmartObjectDocumentInfo,
 	PsdSmartObjectPresetWarpStyle,
 	IPsdSmartFilterInfo,
+	IPsdDisplacementMapBinding,
+	IPsdDisplacementMapBindingEvidence as IPsdDisplacementMapRuntimeEvidence,
 	IPsdShapeBlurKernelBinding,
 	IPsdLayerSatinEffectInfo,
 	IPsdLayerSolidFillEffectInfo,
@@ -124,6 +126,7 @@ export interface IPsdLayerExtractionOptions {
 	smartObjectResourceIds?: string[];
 	smartObjectExternalBindings?: IPsdSmartObjectExternalBindingRequest[];
 	shapeBlurKernelBindings?: IPsdShapeBlurKernelBindingRequest[];
+	displacementMapBindings?: IPsdDisplacementMapBindingRequest[];
 	inspectNestedSmartObjects?: boolean;
 	nestedSmartObjectMaximumDepth?: number;
 	renderEmbeddedSmartObjects?: boolean;
@@ -142,6 +145,19 @@ export interface IPsdShapeBlurKernelBindingRequest {
 	sourcePath: string;
 	coverageSource?: "auto" | "alpha" | "luminance";
 	invert?: boolean;
+}
+
+export interface IPsdDisplacementMapBindingRequest {
+	layerIndex: number;
+	filterIndex: number;
+	sourcePath: string;
+}
+
+export interface IPsdDisplacementMapBindingEvidence extends IPsdDisplacementMapRuntimeEvidence {
+	layerIndex: number;
+	layerName: string;
+	storedSignature: string;
+	storedPath: string;
 }
 
 export interface IPsdShapeBlurKernelBindingEvidence {
@@ -1012,6 +1028,7 @@ export interface IPsdLayerExtractionStatus {
 	requestedSmartObjectResourceIds: string[] | null;
 	requestedSmartObjectExternalBindings: Array<Required<IPsdSmartObjectExternalBindingRequest>>;
 	shapeBlurKernelBindings: IPsdShapeBlurKernelBindingEvidence[];
+	displacementMapBindings: IPsdDisplacementMapBindingEvidence[];
 	inspectNestedSmartObjects: boolean;
 	nestedSmartObjectMaximumDepth: number;
 	renderEmbeddedSmartObjects: boolean;
@@ -1298,6 +1315,100 @@ async function prepareShapeBlurKernelBindings(document: IPsdLayerDocumentInfo, v
 				executionModel: "bounded-custom-shape-blur-kernel-binding-v1",
 			},
 			kernel: { shapeId, width: decoded.width, height: decoded.height, coverage },
+		});
+	}
+	return prepared;
+}
+
+interface IPreparedPsdDisplacementMapBinding {
+	request: IPsdDisplacementMapBindingRequest;
+	runtimeEvidence: IPsdDisplacementMapRuntimeEvidence;
+	evidence: IPsdDisplacementMapBindingEvidence;
+	binding: IPsdDisplacementMapBinding;
+}
+
+async function prepareDisplacementMapBindings(document: IPsdLayerDocumentInfo, value?: IPsdDisplacementMapBindingRequest[]): Promise<IPreparedPsdDisplacementMapBinding[]> {
+	if (value === undefined) {
+		return [];
+	}
+	if (!Array.isArray(value) || value.length > 128) {
+		throw new Error("displacementMapBindings must contain at most 128 entries.");
+	}
+	const keys = new Set<string>();
+	const prepared: IPreparedPsdDisplacementMapBinding[] = [];
+	for (const raw of value) {
+		if (
+			!raw ||
+			typeof raw !== "object" ||
+			!Number.isSafeInteger(raw.layerIndex) ||
+			raw.layerIndex < 0 ||
+			raw.layerIndex >= document.layers.length ||
+			!Number.isSafeInteger(raw.filterIndex) ||
+			raw.filterIndex < 0 ||
+			raw.filterIndex >= 128
+		) {
+			throw new Error("Each displacementMapBindings entry must reference one existing non-negative integer layerIndex and bounded filterIndex.");
+		}
+		const key = `${raw.layerIndex}:${raw.filterIndex}`;
+		if (keys.has(key)) {
+			throw new Error(`displacementMapBindings contains duplicate layer/filter key ${key}.`);
+		}
+		keys.add(key);
+		const layer = document.layers[raw.layerIndex];
+		const filter = layer.smartObject?.smartFilters[raw.filterIndex];
+		if (!filter || filter.index !== raw.filterIndex || filter.type !== "displace" || !filter.displace) {
+			throw new Error(`displacementMapBindings ${key} does not reference one valid Displace smart filter in this document.`);
+		}
+		if (typeof raw.sourcePath !== "string" || !raw.sourcePath.trim() || raw.sourcePath.length > 4096 || raw.sourcePath.includes("\0")) {
+			throw new Error(`Displace map ${key} sourcePath must be a non-empty project asset path of at most 4,096 characters with no NUL bytes.`);
+		}
+		const requestedPath = normalizeNativePath(raw.sourcePath.trim());
+		const absolutePath = isNativeAbsolute(requestedPath) ? requestedPath : resolve(projectDirectory(), requestedPath.replace(/\\/g, "/"));
+		assertContained(absolutePath, `Displace map ${key} sourcePath`);
+		const extension = extname(absolutePath).toLowerCase();
+		if (extension !== ".psd" && extension !== ".psb") {
+			throw new Error(`Displace map ${key} must be a flattened Photoshop .psd or .psb asset; ${extension || "extensionless"} sources are unsupported.`);
+		}
+		if (!(await pathExists(absolutePath))) {
+			throw new Error(`Displace map ${key} sourcePath does not exist: ${absolutePath}`);
+		}
+		const details = await stat(absolutePath);
+		if (!details.isFile() || details.size <= 0 || details.size > 32 * 1024 * 1024) {
+			throw new Error(`Displace map ${key} sourcePath must be a non-empty file no larger than 32 MiB.`);
+		}
+		const data = await readFile(absolutePath);
+		let decoded: ReturnType<typeof decodePsd>;
+		try {
+			decoded = decodePsd(data);
+		} catch (error) {
+			throw new Error(`Displace map ${key} must decode as one bounded flattened RGB or Grayscale PSD/PSB merged composite: ${String(error)}`);
+		}
+		const sourcePath = portablePath(absolutePath);
+		const runtimeEvidence: IPsdDisplacementMapRuntimeEvidence = {
+			filterIndex: raw.filterIndex,
+			sourcePath,
+			sourceHash: createHash("sha256").update(data).digest("hex"),
+			sourceBytes: data.byteLength,
+			format: decoded.version === 1 ? "psd" : "psb",
+			documentVersion: decoded.version,
+			depth: decoded.depth,
+			colorMode: decoded.colorMode,
+			channelMapping: decoded.colorMode === "rgb" ? "red-horizontal-green-vertical" : "grayscale-both-axes",
+			width: decoded.width,
+			height: decoded.height,
+			executionModel: "bounded-explicit-psd-displacement-map-binding-v1",
+		};
+		prepared.push({
+			request: { layerIndex: raw.layerIndex, filterIndex: raw.filterIndex, sourcePath },
+			runtimeEvidence,
+			evidence: {
+				...runtimeEvidence,
+				layerIndex: raw.layerIndex,
+				layerName: layer.name,
+				storedSignature: filter.displace.displacementFile.signature,
+				storedPath: filter.displace.displacementFile.path,
+			},
+			binding: { ...runtimeEvidence, pixels: decoded.pixels },
 		});
 	}
 	return prepared;
@@ -5291,6 +5402,8 @@ export async function preparePsdLayerExtraction(sourcePath: string, options: IPs
 	const requestedSmartObjectExternalBindings = preparedSmartObjectExternalBindings.map((entry) => entry.request);
 	const preparedShapeBlurKernelBindings = await prepareShapeBlurKernelBindings(document, options.shapeBlurKernelBindings);
 	const shapeBlurKernelBindings = preparedShapeBlurKernelBindings.map((entry) => entry.evidence);
+	const preparedDisplacementMapBindings = await prepareDisplacementMapBindings(document, options.displacementMapBindings);
+	const displacementMapBindings = preparedDisplacementMapBindings.map((entry) => entry.evidence);
 	if (requestedSmartObjectResourceIds && !extractSmartObjectPayloads) {
 		throw new Error("smartObjectResourceIds requires extractSmartObjectPayloads=true.");
 	}
@@ -5299,6 +5412,9 @@ export async function preparePsdLayerExtraction(sourcePath: string, options: IPs
 	}
 	if (preparedShapeBlurKernelBindings.length && !renderEmbeddedSmartObjects && !renderExternalSmartObjects) {
 		throw new Error("shapeBlurKernelBindings requires renderEmbeddedSmartObjects=true or renderExternalSmartObjects=true.");
+	}
+	if (preparedDisplacementMapBindings.length && !renderEmbeddedSmartObjects && !renderExternalSmartObjects) {
+		throw new Error("displacementMapBindings requires renderEmbeddedSmartObjects=true or renderExternalSmartObjects=true.");
 	}
 	const smartObjectResourcesById = new Map<string, typeof document.smartObjectResources>();
 	for (const resource of document.smartObjectResources) {
@@ -5741,6 +5857,18 @@ export async function preparePsdLayerExtraction(sourcePath: string, options: IPs
 		}
 		const unfilteredSource = decodedSource;
 		const executableSmartFilters = smartObject.smartFilters.map((filter): IPsdSmartFilterInfo => {
+			if (filter.type === "displace" && filter.displace) {
+				const binding = preparedDisplacementMapBindings.find((candidate) => candidate.request.layerIndex === layerIndex && candidate.request.filterIndex === filter.index);
+				return binding
+					? {
+							...filter,
+							displace: { ...filter.displace, mapBinding: binding.runtimeEvidence },
+							bakeSupported: true,
+							warning: null,
+							algorithmExecutionModel: "bounded-explicit-map-displace-smart-filter-v1",
+						}
+					: filter;
+			}
 			if (filter.type !== "shapeBlur" || filter.shapeBlur?.kernel !== null) {
 				return filter;
 			}
@@ -5761,7 +5889,8 @@ export async function preparePsdLayerExtraction(sourcePath: string, options: IPs
 						decodedSource,
 						executableSmartFilters,
 						smartObject.smartFilterState?.enabled !== false,
-						preparedShapeBlurKernelBindings.map((binding) => binding.kernel)
+						preparedShapeBlurKernelBindings.map((binding) => binding.kernel),
+						preparedDisplacementMapBindings.filter((binding) => binding.request.layerIndex === layerIndex).map((binding) => binding.binding)
 					)
 				: null;
 		if (smartFilterResult) {
@@ -6674,6 +6803,7 @@ export async function preparePsdLayerExtraction(sourcePath: string, options: IPs
 				requestedSmartObjectResourceIds,
 				requestedSmartObjectExternalBindings,
 				shapeBlurKernelBindings,
+				displacementMapBindings,
 				inspectNestedSmartObjects,
 				nestedSmartObjectMaximumDepth,
 				renderEmbeddedSmartObjects,
@@ -6702,6 +6832,7 @@ export async function preparePsdLayerExtraction(sourcePath: string, options: IPs
 			requestedSmartObjectResourceIds,
 			requestedSmartObjectExternalBindings,
 			shapeBlurKernelBindings,
+			displacementMapBindings,
 			inspectNestedSmartObjects,
 			nestedSmartObjectMaximumDepth,
 			renderEmbeddedSmartObjects,

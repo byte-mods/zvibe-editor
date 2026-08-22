@@ -2,13 +2,14 @@ import { extname } from "path/posix";
 
 import { Component, ReactNode } from "react";
 
+import { toast } from "sonner";
 import { VscJson } from "react-icons/vsc";
 import { AiOutlineMinus, AiOutlinePlus } from "react-icons/ai";
 
 import { Reorder } from "framer-motion";
 
 import { Observer, Node, Tools } from "babylonjs";
-import { ISpriteMapTile } from "babylonjs-editor-tools";
+import { IPhysics2DPolygonContour, ISpriteMapTile, ITilemapColliderSettings, TilemapColliderType } from "babylonjs-editor-tools";
 
 import { Button } from "../../../../ui/shadcn/ui/button";
 
@@ -16,24 +17,35 @@ import { SpriteMapNode } from "../../../nodes/sprite-map";
 
 import { onGizmoNodeChangedObservable } from "../../preview/gizmo/gizmo";
 
-import { registerUndoRedo } from "../../../../tools/undoredo";
+import { onRedoObservable, onUndoObservable, registerUndoRedo } from "../../../../tools/undoredo";
 import { isSpriteMapNode } from "../../../../tools/guards/sprites";
 import { onNodeModifiedObservable } from "../../../../tools/observables";
 import { computeSpriteMapPreviews } from "../../../../tools/sprite/preview";
 import {
 	createAnimatedTile,
 	createTilePalette,
+	applyTilePaletteOperation,
 	clearTileColliderGenerator,
 	deleteAnimatedTile,
 	deleteTilePalette,
 	generateTileColliders,
-	refreshTileColliders,
+	getTilePaintViewport,
+	getTilePaintViewportSnapshot,
+	getTileGridConfiguration,
 	getTileColliderGenerator,
+	getTileColliderGeneratorSnapshot,
 	listAnimatedTiles,
 	listTilePalettes,
-	paintTilePalette,
+	listGridBrushTypes,
+	notifySpriteMapTileDataChanged,
+	refreshTileColliders,
+	restoreTileColliderGeneratorSnapshot,
+	restoreTilePaintViewportSnapshot,
 	setAnimatedTile,
 	setSpriteMapRuleTiles,
+	setTileColliderGenerator,
+	setTilePaintViewport,
+	setTileGridConfiguration,
 	setTilePalette,
 } from "../../../../mcp/sprites/sprites";
 
@@ -53,6 +65,9 @@ export interface IEditorSpriteMapNodeInspectorState {
 	selectedTile: ISpriteMapTile | null;
 	paletteName: string;
 	palettePosition: { x: number; y: number };
+	paletteEndPosition: { x: number; y: number };
+	paletteMoveOffset: { x: number; y: number };
+	gridBrushData: string;
 	animatedTileName: string;
 	animatedTileFrames: string;
 	animatedTileDuration: number;
@@ -76,6 +91,9 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 			selectedTile: props.object.tiles?.[0] ?? null,
 			paletteName: "Palette",
 			palettePosition: { x: 0, y: 0 },
+			paletteEndPosition: { x: 0, y: 0 },
+			paletteMoveOffset: { x: 1, y: 0 },
+			gridBrushData: "{}",
 			animatedTileName: "Animated Tile",
 			animatedTileFrames: "0, 1",
 			animatedTileDuration: 120,
@@ -111,26 +129,57 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 	}
 
 	private _gizmoObserver: Observer<Node> | null = null;
+	private _undoObserver: Observer<void> | null = null;
+	private _redoObserver: Observer<void> | null = null;
+	private _tileDataFingerprint: string = "";
+	private _committedOptions: any = null;
+	private _mounted: boolean = false;
 
 	public async componentDidMount(): Promise<void> {
+		this._mounted = true;
 		this._gizmoObserver = onGizmoNodeChangedObservable.add((node) => {
 			if (node === this.props.object) {
 				this.props.editor.layout.inspector.forceUpdate();
 			}
 		});
+		this._tileDataFingerprint = this._getTileDataFingerprint();
+		this._committedOptions = this._captureOptions();
+		const synchronizeUndoRedo = (): void => {
+			const fingerprint = this._getTileDataFingerprint();
+			if (fingerprint !== this._tileDataFingerprint) {
+				this.props.object.updateFromOptions(this.props.object.spriteMap?.options ?? ({} as any));
+				this._notifyTileMapChanged();
+			}
+			this._committedOptions = this._captureOptions();
+		};
+		this._undoObserver = onUndoObservable.add(synchronizeUndoRedo);
+		this._redoObserver = onRedoObservable.add(synchronizeUndoRedo);
 
 		this._computeSpritePreviewImages();
 	}
 
 	public componentWillUnmount(): void {
+		this._mounted = false;
 		if (this._gizmoObserver) {
 			onGizmoNodeChangedObservable.remove(this._gizmoObserver);
+		}
+		if (this._undoObserver) {
+			onUndoObservable.remove(this._undoObserver);
+		}
+		if (this._redoObserver) {
+			onRedoObservable.remove(this._redoObserver);
 		}
 	}
 
 	private async _computeSpritePreviewImages(): Promise<void> {
-		await computeSpriteMapPreviews(this.props.object);
-		this.forceUpdate();
+		try {
+			await computeSpriteMapPreviews(this.props.object);
+			if (this._mounted) {
+				this.forceUpdate();
+			}
+		} catch (error) {
+			console.warn("Could not generate Sprite Map frame previews.", error);
+		}
 	}
 
 	private _getAtlasJsonDraggableZone(): ReactNode {
@@ -159,6 +208,7 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 						const extension = extname(path).toLowerCase();
 						if (extension === ".json") {
 							await this.props.object.buildFromAbsolutePath(path);
+							this._notifyTileMapChanged();
 							await this._computeSpritePreviewImages();
 							this.forceUpdate();
 						}
@@ -197,7 +247,10 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 						max={8}
 						step={1}
 						onChange={() => this.props.object.updateFromOptions(options)}
-						onFinishChange={() => this._handleOptionsUndoRedo()}
+						onFinishChange={() => {
+							this._handleOptionsUndoRedo();
+							this._notifyTileMapChanged();
+						}}
 					/>
 					<EditorInspectorVectorField
 						noUndoRedo
@@ -206,7 +259,10 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 						label="Stage Size"
 						step={1}
 						onChange={() => this.props.object.updateFromOptions(options)}
-						onFinishChange={() => this._handleOptionsUndoRedo()}
+						onFinishChange={() => {
+							this._handleOptionsUndoRedo();
+							this._notifyTileMapChanged();
+						}}
 					/>
 					<EditorInspectorVectorField
 						noUndoRedo
@@ -215,7 +271,10 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 						label="Output Size"
 						step={1}
 						onChange={() => this.props.object.updateFromOptions(options)}
-						onFinishChange={() => this._handleOptionsUndoRedo()}
+						onFinishChange={() => {
+							this._handleOptionsUndoRedo();
+							this._notifyTileMapChanged();
+						}}
 					/>
 					<EditorInspectorVectorField
 						noUndoRedo
@@ -226,7 +285,10 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 						min={0}
 						max={1}
 						onChange={() => this.props.object.updateFromOptions(options)}
-						onFinishChange={() => this._handleOptionsUndoRedo()}
+						onFinishChange={() => {
+							this._handleOptionsUndoRedo();
+							this._notifyTileMapChanged();
+						}}
 					/>
 				</EditorInspectorSectionField>
 
@@ -259,7 +321,10 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 									executeRedo: true,
 									undo: () => (this.props.object.tiles = oldTiles),
 									redo: () => (this.props.object.tiles = newTiles),
-									action: () => this.props.object.updateFromOptions(options),
+									action: () => {
+										this.props.object.updateFromOptions(options);
+										this._notifyTileMapChanged();
+									},
 								});
 
 								this._tilesBeforePan = null;
@@ -310,7 +375,7 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 					step={1}
 					min={0}
 					max={[this.props.object.spriteMap!.options.stageSize?.x ?? 0, this.props.object.spriteMap!.options.stageSize?.y ?? 0]}
-					onChange={() => this.props.object.updateTile(this.state.selectedTile!)}
+					onChange={() => this._updateSelectedTile()}
 				/>
 				<EditorInspectorVectorField
 					object={this.state.selectedTile}
@@ -319,7 +384,7 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 					step={1}
 					min={0}
 					max={[this.props.object.spriteMap!.options.stageSize?.x ?? 0, this.props.object.spriteMap!.options.stageSize?.y ?? 0]}
-					onChange={() => this.props.object.updateTile(this.state.selectedTile!)}
+					onChange={() => this._updateSelectedTile()}
 				/>
 				<EditorInspectorVectorField
 					object={this.state.selectedTile}
@@ -328,7 +393,7 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 					step={1}
 					min={0}
 					max={[this.props.object.spriteMap!.options.stageSize?.x ?? 0, this.props.object.spriteMap!.options.stageSize?.y ?? 0]}
-					onChange={() => this.props.object.updateTile(this.state.selectedTile!)}
+					onChange={() => this._updateSelectedTile()}
 				/>
 
 				<EditorInspectorListField
@@ -345,7 +410,7 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 							</div>
 						),
 					}))}
-					onChange={() => this.props.object.updateTile(this.state.selectedTile!)}
+					onChange={() => this._updateSelectedTile()}
 				/>
 
 				{(options.layerCount ?? 1) > 1 && (
@@ -356,7 +421,10 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 						min={0}
 						max={(options.layerCount ?? 1) - 1}
 						step={1}
-						onChange={() => this.props.object.updateFromOptions(options)}
+						onChange={() => {
+							this.props.object.updateFromOptions(options);
+							this._notifyTileMapChanged();
+						}}
 					/>
 				)}
 			</>
@@ -364,14 +432,32 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 	}
 
 	private _getTilePaletteInspector(): ReactNode {
-		const palettes = listTilePalettes(this.props.object.getScene()).palettes.filter((palette: any) => palette.mapNodeId === this.props.object.id) as any[];
+		const scene = this.props.object.getScene();
+		const palettes = listTilePalettes(scene).palettes.filter((palette: any) => palette.mapNodeId === this.props.object.id) as any[];
+		const viewport = getTilePaintViewport(scene);
+		const grid = getTileGridConfiguration(scene, { mapNodeId: this.props.object.id }).grid;
+		const gridBrushes = listGridBrushTypes().brushes as any[];
 		const selectedFrame = (this.state.selectedTile as any)?.ruleSource ?? this.state.selectedTile?.tile ?? 0;
 		return (
 			<EditorInspectorSectionField
 				title="Tile Palettes"
-				tooltip="Reusable tile brushes with persisted rectangular paint/erase operations. The same palette assets are available through MCP."
+				tooltip="Versioned rectangular, isometric, and hexagonal palettes with map/palette edit targets, fill/picker/selection transforms, and project-script GridBrush extensions."
 			>
 				<div className="flex flex-col gap-2">
+					<div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded bg-input p-2 text-xs">
+						<span>Map layout</span>
+						<select
+							value={grid.layout}
+							aria-label="Tile grid layout"
+							onChange={(event) => this._setTileGridLayout(event.currentTarget.value)}
+							className="rounded bg-background px-2 py-1"
+						>
+							<option value="rectangular">Rectangular</option>
+							<option value="isometric">Isometric</option>
+							<option value="hexagonal-point-top">Hexagonal · point top</option>
+							<option value="hexagonal-flat-top">Hexagonal · flat top</option>
+						</select>
+					</div>
 					<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
 						<input
 							value={this.state.paletteName}
@@ -386,11 +472,98 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 					{palettes.map((palette) => (
 						<div key={palette.id} className="flex flex-col gap-2 rounded-lg bg-input p-2 text-xs">
 							<div className="flex items-center justify-between gap-2">
-								<span className="font-medium">{palette.name}</span>
-								<Button size="sm" variant="ghost" className="h-6 px-1 !text-red-400" onClick={() => this._deleteTilePalette(palette.id)}>
-									Remove
-								</Button>
+								<span className="font-medium">
+									{palette.name} · r{palette.revision} · {palette.layout}
+								</span>
+								<div className="flex gap-1">
+									<Button
+										size="sm"
+										variant={viewport.enabled && viewport.paletteId === palette.id ? "default" : "secondary"}
+										className="h-6 px-2"
+										onClick={() =>
+											viewport.enabled && viewport.paletteId === palette.id
+												? this._setTilePaintViewport({ enabled: false })
+												: this._setTilePaintViewport({ enabled: true, mapNodeId: this.props.object.id, paletteId: palette.id })
+										}
+									>
+										{viewport.enabled && viewport.paletteId === palette.id ? "Stop Viewport" : "Paint in Viewport"}
+									</Button>
+									<Button size="sm" variant="ghost" className="h-6 px-1 !text-red-400" onClick={() => this._deleteTilePalette(palette.id, palette.revision)}>
+										Remove
+									</Button>
+								</div>
 							</div>
+							{viewport.enabled && viewport.paletteId === palette.id && (
+								<div className="flex flex-col gap-1 rounded border border-primary/50 bg-background/60 p-2">
+									<div className="text-[10px] text-muted-foreground">
+										Viewport r{viewport.revision} · map r{viewport.mapRevision} · palette r{viewport.palette.revision}
+									</div>
+									<div className="flex flex-wrap gap-1">
+										{(["paint", "erase", "fill", "pick", "select"] as const).map((mode) => (
+											<Button
+												key={mode}
+												size="sm"
+												variant={viewport.mode === mode ? "default" : "secondary"}
+												className="h-6 px-2 capitalize"
+												onClick={() => this._setTilePaintViewport({ mode })}
+											>
+												{mode}
+											</Button>
+										))}
+										<Button
+											size="sm"
+											variant={viewport.target === "map" ? "default" : "secondary"}
+											className="h-6 px-2"
+											onClick={() => this._setTilePaintViewport({ target: "map" })}
+										>
+											Map Edit
+										</Button>
+										<Button
+											size="sm"
+											variant={viewport.target === "palette" ? "default" : "secondary"}
+											className="h-6 px-2"
+											onClick={() => this._setTilePaintViewport({ target: "palette" })}
+										>
+											Palette Edit
+										</Button>
+									</div>
+									<div className="grid grid-cols-3 gap-1">
+										<input
+											type="number"
+											min={0}
+											max={(this.props.object.spriteMap?.options.layerCount ?? 1) - 1}
+											value={viewport.layer}
+											aria-label="Tile Paint viewport layer"
+											title="Layer"
+											onChange={(event) => this._setTilePaintViewport({ layer: Number(event.currentTarget.value) })}
+											className="min-w-0 rounded bg-input px-1 py-1"
+										/>
+										<input
+											type="number"
+											min={1}
+											max={32}
+											value={viewport.brushSize[0]}
+											aria-label="Tile Paint brush width"
+											title="Brush width"
+											onChange={(event) => this._setTilePaintViewport({ brushSize: [Number(event.currentTarget.value), viewport.brushSize[1]] })}
+											className="min-w-0 rounded bg-input px-1 py-1"
+										/>
+										<input
+											type="number"
+											min={1}
+											max={32}
+											value={viewport.brushSize[1]}
+											aria-label="Tile Paint brush height"
+											title="Brush height"
+											onChange={(event) => this._setTilePaintViewport({ brushSize: [viewport.brushSize[0], Number(event.currentTarget.value)] })}
+											className="min-w-0 rounded bg-input px-1 py-1"
+										/>
+									</div>
+									<div className="text-[10px] text-muted-foreground">
+										Left-drag paints/erases; Fill and Pick click once; Select drags a region. Every change is one Undo/Redo transaction.
+									</div>
+								</div>
+							)}
 							<div className="flex flex-wrap gap-1">
 								{palette.tileIndexes.map((index: number) => (
 									<Button
@@ -398,7 +571,7 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 										size="sm"
 										variant={palette.activeTileIndex === index ? "default" : "secondary"}
 										className="h-6 px-2"
-										onClick={() => this._setPaletteTile(palette.id, index)}
+										onClick={() => this._setPaletteTile(palette.id, palette.revision, index)}
 									>
 										{index}
 									</Button>
@@ -407,7 +580,7 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 									+ Frame {selectedFrame}
 								</Button>
 							</div>
-							<div className="grid grid-cols-[1fr_1fr_auto_auto] gap-1">
+							<div className="grid grid-cols-4 gap-1">
 								<input
 									type="number"
 									value={this.state.palettePosition.x}
@@ -422,12 +595,96 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 									onChange={(event) => this.setState({ palettePosition: { ...this.state.palettePosition, y: Number(event.currentTarget.value) } })}
 									className="rounded bg-background px-2 py-1"
 								/>
-								<Button size="sm" onClick={() => this._paintPalette(palette.id, "paint")}>
-									Paint
-								</Button>
-								<Button size="sm" variant="secondary" onClick={() => this._paintPalette(palette.id, "erase")}>
-									Erase
-								</Button>
+								<input
+									type="number"
+									value={this.state.paletteEndPosition.x}
+									aria-label="Tile selection end x"
+									onChange={(event) => this.setState({ paletteEndPosition: { ...this.state.paletteEndPosition, x: Number(event.currentTarget.value) } })}
+									className="rounded bg-background px-2 py-1"
+								/>
+								<input
+									type="number"
+									value={this.state.paletteEndPosition.y}
+									aria-label="Tile selection end y"
+									onChange={(event) => this.setState({ paletteEndPosition: { ...this.state.paletteEndPosition, y: Number(event.currentTarget.value) } })}
+									className="rounded bg-background px-2 py-1"
+								/>
+							</div>
+							<div className="flex flex-wrap gap-1">
+								{(["paint", "erase", "fill", "pick", "select", "custom"] as const).map((operation) => (
+									<Button
+										key={operation}
+										size="sm"
+										className="h-6 px-2 capitalize"
+										variant="secondary"
+										disabled={!viewport.enabled || viewport.paletteId !== palette.id}
+										onClick={() => this._applyPaletteOperation(palette, operation)}
+									>
+										{operation}
+									</Button>
+								))}
+								{(["rotate", "flip-x", "flip-y", "move"] as const).map((operation) => (
+									<Button
+										key={operation}
+										size="sm"
+										className="h-6 px-2 capitalize"
+										variant="ghost"
+										disabled={!viewport.selection || viewport.paletteId !== palette.id}
+										onClick={() => this._applyPaletteOperation(palette, operation)}
+									>
+										{operation}
+									</Button>
+								))}
+							</div>
+							<div className="grid grid-cols-4 gap-1">
+								<select
+									value={palette.layout}
+									aria-label="Tile Palette layout"
+									onChange={(event) => this._setPaletteLayout(palette, event.currentTarget.value)}
+									className="rounded bg-background px-2 py-1"
+								>
+									<option value="rectangular">Rectangular</option>
+									<option value="isometric">Isometric</option>
+									<option value="hexagonal-point-top">Hex point</option>
+									<option value="hexagonal-flat-top">Hex flat</option>
+								</select>
+								<select
+									value={palette.brush.type}
+									aria-label="GridBrush type"
+									onChange={(event) => this._setPaletteBrush(palette, event.currentTarget.value)}
+									className="rounded bg-background px-2 py-1"
+								>
+									{gridBrushes.map((brush) => (
+										<option key={brush.id} value={brush.id}>
+											{brush.displayName}
+										</option>
+									))}
+									{!gridBrushes.some((brush) => brush.id === palette.brush.type) && <option value={palette.brush.type}>{palette.brush.type} (not loaded)</option>}
+								</select>
+								<input
+									value={this.state.gridBrushData}
+									aria-label="GridBrush JSON data"
+									onChange={(event) => this.setState({ gridBrushData: event.currentTarget.value })}
+									className="rounded bg-background px-2 py-1"
+								/>
+								<div className="rounded bg-background px-2 py-1 text-[10px] text-muted-foreground">{palette.cells.length} palette cells</div>
+							</div>
+							<div className="grid grid-cols-[auto_1fr_1fr] items-center gap-1">
+								<span className="text-[10px] text-muted-foreground">Move offset</span>
+								<input
+									type="number"
+									value={this.state.paletteMoveOffset.x}
+									aria-label="Tile selection move x"
+									onChange={(event) => this.setState({ paletteMoveOffset: { ...this.state.paletteMoveOffset, x: Number(event.currentTarget.value) } })}
+									className="rounded bg-background px-2 py-1"
+								/>
+								<input
+									type="number"
+									value={this.state.paletteMoveOffset.y}
+									aria-label="Tile selection move y"
+									onChange={(event) => this.setState({ paletteMoveOffset: { ...this.state.paletteMoveOffset, y: Number(event.currentTarget.value) } })}
+									className="rounded bg-background px-2 py-1"
+								/>
 							</div>
 						</div>
 					))}
@@ -449,31 +706,95 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 		}
 	}
 
-	private _setPaletteTile(paletteId: string, activeTileIndex: number): void {
-		setTilePalette(this.props.object.getScene(), { paletteId, activeTileIndex }, { editor: this.props.editor });
+	private _setTileGridLayout(layout: string): void {
+		const scene = this.props.object.getScene();
+		const current = getTileGridConfiguration(scene, { mapNodeId: this.props.object.id }).grid;
+		setTileGridConfiguration(scene, { mapNodeId: this.props.object.id, expectedRevision: current.revision, layout }, { editor: this.props.editor });
+		this.forceUpdate();
+	}
+
+	private _setPaletteTile(paletteId: string, expectedRevision: number, activeTileIndex: number): void {
+		setTilePalette(this.props.object.getScene(), { paletteId, expectedRevision, activeTileIndex }, { editor: this.props.editor });
 		this.forceUpdate();
 	}
 
 	private _addPaletteTile(palette: any, tileIndex: number): void {
-		setTilePalette(this.props.object.getScene(), { paletteId: palette.id, tileIndexes: [...new Set([...palette.tileIndexes, tileIndex])] }, { editor: this.props.editor });
+		setTilePalette(
+			this.props.object.getScene(),
+			{ paletteId: palette.id, expectedRevision: palette.revision, tileIndexes: [...new Set([...palette.tileIndexes, tileIndex])] },
+			{ editor: this.props.editor }
+		);
 		this.forceUpdate();
 	}
 
-	private _paintPalette(paletteId: string, mode: "paint" | "erase"): void {
+	private _setTilePaintViewport(data: Record<string, unknown>): void {
 		try {
-			paintTilePalette(
-				this.props.object.getScene(),
-				{ paletteId, position: [this.state.palettePosition.x, this.state.palettePosition.y], mode },
-				{ editor: this.props.editor }
-			);
+			const current = getTilePaintViewport(this.props.object.getScene());
+			setTilePaintViewport(this.props.object.getScene(), { expectedRevision: current.revision, ...data }, { editor: this.props.editor });
 			this.forceUpdate();
 		} catch (error) {
 			console.error(error);
 		}
 	}
 
-	private _deleteTilePalette(paletteId: string): void {
-		deleteTilePalette(this.props.object.getScene(), { paletteId }, { editor: this.props.editor });
+	private _setPaletteBrush(palette: any, type: string): void {
+		try {
+			const definition = (listGridBrushTypes().brushes as any[]).find((candidate) => candidate.id === type);
+			setTilePalette(
+				this.props.object.getScene(),
+				{ paletteId: palette.id, expectedRevision: palette.revision, brush: { type, dataVersion: definition?.dataVersion ?? 1, data: definition?.defaultData ?? {} } },
+				{ editor: this.props.editor }
+			);
+			this.setState({ gridBrushData: JSON.stringify(definition?.defaultData ?? {}) });
+			this.forceUpdate();
+		} catch (error) {
+			console.error(error);
+		}
+	}
+
+	private _setPaletteLayout(palette: any, layout: string): void {
+		setTilePalette(this.props.object.getScene(), { paletteId: palette.id, expectedRevision: palette.revision, layout }, { editor: this.props.editor });
+		this.forceUpdate();
+	}
+
+	private _applyPaletteOperation(palette: any, operation: "paint" | "erase" | "fill" | "pick" | "select" | "custom" | "rotate" | "flip-x" | "flip-y" | "move"): void {
+		const scene = this.props.object.getScene();
+		const current = getTilePaintViewport(scene);
+		if (!current.enabled || current.paletteId !== palette.id) {
+			return;
+		}
+		const before = getTilePaintViewportSnapshot(scene, { mapNodeId: this.props.object.id });
+		try {
+			applyTilePaletteOperation(
+				scene,
+				{
+					expectedRevision: current.revision,
+					expectedMapRevision: current.mapRevision,
+					expectedPaletteRevision: current.palette.revision,
+					operation,
+					position: [this.state.palettePosition.x, this.state.palettePosition.y],
+					endPosition: operation === "select" ? [this.state.paletteEndPosition.x, this.state.paletteEndPosition.y] : undefined,
+					offset: operation === "move" ? [this.state.paletteMoveOffset.x, this.state.paletteMoveOffset.y] : undefined,
+					brushType: operation === "custom" ? palette.brush.type : undefined,
+					brushData: operation === "custom" ? JSON.parse(this.state.gridBrushData || "{}") : undefined,
+				},
+				{ editor: this.props.editor }
+			);
+			const after = getTilePaintViewportSnapshot(scene, { mapNodeId: this.props.object.id });
+			if (JSON.stringify(before) !== JSON.stringify(after)) {
+				registerUndoRedo({
+					undo: () => restoreTilePaintViewportSnapshot(scene, before, { editor: this.props.editor }),
+					redo: () => restoreTilePaintViewportSnapshot(scene, after, { editor: this.props.editor }),
+				});
+			}
+			this.forceUpdate();
+		} catch (error) {
+			console.error(error);
+		}
+	}
+
+	private _deleteTilePalette(paletteId: string, expectedRevision: number): void {
+		deleteTilePalette(this.props.object.getScene(), { paletteId, expectedRevision }, { editor: this.props.editor });
 		this.forceUpdate();
 	}
 
@@ -581,59 +902,320 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 	private _getTileColliderInspector(): ReactNode {
 		const generator = getTileColliderGenerator(this.props.object.getScene(), { mapNodeId: this.props.object.id }).generator as any;
 		const selectedFrame = (this.state.selectedTile as any)?.ruleSource ?? this.state.selectedTile?.tile;
+		const materials = this.props.object.getScene().metadata?.babylonEditorPhysics2DMaterials ?? [];
+		const frameType = selectedFrame === undefined ? "grid" : (generator?.tileColliderTypes?.[String(selectedFrame)] ?? "grid");
+		const selectedShape = selectedFrame === undefined ? undefined : generator?.spriteShapes?.[String(selectedFrame)];
 		return (
 			<EditorInspectorSectionField
-				title="Tile Colliders"
-				tooltip="Generate static 2D physics box bodies for painted Sprite Map cells. Composite mode merges adjacent cells into rectangles to reduce solver bodies."
+				title="Tilemap Collider 2D"
+				tooltip="Unity-style Tilemap Collider 2D authoring with per-frame Grid/Sprite/None shapes, composite geometry, manual or synchronous generation, material, trigger, effector, and Layer Override controls."
 			>
 				<div className="flex flex-col gap-2 text-xs">
-					<div>{generator ? `${generator.nodeIds.length} generated static collider${generator.nodeIds.length === 1 ? "" : "s"}` : "No generated tile colliders."}</div>
-					<div className="flex gap-2">
-						<Button size="sm" disabled={selectedFrame === undefined} onClick={() => this._generateTileColliders(selectedFrame, true)}>
-							Generate Frame {selectedFrame ?? ""}
-						</Button>
-						<Button size="sm" variant="secondary" onClick={() => this._generateTileColliders(undefined, true)}>
-							Generate Composite
-						</Button>
-						<Button size="sm" variant="secondary" onClick={() => this._generateTileColliders(undefined, false)}>
-							Per Cell
-						</Button>
-						<Button size="sm" variant="secondary" disabled={!generator} onClick={() => this._refreshTileColliders()}>
-							Refresh
-						</Button>
-						<Button size="sm" variant="ghost" className="!text-red-400" disabled={!generator} onClick={() => this._clearTileColliders()}>
-							Clear
-						</Button>
-					</div>
+					{!generator ? (
+						<div className="flex flex-col gap-2">
+							<div className="text-muted-foreground">No Tilemap Collider 2D configuration.</div>
+							<div className="flex flex-wrap gap-2">
+								<Button size="sm" onClick={() => this._generateTileColliders(undefined, "merge")}>
+									Create Composite
+								</Button>
+								<Button size="sm" variant="secondary" onClick={() => this._generateTileColliders(undefined, "none")}>
+									Create Per Cell
+								</Button>
+								<Button size="sm" variant="secondary" disabled={selectedFrame === undefined} onClick={() => this._generateTileColliders(selectedFrame, "merge")}>
+									Create Frame {selectedFrame ?? ""}
+								</Button>
+							</div>
+						</div>
+					) : (
+						<>
+							<div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded bg-input p-2">
+								<span>Configuration revision</span>
+								<span>{generator.revision}</span>
+								<span>Geometry / map revision</span>
+								<span>
+									{generator.geometryRevision} / {generator.mapRevision}
+								</span>
+								<span>Generated colliders</span>
+								<span>{generator.nodeIds.length}</span>
+								<span>Pending tile changes</span>
+								<span className={generator.hasTilemapChanges ? "text-yellow-400" : "text-emerald-400"}>{generator.pendingChangeCount}</span>
+								<span>Last generation</span>
+								<span>
+									{generator.lastBuild.mode} · {generator.lastBuild.reusedColliderCount} reused / {generator.lastBuild.createdColliderCount} created
+								</span>
+								<span>Geometry evidence</span>
+								<span>
+									{generator.lastBuild.evidence.boxCount} box · {generator.lastBuild.evidence.polygonCount} polygon · {generator.lastBuild.evidence.edgeCount}{" "}
+									edge
+								</span>
+								<span>Triangulation</span>
+								<span>
+									{generator.lastBuild.evidence.triangulation} · {generator.lastBuild.evidence.delaunayFlipCount ?? 0} flips
+								</span>
+							</div>
+
+							<div className="grid grid-cols-2 gap-2">
+								{this._tileColliderSelect("Composite Operation", generator.compositeOperation, ["none", "merge", "intersect", "difference", "flip"], (value) =>
+									this._updateTileCollider({ compositeOperation: value })
+								)}
+								{this._tileColliderSelect("Geometry Type", generator.geometryType, ["polygons", "outlines"], (value) =>
+									this._updateTileCollider({ geometryType: value })
+								)}
+								{this._tileColliderSelect("Generation Type", generator.generationType, ["synchronous", "manual"], (value) =>
+									this._updateTileCollider({ generationType: value })
+								)}
+								{this._tileColliderBoolean("Use Delaunay Mesh", generator.useDelaunayMesh, (value) => this._updateTileCollider({ useDelaunayMesh: value }))}
+							</div>
+
+							<div className="grid grid-cols-2 gap-2">
+								{this._tileColliderNumber("Max Tile Changes", generator.maxTileChangeCount, (value) => this._updateTileCollider({ maxTileChangeCount: value }), 1)}
+								{this._tileColliderNumber("Extrusion Factor", generator.extrusionFactor, (value) => this._updateTileCollider({ extrusionFactor: value }), 0)}
+								{this._tileColliderNumber("Vertex Distance", generator.vertexDistance, (value) => this._updateTileCollider({ vertexDistance: value }), 0.000001)}
+								{this._tileColliderNumber("Offset Distance", generator.offsetDistance, (value) => this._updateTileCollider({ offsetDistance: value }), 0)}
+								{this._tileColliderNumber("Offset X", generator.offset[0], (value) => this._updateTileCollider({ offset: [value, generator.offset[1]] }))}
+								{this._tileColliderNumber("Offset Y", generator.offset[1], (value) => this._updateTileCollider({ offset: [generator.offset[0], value] }))}
+								{this._tileColliderNumber("Edge Radius", generator.edgeRadius, (value) => this._updateTileCollider({ edgeRadius: value }), 0.001)}
+								{this._tileColliderNumber("Collision Layer", generator.collisionLayer, (value) => this._updateTileCollider({ collisionLayer: value }), 0, 31)}
+							</div>
+
+							<div className="grid grid-cols-2 gap-2">
+								<label className="flex flex-col gap-1">
+									Physics Material
+									<select
+										value={generator.materialId ?? ""}
+										onChange={(event) => this._updateTileCollider({ materialId: event.currentTarget.value || null })}
+										className="rounded bg-input px-2 py-1"
+									>
+										<option value="">None</option>
+										{materials.map((material: any) => (
+											<option key={material.id} value={material.id}>
+												{material.name}
+											</option>
+										))}
+									</select>
+								</label>
+								<div className="grid grid-cols-2 gap-2">
+									{this._tileColliderBoolean("Is Trigger", generator.isTrigger, (value) => this._updateTileCollider({ isTrigger: value }))}
+									{this._tileColliderBoolean("Used By Effector", generator.usedByEffector, (value) => this._updateTileCollider({ usedByEffector: value }))}
+								</div>
+								{this._tileColliderNumber("Friction", generator.friction, (value) => this._updateTileCollider({ friction: value }), 0, 1)}
+								{this._tileColliderNumber("Bounciness", generator.restitution, (value) => this._updateTileCollider({ restitution: value }), 0, 1)}
+							</div>
+
+							<div className="rounded border border-border p-2">
+								<div className="mb-2 font-medium">Layer Overrides (32-bit masks)</div>
+								<div className="grid grid-cols-2 gap-2">
+									{this._tileColliderNumber(
+										"Priority",
+										generator.layerOverrides.priority,
+										(value) => this._updateTileCollider({ layerOverrides: { ...generator.layerOverrides, priority: value } }),
+										-128,
+										127
+									)}
+									{["includeLayers", "excludeLayers", "forceSendLayers", "forceReceiveLayers", "contactCaptureLayers", "callbackLayers"].map((property) =>
+										this._tileColliderNumber(
+											property.replace(/([A-Z])/g, " $1"),
+											generator.layerOverrides[property],
+											(value) => this._updateTileCollider({ layerOverrides: { ...generator.layerOverrides, [property]: value } }),
+											0,
+											0xffffffff
+										)
+									)}
+								</div>
+							</div>
+
+							<div className="rounded border border-border p-2">
+								<div className="mb-2 font-medium">Selected Atlas Frame {selectedFrame ?? "—"}</div>
+								<select
+									disabled={selectedFrame === undefined}
+									value={frameType}
+									onChange={(event) => this._setTileColliderFrameType(selectedFrame!, event.currentTarget.value as TilemapColliderType)}
+									className="w-full rounded bg-input px-2 py-1"
+								>
+									<option value="none">None</option>
+									<option value="grid">Grid</option>
+									<option value="sprite">Sprite Physics Shape</option>
+								</select>
+								{selectedFrame !== undefined && frameType === "sprite" && (
+									<label className="mt-2 flex flex-col gap-1">
+										Normalized compound contours JSON
+										<textarea
+											key={`${generator.revision}:${selectedFrame}`}
+											defaultValue={JSON.stringify(selectedShape ?? this._defaultTileColliderSpriteShape(), null, 2)}
+											onBlur={(event) => this._setTileColliderSpriteShape(selectedFrame, event.currentTarget.value)}
+											className="h-40 rounded bg-input p-2 font-mono text-[10px]"
+										/>
+									</label>
+								)}
+							</div>
+
+							<div className="flex flex-wrap gap-2">
+								<Button size="sm" onClick={() => this._refreshTileColliders(false)}>
+									Generate Geometry
+								</Button>
+								<Button size="sm" variant="secondary" onClick={() => this._refreshTileColliders(true)}>
+									Force Full Rebuild
+								</Button>
+								<Button
+									size="sm"
+									variant="secondary"
+									onClick={() => this._updateTileCollider({ tileIndexes: selectedFrame === undefined ? undefined : [selectedFrame] })}
+									disabled={selectedFrame === undefined}
+								>
+									Filter Frame {selectedFrame ?? ""}
+								</Button>
+								<Button size="sm" variant="secondary" onClick={() => this._updateTileCollider({ tileIndexes: undefined, layer: undefined })}>
+									All Tiles/Layers
+								</Button>
+								<Button size="sm" variant="ghost" className="!text-red-400" onClick={() => this._clearTileColliders()}>
+									Clear
+								</Button>
+							</div>
+						</>
+					)}
 				</div>
 			</EditorInspectorSectionField>
 		);
 	}
 
-	private _generateTileColliders(tileIndex: number | undefined, merge: boolean): void {
+	private _tileColliderSelect(label: string, value: string, values: string[], onChange: (value: string) => void): ReactNode {
+		return (
+			<label className="flex flex-col gap-1">
+				{label}
+				<select value={value} onChange={(event) => onChange(event.currentTarget.value)} className="rounded bg-input px-2 py-1">
+					{values.map((candidate) => (
+						<option key={candidate} value={candidate}>
+							{candidate}
+						</option>
+					))}
+				</select>
+			</label>
+		);
+	}
+
+	private _tileColliderBoolean(label: string, value: boolean, onChange: (value: boolean) => void): ReactNode {
+		return (
+			<label className="flex items-center justify-between gap-2 rounded bg-input px-2 py-1">
+				<span>{label}</span>
+				<input type="checkbox" checked={value} onChange={(event) => onChange(event.currentTarget.checked)} />
+			</label>
+		);
+	}
+
+	private _tileColliderNumber(label: string, value: number, onCommit: (value: number) => void, minimum?: number, maximum?: number): ReactNode {
+		return (
+			<label className="flex flex-col gap-1 capitalize">
+				{label}
+				<input
+					key={`${label}:${value}`}
+					type="number"
+					defaultValue={value}
+					min={minimum}
+					max={maximum}
+					onBlur={(event) => onCommit(Number(event.currentTarget.value))}
+					onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()}
+					className="rounded bg-input px-2 py-1"
+				/>
+			</label>
+		);
+	}
+
+	private _defaultTileColliderSpriteShape(): IPhysics2DPolygonContour[] {
+		return [
+			{
+				id: "outer",
+				points: [
+					[-0.5, -0.5],
+					[0.5, -0.5],
+					[0.5, 0.5],
+					[-0.5, 0.5],
+				],
+				holes: [],
+			},
+		];
+	}
+
+	private _generateTileColliders(tileIndex: number | undefined, compositeOperation: ITilemapColliderSettings["compositeOperation"]): void {
+		const scene = this.props.object.getScene();
+		const options = { editor: this.props.editor };
 		try {
+			const before = getTileColliderGeneratorSnapshot(scene, { mapNodeId: this.props.object.id });
+			const existing = getTileColliderGenerator(scene, { mapNodeId: this.props.object.id }).generator as any;
 			generateTileColliders(
-				this.props.object.getScene(),
-				{ mapNodeId: this.props.object.id, merge, ...(tileIndex === undefined ? {} : { tileIndexes: [tileIndex] }) },
-				{ editor: this.props.editor }
+				scene,
+				{ mapNodeId: this.props.object.id, expectedRevision: existing?.revision, compositeOperation, ...(tileIndex === undefined ? {} : { tileIndexes: [tileIndex] }) },
+				options
 			);
+			const after = getTileColliderGeneratorSnapshot(scene, { mapNodeId: this.props.object.id });
+			registerUndoRedo({ undo: () => restoreTileColliderGeneratorSnapshot(scene, before, options), redo: () => restoreTileColliderGeneratorSnapshot(scene, after, options) });
 			this.forceUpdate();
 		} catch (error) {
-			console.error(error);
+			toast.error(error instanceof Error ? error.message : "Could not create Tilemap Collider 2D geometry.");
+		}
+	}
+
+	private _updateTileCollider(update: Record<string, unknown>): void {
+		const scene = this.props.object.getScene();
+		const options = { editor: this.props.editor };
+		try {
+			const before = getTileColliderGeneratorSnapshot(scene, { mapNodeId: this.props.object.id });
+			if (!before.generator) {
+				throw new Error("Create a Tilemap Collider 2D configuration first.");
+			}
+			setTileColliderGenerator(scene, { mapNodeId: this.props.object.id, expectedRevision: before.generator.revision, update }, options);
+			const after = getTileColliderGeneratorSnapshot(scene, { mapNodeId: this.props.object.id });
+			registerUndoRedo({ undo: () => restoreTileColliderGeneratorSnapshot(scene, before, options), redo: () => restoreTileColliderGeneratorSnapshot(scene, after, options) });
+			this.forceUpdate();
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : "Could not update Tilemap Collider 2D settings.");
+			this.forceUpdate();
+		}
+	}
+
+	private _setTileColliderFrameType(tileIndex: number, type: TilemapColliderType): void {
+		const generator = getTileColliderGenerator(this.props.object.getScene(), { mapNodeId: this.props.object.id }).generator as any;
+		const tileColliderTypes = { ...generator.tileColliderTypes, [tileIndex]: type };
+		const spriteShapes =
+			type === "sprite" && !generator.spriteShapes[String(tileIndex)]
+				? { ...generator.spriteShapes, [tileIndex]: this._defaultTileColliderSpriteShape() }
+				: generator.spriteShapes;
+		this._updateTileCollider({ tileColliderTypes, spriteShapes });
+	}
+
+	private _setTileColliderSpriteShape(tileIndex: number, value: string): void {
+		try {
+			const contours = JSON.parse(value) as IPhysics2DPolygonContour[];
+			const generator = getTileColliderGenerator(this.props.object.getScene(), { mapNodeId: this.props.object.id }).generator as any;
+			this._updateTileCollider({ spriteShapes: { ...generator.spriteShapes, [tileIndex]: contours } });
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : "Sprite Physics Shape JSON is invalid.");
 		}
 	}
 
 	private _clearTileColliders(): void {
-		clearTileColliderGenerator(this.props.object.getScene(), { mapNodeId: this.props.object.id }, { editor: this.props.editor });
-		this.forceUpdate();
-	}
-
-	private _refreshTileColliders(): void {
+		const scene = this.props.object.getScene();
+		const options = { editor: this.props.editor };
 		try {
-			refreshTileColliders(this.props.object.getScene(), { mapNodeId: this.props.object.id }, { editor: this.props.editor });
+			const before = getTileColliderGeneratorSnapshot(scene, { mapNodeId: this.props.object.id });
+			if (!before.generator) {
+				return;
+			}
+			clearTileColliderGenerator(scene, { mapNodeId: this.props.object.id, expectedRevision: before.generator.revision }, options);
+			const after = getTileColliderGeneratorSnapshot(scene, { mapNodeId: this.props.object.id });
+			registerUndoRedo({ undo: () => restoreTileColliderGeneratorSnapshot(scene, before, options), redo: () => restoreTileColliderGeneratorSnapshot(scene, after, options) });
 			this.forceUpdate();
 		} catch (error) {
-			console.error(error);
+			toast.error(error instanceof Error ? error.message : "Could not clear Tilemap Collider 2D geometry.");
+		}
+	}
+
+	private _refreshTileColliders(forceFull: boolean): void {
+		try {
+			const generator = getTileColliderGenerator(this.props.object.getScene(), { mapNodeId: this.props.object.id }).generator as any;
+			refreshTileColliders(this.props.object.getScene(), { mapNodeId: this.props.object.id, expectedRevision: generator.revision, forceFull }, { editor: this.props.editor });
+			this.forceUpdate();
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : "Could not generate Tilemap Collider 2D geometry.");
 		}
 	}
 
@@ -735,7 +1317,9 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 
 	private _createBasicRuleTile(): void {
 		const tile = this.state.selectedTile as any;
-		if (!tile) return;
+		if (!tile) {
+			return;
+		}
 		const sourceTile = tile.ruleSource ?? tile.tile;
 		const existing = this.props.object.metadata?.babylonEditorRuleTiles ?? [];
 		this._setRuleTiles([...existing.filter((rule: any) => rule.sourceTile !== sourceTile), { sourceTile, outputTile: sourceTile, neighbors: {} }]);
@@ -774,31 +1358,65 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 		this.forceUpdate();
 	}
 
+	private _updateSelectedTile(): void {
+		if (!this.state.selectedTile) {
+			return;
+		}
+		this.props.object.updateTile(this.state.selectedTile);
+		this._notifyTileMapChanged();
+	}
+
+	private _notifyTileMapChanged(): void {
+		try {
+			notifySpriteMapTileDataChanged(this.props.object.getScene(), { mapNodeId: this.props.object.id }, { editor: this.props.editor });
+			this._tileDataFingerprint = this._getTileDataFingerprint();
+			this.forceUpdate();
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : "Could not synchronize Tilemap Collider 2D geometry.");
+		}
+	}
+
+	private _getTileDataFingerprint(): string {
+		const options = this.props.object.spriteMap?.options;
+		return JSON.stringify({
+			atlas: this.props.object.atlasJsonRelativePath,
+			tiles: this.props.object.tiles,
+			layerCount: options?.layerCount,
+			stageSize: options?.stageSize ? [options.stageSize.x, options.stageSize.y] : null,
+			outputSize: options?.outputSize ? [options.outputSize.x, options.outputSize.y] : null,
+			colorMultiply: options?.colorMultiply ? [options.colorMultiply.x, options.colorMultiply.y, options.colorMultiply.z] : null,
+		});
+	}
+
+	private _captureOptions(): any {
+		const options = this.props.object.spriteMap?.options;
+		return options
+			? {
+					layerCount: options.layerCount,
+					stageSize: options.stageSize?.clone(),
+					outputSize: options.outputSize?.clone(),
+					colorMultiply: options.colorMultiply?.clone(),
+				}
+			: null;
+	}
+
 	private _handleOptionsUndoRedo(): void {
 		const options = this.props.object.spriteMap?.options;
 		if (!options) {
 			return;
 		}
 
-		const oldOptions = {
-			layerCount: options.layerCount,
-			stageSize: options.stageSize?.clone(),
-			outputSize: options.outputSize?.clone(),
-			colorMultiply: options.colorMultiply?.clone(),
-		};
-
-		const newOptions = {
-			layerCount: options.layerCount,
-			stageSize: options.stageSize?.clone(),
-			outputSize: options.outputSize?.clone(),
-			colorMultiply: options.colorMultiply?.clone(),
-		};
+		const oldOptions = this._committedOptions ?? this._captureOptions();
+		const newOptions = this._captureOptions();
+		if (JSON.stringify(oldOptions) === JSON.stringify(newOptions)) {
+			return;
+		}
 
 		registerUndoRedo({
-			executeRedo: true,
 			undo: () => this.props.object.updateFromOptions(oldOptions),
 			redo: () => this.props.object.updateFromOptions(newOptions),
 		});
+		this._committedOptions = newOptions;
 
 		this.forceUpdate();
 	}
@@ -818,14 +1436,15 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 			executeRedo: true,
 			undo: () => this.props.object.tiles.pop(),
 			redo: () => this.props.object.tiles.push(newTile),
-			action: () => this.props.object.updateFromOptions(this.props.object.spriteMap!.options),
+			action: () => {
+				this.props.object.updateFromOptions(this.props.object.spriteMap!.options);
+				this._notifyTileMapChanged();
+			},
 		});
 
 		this.setState({
 			selectedTile: newTile,
 		});
-
-		this.props.object.updateFromOptions(this.props.object.spriteMap!.options);
 	}
 
 	private _handleRemoveTile(): void {
@@ -845,7 +1464,10 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 			executeRedo: true,
 			undo: () => tiles.splice(index, 0, selectedTile),
 			redo: () => tiles.splice(index, 1),
-			action: () => this.props.object.updateFromOptions(this.props.object.spriteMap!.options),
+			action: () => {
+				this.props.object.updateFromOptions(this.props.object.spriteMap!.options);
+				this._notifyTileMapChanged();
+			},
 		});
 
 		this.setState({

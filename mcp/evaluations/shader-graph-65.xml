@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect Shader Graph template search. Which tool returns the exact template catalog revision?</question>
+      <answer>list_shader_graph_templates</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the Rendering template catalog. Which portable template corresponds to a Unity URP Decal Projector template?</question>
+      <answer>urp-decal-projector-portable</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the Rendering template catalog. Which portable template creates a Babylon post-process Node Material?</question>
+      <answer>urp-fullscreen-renderer-portable</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the multi-case Switch limits. What is the maximum supported case count?</question>
+      <answer>16</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect multi-case Switch modes. Which two selector modes are supported? Answer as a comma-separated list in documented order.</question>
+      <answer>float, enum</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect reusable subgraph float modes. Which four modes are supported? Answer as a comma-separated list in documented order.</question>
+      <answer>default, slider, integer, enum</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect a connector-disabled reusable subgraph input. Which field supplies its compile-time value?</question>
+      <answer>staticValue</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect reflected Shader Graph functions. Which shader language is initially supported?</question>
+      <answer>GLSL</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect reflected-function parameter support. Which bidirectional parameter qualifier is deliberately rejected?</question>
+      <answer>inout</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect reflected shader-source bounds. What is the maximum source size in bytes?</question>
+      <answer>262144</answer>
+   </qa_pair>
+</evaluation>

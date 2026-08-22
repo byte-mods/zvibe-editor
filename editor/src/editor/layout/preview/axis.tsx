@@ -34,6 +34,26 @@ export interface IEditorPreviewAxisHelperState {
 	zLabelPosition: Vector2;
 }
 
+export interface IArcRotateCameraAxisTransition {
+	alpha: number;
+	beta: number;
+	radius: number;
+}
+
+/** Resolves an axis-view position into the closest equivalent ArcRotateCamera orbit. */
+export function getArcRotateCameraAxisTransition(camera: ArcRotateCamera, cameraPosition: Vector3): IArcRotateCameraAxisTransition {
+	const offset = cameraPosition.subtract(camera.target);
+	const radius = offset.length();
+	if (radius <= 0) {
+		return { alpha: camera.alpha, beta: camera.beta, radius: camera.radius };
+	}
+	const planarLength = Math.hypot(offset.x, offset.z);
+	const rawAlpha = planarLength <= 1e-6 ? camera.alpha : Math.atan2(offset.z, offset.x);
+	const alpha = camera.alpha + Math.atan2(Math.sin(rawAlpha - camera.alpha), Math.cos(rawAlpha - camera.alpha));
+	const beta = Math.acos(Math.min(1, Math.max(-1, offset.y / radius)));
+	return { alpha, beta, radius };
+}
+
 export class EditorPreviewAxisHelper extends Component<IEditorPreviewAxisHelperProps, IEditorPreviewAxisHelperState> {
 	public scene: Scene | null = null;
 
@@ -197,7 +217,11 @@ export class EditorPreviewAxisHelper extends Component<IEditorPreviewAxisHelperP
 		const cameraPosition = target.add(axis.scale(distance));
 
 		if (isArcRotateCamera(camera)) {
-			// TODO: handle arc rotate camera
+			Tween.create(camera, 0.35, {
+				...getArcRotateCameraAxisTransition(camera, cameraPosition),
+				noOptimize: true,
+				killAllTweensOfTarget: true,
+			});
 		} else {
 			const cameraRotation = Vector3.Zero();
 

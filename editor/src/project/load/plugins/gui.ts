@@ -1,5 +1,5 @@
 import { join } from "path/posix";
-import { readJSON } from "fs-extra";
+import { readSerializedJSON as readJSON } from "../../serialization-session";
 
 import { Editor } from "../../../editor/main";
 import { applyImportedGuiFile } from "../../../editor/layout/preview/import/gui";

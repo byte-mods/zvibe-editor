@@ -6,6 +6,7 @@ import { isArcRotateCamera } from "../../../../tools/guards/nodes";
 import { onNodeModifiedObservable } from "../../../../tools/observables";
 
 import { IEditorInspectorImplementationProps } from "../inspector";
+import { NodeRenderingLayersInspector } from "../rendering-layers";
 
 import { EditorInspectorNumberField } from "../fields/number";
 import { EditorInspectorVectorField } from "../fields/vector";
@@ -18,6 +19,7 @@ import { CustomMetadataInspector } from "../metadata/custom-metadata";
 import { CameraModeInspector } from "./utils/mode";
 import { FocalLengthInspector } from "./utils/focal";
 import { CameraDollyInspector } from "./utils/dolly";
+import { CameraCinemachineInspector } from "./utils/cinemachine";
 
 export class EditorArcRotateCameraInspector extends Component<IEditorInspectorImplementationProps<ArcRotateCamera>> {
 	/**
@@ -43,6 +45,8 @@ export class EditorArcRotateCameraInspector extends Component<IEditorInspectorIm
 					/>
 				</EditorInspectorSectionField>
 
+				<NodeRenderingLayersInspector editor={this.props.editor} node={this.props.object} onUpdate={() => this.forceUpdate()} />
+
 				<EditorInspectorSectionField title="Transforms">
 					<EditorInspectorVectorField label={<div className="w-14">Target</div>} object={this.props.object} property="target" />
 					<EditorInspectorNumberField asDegrees object={this.props.object} property="alpha" label="Alpha" step={0.1} />
@@ -53,6 +57,7 @@ export class EditorArcRotateCameraInspector extends Component<IEditorInspectorIm
 				<CameraModeInspector camera={this.props.object} onUpdate={() => this.forceUpdate()} />
 
 				<CameraDollyInspector editor={this.props.editor} camera={this.props.object} />
+				<CameraCinemachineInspector editor={this.props.editor} camera={this.props.object} />
 
 				<EditorInspectorSectionField title="Fov">
 					<EditorInspectorNumberField object={this.props.object} property="minZ" label="Min Z" min={0.01} />

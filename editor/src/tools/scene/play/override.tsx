@@ -64,6 +64,7 @@ const savedHtmlElementListeners: {
 
 const savedTimeoutIds: number[] = [];
 const savedIntervalIds: number[] = [];
+let playOverridesApplied = false;
 
 function normalizeUrl(url: string) {
 	if (url.startsWith("scene/")) {
@@ -82,6 +83,10 @@ function normalizeUrl(url: string) {
  * This function restores all the orignal methods for all object that have been overridden.
  */
 export function restorePlayOverrides(editor: Editor) {
+	if (!playOverridesApplied) {
+		return;
+	}
+
 	console.log = savedConsoleMethods.log;
 	console.info = savedConsoleMethods.info;
 	console.warn = savedConsoleMethods.warn;
@@ -142,9 +147,15 @@ export function restorePlayOverrides(editor: Editor) {
 	}
 
 	engine.resize();
+	playOverridesApplied = false;
 }
 
 export function applyOverrides(editor: Editor) {
+	if (playOverridesApplied) {
+		return;
+	}
+	playOverridesApplied = true;
+
 	// Console
 	const consoleMethodsList = ["log", "warn", "error", "info"];
 	consoleMethodsList.forEach((method) => {

@@ -22,7 +22,7 @@ describe("mcp/scene-tests", () => {
 		engine.dispose();
 	});
 
-	test("updates persisted assertions and reports per-assertion play-mode results", () => {
+	test("updates persisted assertions and reports per-assertion play-mode results", async () => {
 		const created = createSceneTest(scene, { name: "Subject checks", assertions: [] }, options);
 		const updated = setSceneTest(
 			scene,
@@ -36,19 +36,19 @@ describe("mcp/scene-tests", () => {
 			options
 		);
 		expect(updated.assertions).toHaveLength(2);
-		expect(runSceneTests(scene, { id: created.id }, options)).toMatchObject({ passed: true, results: [{ assertions: [{ passed: true }, { passed: true }] }] });
+		expect(await runSceneTests(scene, { id: created.id }, options)).toMatchObject({ passed: true, results: [{ assertions: [{ passed: true }, { passed: true }] }] });
 
 		expect(() => setSceneTest(scene, { id: created.id, assertions: [{ type: "node-position", nodeId: node.id, equals: [1, 2] }] }, options)).toThrow("three finite");
 	});
 
-	test("persists and evaluates scene diagnostics performance budgets", () => {
+	test("persists and evaluates scene diagnostics performance budgets", async () => {
 		const budget = createPerformanceBudget(scene, { name: "Mesh limit", limits: { meshes: 0, totalVertices: 100 } }, options);
 		MeshBuilder.CreateBox("Budget Mesh", {}, scene);
-		const failed = runPerformanceBudgets(scene, { id: budget.id }, options);
+		const failed = await runPerformanceBudgets(scene, { id: budget.id }, options);
 		expect(failed).toMatchObject({ passed: false, results: [{ name: "Mesh limit", passed: false }] });
 		expect(failed.results[0].limits.find((limit: any) => limit.metric === "meshes")).toMatchObject({ limit: 0, actual: 1, passed: false });
 		setPerformanceBudget(scene, { id: budget.id, limits: { meshes: 1, totalVertices: 100 } }, options);
-		expect(runPerformanceBudgets(scene, { id: budget.id }, options)).toMatchObject({ passed: true, results: [{ passed: true }] });
+		expect(await runPerformanceBudgets(scene, { id: budget.id }, options)).toMatchObject({ passed: true, results: [{ passed: true }] });
 		expect(() => createPerformanceBudget(scene, { name: "Invalid", limits: { madeUpMetric: 1 } }, options)).toThrow("Unsupported performance metric");
 	});
 });

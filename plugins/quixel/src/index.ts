@@ -3,7 +3,7 @@ import { copyFile, mkdir, pathExists } from "fs-extra";
 import { dirname, join, basename, extname } from "path/posix";
 
 import { PBRMaterial } from "babylonjs";
-import { Editor } from "babylonjs-editor";
+import { Editor, IEditorExtensionContext } from "babylonjs-editor";
 
 import { importMaterial } from "./material";
 import { QuixelJsonType, QuixelLodListType } from "./typings";
@@ -14,14 +14,56 @@ export const description = "Quixel Bridge integration for Babylon.js Editor";
 
 let server: Server | null = null;
 
-export function main(editor: Editor): void {
-	createRootFolder(editor);
-
-	server = new Server((s) => {
-		handeServerEvents(editor, s);
+function startServer(editor: Editor): Promise<void> {
+	if (server?.listening) {
+		return Promise.resolve();
+	}
+	server = new Server((socket) => {
+		handeServerEvents(editor, socket);
 	});
+	return new Promise((resolve, reject) => {
+		const instance = server!;
+		let onError: (error: Error) => void;
+		const onListening = (): void => {
+			instance.removeListener("error", onError);
+			instance.on("error", (error) => editor.layout.console.error(`Quixel Bridge listener error: ${error.message}`));
+			resolve();
+		};
+		onError = (error: Error): void => {
+			instance.removeListener("listening", onListening);
+			if (server === instance) {
+				server = null;
+			}
+			reject(error);
+		};
+		instance.once("error", onError);
+		instance.once("listening", onListening);
+		// Keep the import bridge loopback-only: trusting the extension must not expose an unauthenticated LAN listener.
+		instance.listen(24981, "127.0.0.1");
+	});
+}
 
-	server.listen(24981);
+/** Versioned extension lifecycle used by Package Manager and external MCP automation. */
+export async function activate(context: IEditorExtensionContext): Promise<() => void> {
+	const editor = context.getEditor();
+	await createRootFolder(editor);
+	await startServer(editor);
+	context.tests.register({
+		id: "babylon.editor.quixel.listener",
+		run: () => {
+			if (!server?.listening) {
+				throw new Error("Quixel Bridge loopback listener is not running.");
+			}
+		},
+	});
+	return close;
+}
+
+/** Legacy plugin entry retained while existing project files migrate to zvibeEditor manifests. */
+export function main(editor: Editor): void {
+	void createRootFolder(editor)
+		.then(() => startServer(editor))
+		.catch((error) => editor.layout.console.error(`Failed to start Quixel Bridge listener: ${error instanceof Error ? error.message : String(error)}`));
 }
 
 export function close(): void {
@@ -33,6 +75,9 @@ export function close(): void {
 		server = null;
 	}
 }
+
+/** Host-compatible cleanup name; close remains available to legacy plugin loading. */
+export const deactivate = close;
 
 function handeServerEvents(editor: Editor, socket: Socket): void {
 	let buffer: Buffer | null = null;

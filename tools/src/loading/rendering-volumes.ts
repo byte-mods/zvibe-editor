@@ -35,11 +35,15 @@ function applyProfile(camera: any, profile: IProfile, rootUrl: string): void {
 export function configureRenderingVolumes(scene: Scene, rootUrl: string): void {
 	const profiles = scene.metadata?.babylonEditorRenderingProfiles as IProfile[] | undefined;
 	const volumes = scene.metadata?.babylonEditorRenderingVolumes as IVolume[] | undefined;
-	if (!profiles?.length || !volumes?.length) return;
+	if (!profiles?.length || !volumes?.length) {
+		return;
+	}
 	const states = new WeakMap<object, { signature: string; baseline: IProfile }>();
 	scene.onBeforeRenderObservable.add(() => {
 		const camera: any = scene.activeCamera;
-		if (!camera?.position) return;
+		if (!camera?.position) {
+			return;
+		}
 		const position = camera.getAbsolutePosition?.() ?? camera.globalPosition ?? camera.position;
 		const contributions = getRenderingVolumeContributions(
 			volumes.filter((volume) => volume.enabled),
@@ -47,7 +51,9 @@ export function configureRenderingVolumes(scene: Scene, rootUrl: string): void {
 		).filter((entry) => profiles.some((profile) => profile.id === entry.volume.profileId));
 		const state = states.get(camera);
 		if (!contributions.length) {
-			if (state) applyProfile(camera, state.baseline, rootUrl);
+			if (state) {
+				applyProfile(camera, state.baseline, rootUrl);
+			}
 			states.delete(camera);
 			return;
 		}
@@ -70,7 +76,9 @@ export function configureRenderingVolumes(scene: Scene, rootUrl: string): void {
 			return blendRenderingConfiguration(current, normalizeConfigurations(profile.configurations), contribution.blendFactor);
 		}, baseline.configurations);
 		const signature = JSON.stringify(configurations);
-		if (state?.signature === signature) return;
+		if (state?.signature === signature) {
+			return;
+		}
 		applyProfile(camera, { id: "blended-volume", configurations }, rootUrl);
 		states.set(camera, { signature, baseline });
 	});

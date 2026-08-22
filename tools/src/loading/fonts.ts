@@ -8,6 +8,7 @@ export interface ILoadedImportedFont {
 	manifest: IFontAtlasManifest;
 	pageUrls: string[];
 	dynamicFontUrl: string | null;
+	sourceFontUrl: string | null;
 }
 
 function joinRoot(rootUrl: string, path: string): string {
@@ -32,6 +33,7 @@ export async function loadImportedFontAsset(rootUrl: string, authoredPath: strin
 	const manifest = (await manifestResponse.json()) as IFontAtlasManifest;
 	const manifestDirectory = sidecar.manifestPath.includes("/") ? sidecar.manifestPath.slice(0, sidecar.manifestPath.lastIndexOf("/") + 1) : "";
 	const dynamicFontUrl = typeof sidecar.dynamicFontPath === "string" && sidecar.dynamicFontPath ? joinRoot(rootUrl, sidecar.dynamicFontPath) : null;
+	const sourceFontUrl = typeof sidecar.sourceFontPath === "string" && sidecar.sourceFontPath ? joinRoot(rootUrl, sidecar.sourceFontPath) : dynamicFontUrl;
 	return {
 		authoredPath,
 		renderMode: sidecar.renderMode as FontImporterRenderMode,
@@ -40,7 +42,25 @@ export async function loadImportedFontAsset(rootUrl: string, authoredPath: strin
 		manifest,
 		pageUrls: manifest.pages.map((page) => joinRoot(rootUrl, `${manifestDirectory}${page}`)),
 		dynamicFontUrl,
+		sourceFontUrl,
 	};
+}
+
+/** Installs any imported project font for GUI/text fallback rendering, independent of atlas render mode. */
+export async function installImportedFontAsset(rootUrl: string, authoredPath: string): Promise<string> {
+	const asset = await loadImportedFontAsset(rootUrl, authoredPath);
+	if (!asset.sourceFontUrl) {
+		throw new Error(`Imported font "${authoredPath}" does not publish a source font fallback.`);
+	}
+	if (typeof FontFace === "undefined" || typeof document === "undefined") {
+		throw new Error("Imported font installation requires a browser FontFace API.");
+	}
+	if (!document.fonts.check(`12px ${JSON.stringify(asset.family)}`)) {
+		const face = new FontFace(asset.family, `url(${JSON.stringify(asset.sourceFontUrl)})`);
+		await face.load();
+		document.fonts.add(face);
+	}
+	return asset.family;
 }
 
 /** Loads a dynamic imported font into the browser FontFaceSet and returns its generated family name. */

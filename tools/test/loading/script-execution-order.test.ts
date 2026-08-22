@@ -7,11 +7,10 @@ describe("loading/script execution order", () => {
 		const calls: string[] = [];
 		const scene: any = {
 			onBeforeRenderObservable: {
-				addOnce: (callback: () => void) => {
+				add: (callback: () => void) => {
 					callback();
 					return null;
 				},
-				add: () => null,
 			},
 		};
 		const object = {
@@ -53,11 +52,10 @@ describe("loading/script execution order", () => {
 		const scene: any = {
 			metadata: { babylonEditorScriptExecutionOrders: { "bootstrap.ts": -100 } },
 			onBeforeRenderObservable: {
-				addOnce: (callback: () => void) => {
+				add: (callback: () => void) => {
 					callback();
 					return null;
 				},
-				add: () => null,
 			},
 		};
 		const firstObject = { metadata: { scripts: [{ key: "gameplay.ts", enabled: true, executionOrder: -50 }] } };
@@ -92,7 +90,7 @@ describe("loading/script execution order", () => {
 		const calls: string[] = [];
 		const scene: any = {
 			metadata: { babylonEditorProjectScriptExecutionOrders: { "shared.ts": -100 }, babylonEditorScriptExecutionOrders: { "scene.ts": -200 } },
-			onBeforeRenderObservable: { addOnce: (callback: () => void) => (callback(), null), add: () => null },
+			onBeforeRenderObservable: { add: (callback: () => void) => (callback(), null) },
 		};
 		_applyScriptsForObjects(
 			scene,

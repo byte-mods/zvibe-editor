@@ -5,6 +5,63 @@ import { z } from "zod";
 import { callTextTool } from "./helpers.mjs";
 
 const identity = { controllerId: z.string().optional(), controllerName: z.string().optional() };
+const humanBone = z.enum([
+	"hips",
+	"spine",
+	"chest",
+	"upperChest",
+	"neck",
+	"head",
+	"leftShoulder",
+	"leftUpperArm",
+	"leftLowerArm",
+	"leftHand",
+	"rightShoulder",
+	"rightUpperArm",
+	"rightLowerArm",
+	"rightHand",
+	"leftUpperLeg",
+	"leftLowerLeg",
+	"leftFoot",
+	"leftToes",
+	"rightUpperLeg",
+	"rightLowerLeg",
+	"rightFoot",
+	"rightToes",
+	"leftEye",
+	"rightEye",
+	"jaw",
+	"leftThumbProximal",
+	"leftThumbIntermediate",
+	"leftThumbDistal",
+	"leftIndexProximal",
+	"leftIndexIntermediate",
+	"leftIndexDistal",
+	"leftMiddleProximal",
+	"leftMiddleIntermediate",
+	"leftMiddleDistal",
+	"leftRingProximal",
+	"leftRingIntermediate",
+	"leftRingDistal",
+	"leftLittleProximal",
+	"leftLittleIntermediate",
+	"leftLittleDistal",
+	"rightThumbProximal",
+	"rightThumbIntermediate",
+	"rightThumbDistal",
+	"rightIndexProximal",
+	"rightIndexIntermediate",
+	"rightIndexDistal",
+	"rightMiddleProximal",
+	"rightMiddleIntermediate",
+	"rightMiddleDistal",
+	"rightRingProximal",
+	"rightRingIntermediate",
+	"rightRingDistal",
+	"rightLittleProximal",
+	"rightLittleIntermediate",
+	"rightLittleDistal",
+]);
 let blendTree: z.ZodType<any>;
 const blendTreeChild: z.ZodType<any> = z.lazy(() =>
 	z
@@ -50,11 +107,50 @@ blendTree = z.lazy(() =>
 			"Use parameter for 1D, parameterX and parameterY for 2D, or blendMode direct with directParameter on every child."
 		)
 );
+const unityBehaviourSource = z
+	.object({
+		bindingKey: z.string().startsWith("@unity-behaviour:").max(256),
+		behaviourFileId: z.string().min(1).max(64),
+		behaviourGuid: z
+			.string()
+			.regex(/^[a-f0-9]{32}$/)
+			.nullable(),
+		scriptFileId: z.string().min(1).max(64).nullable(),
+		scriptGuid: z
+			.string()
+			.regex(/^[a-f0-9]{32}$/)
+			.nullable(),
+		scriptPath: z.string().max(1024).nullable(),
+		scriptContentHash: z
+			.string()
+			.regex(/^[a-f0-9]{64}$/)
+			.nullable(),
+		scriptMetaHash: z
+			.string()
+			.regex(/^[a-f0-9]{64}$/)
+			.nullable(),
+		behaviourName: z.string().max(512),
+		editorClassIdentifier: z.string().max(1024),
+		serializedFieldsJson: z.string().max(65_536).describe("Bounded JSON object retaining Unity-authored fields as import evidence."),
+	})
+	.strict();
+const unityStateSource = z
+	.object({
+		fileId: z.string().min(1).max(64).describe("Exact Unity AnimatorState local fileID."),
+		serializedVersion: z.number().int().nonnegative().nullable().describe("Authored AnimatorState serializedVersion, or null when absent."),
+		footIKField: z.enum(["m_IKOnFeet", "m_FootIK"]).nullable().describe("Exact modern or legacy serialized Foot IK field spelling."),
+		speedParameter: z.string().min(1).max(256).nullable(),
+		mirrorParameter: z.string().min(1).max(256).nullable(),
+		cycleOffsetParameter: z.string().min(1).max(256).nullable(),
+		timeParameter: z.string().min(1).max(256).nullable(),
+	})
+	.strict();
 const stateBehaviour = z
 	.object({
 		id: z.string().min(1).max(256).describe("Stable behaviour binding id, unique within this state."),
 		scriptKey: z.string().min(1).max(1024).describe('Exact attachment key relative to the project "src" directory for a script attached to the Animator target node.'),
 		enabled: z.boolean().optional().describe("False preserves the binding without invoking its state callbacks."),
+		unitySource: unityBehaviourSource.optional().describe("Exact immutable Unity MonoBehaviour/MonoScript provenance retained by controller import."),
 	})
 	.strict();
 const state = z
@@ -62,7 +158,44 @@ const state = z
 		name: z.string().min(1),
 		animationGroup: z.string().min(1).optional(),
 		loop: z.boolean().optional(),
-		speed: z.number().positive().optional(),
+		speed: z
+			.number()
+			.refine((value) => value !== 0, "State speed must be non-zero; negative values play in reverse.")
+			.optional(),
+		cycleOffset: z.number().min(0).max(1).optional().describe("Static normalized phase offset applied to the complete state Motion."),
+		mirror: z.boolean().optional().describe("Mirror the complete state Motion through the current Humanoid Avatar mapping."),
+		speedParameter: z
+			.string()
+			.min(1)
+			.max(256)
+			.nullable()
+			.optional()
+			.describe("Float Animator parameter multiplied with authored speed; null explicitly disables an imported binding."),
+		mirrorParameter: z
+			.string()
+			.min(1)
+			.max(256)
+			.nullable()
+			.optional()
+			.describe("Bool Animator parameter replacing authored mirror; null explicitly disables an imported binding."),
+		cycleOffsetParameter: z
+			.string()
+			.min(1)
+			.max(256)
+			.nullable()
+			.optional()
+			.describe("Float Animator parameter replacing authored cycle offset; null explicitly disables an imported binding."),
+		timeParameter: z
+			.string()
+			.min(1)
+			.max(256)
+			.nullable()
+			.optional()
+			.describe("Float Animator parameter directly driving normalized state time; null disables it and root motion is suppressed while active."),
+		tag: z.string().max(256).optional().describe("Optional Animator state tag."),
+		footIK: z.boolean().optional().describe("Apply bounded automatic Humanoid ground-contact Foot IK after animation sampling in preview and exported runtime."),
+		writeDefaultValues: z.boolean().optional().describe("On state entry, restore captured controller defaults for animated properties not written by this state."),
+		unitySource: unityStateSource.optional().describe("Exact Unity AnimatorState serialization and active parameter-binding provenance retained by import."),
 		behaviours: z
 			.array(stateBehaviour)
 			.max(16)
@@ -122,6 +255,7 @@ const subgraph = z
 	.object({
 		id: z.string().min(1).max(256),
 		name: z.string().min(1).max(256),
+		behaviours: z.array(stateBehaviour).max(16).optional().describe("Ordered callbacks invoked when evaluation enters or exits this reusable state-machine boundary."),
 		states: z.array(state).min(1).max(64),
 		transitions: z.array(transition).max(512).optional(),
 		entryTransitions: z.array(entryTransition).max(64).optional(),
@@ -158,6 +292,7 @@ const synchronizedBehaviourOverrides = z
 const layer = z
 	.object({
 		name: z.string().min(1),
+		behaviours: z.array(stateBehaviour).max(16).optional().describe("Ordered callbacks invoked when evaluation enters or exits this layer state-machine boundary."),
 		weight: z.number().min(0).max(1).optional().describe("Layer influence from 0 to 1."),
 		maskTargetNames: z.array(z.string().min(1)).optional().describe("Optional target-name include mask for every state in this layer unless a state mask overrides it."),
 		avatarMaskId: z.string().min(1).max(256).optional().describe("Reusable humanoid body-part Avatar Mask used unless a state overrides it."),
@@ -187,6 +322,16 @@ const layer = z
 		activeState: z.string().min(1).optional(),
 	})
 	.strict();
+const runtimeDebugBreakpoint = z
+	.object({
+		id: z.string().min(1).max(128).describe("Unique runtime-only breakpoint id."),
+		layer: z.string().min(1).max(256).optional().describe('Machine scope: "$base" by default, or an exact Animator layer name.'),
+		from: z.string().min(1).max(512).optional().describe("Optional exact compiled source-state name."),
+		to: z.string().min(1).max(512).optional().describe('Optional exact compiled destination-state name, including "$exit".'),
+		enabled: z.boolean().optional().describe("False retains the breakpoint without halting execution."),
+	})
+	.strict()
+	.refine((breakpoint) => breakpoint.from !== undefined || breakpoint.to !== undefined, "A transition breakpoint requires from, to, or both.");
 
 export function registerAnimatorTools(server: McpServer): void {
 	server.registerTool(
@@ -194,8 +339,14 @@ export function registerAnimatorTools(server: McpServer): void {
 		{
 			title: "Inspect Unity Animator Controller import",
 			description:
-				"Inspect a current Animation Importer artifact created from Unity multi-document YAML .controller/.animator data. Returns converted layers, parameters, states, nested state machines, Blend Trees, transitions, unsupported-feature diagnostics, exact source/settings fingerprint, required external Motion and AvatarMask bindings, deterministic matches against current Animation Groups/Avatar Masks, and readiness without changing the scene. Apply the Animation Importer first when ready=false.",
-			inputSchema: z.object({ path: z.string().min(1).max(1024).describe("Project-relative Unity .controller or .animator asset path.") }).strict(),
+				"Inspect a current Unity YAML .controller/.animator artifact and build an exact scene import lease. Reports YAML/object serialized-version evidence and legacy/modern field variants; static signed state speed, normalized cycle offset, mirror, loop, tag, Foot IK, Write Defaults, and typed dynamic state-parameter bindings convert into executable settings. Motion, AvatarMask, and class-114 MonoBehaviour/MonoScript references resolve through paired project .meta GUIDs, exact fileIDs, current hashes, source provenance, and the selected target node's attached scripts. A single humanoid Avatar enables planned exact .mask import. Returns bounded dependency diagnostics, automatic/manual matches, target choices, converted controller data, and readiness without changing the scene.",
+			inputSchema: z
+				.object({
+					path: z.string().min(1).max(1024).describe("Project-relative Unity .controller or .animator asset path."),
+					targetNodeId: z.string().min(1).max(512).optional().describe("Scene node whose already attached project scripts will receive imported behaviour callbacks."),
+					targetNodeName: z.string().min(1).max(512).optional().describe("Unique scene-node name alternative to targetNodeId."),
+				})
+				.strict(),
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("get_animator_controller_asset_import", args)
@@ -205,19 +356,25 @@ export function registerAnimatorTools(server: McpServer): void {
 		{
 			title: "Import Unity Animator Controller into scene",
 			description:
-				"After confirm=true, import one valid current Unity YAML Animator Controller artifact into scene metadata under the exact fingerprint returned by get_animator_controller_asset_import. Every external Unity Motion must map to an existing Babylon Animation Group; AvatarMask references must map to existing mask ids unless explicitly ignored. Creates a controller or atomically replaces a same-name controller only when replaceExisting=true. Returns the persisted controller, applied bindings, ignored masks, and explicit unsupported-feature evidence.",
+				"After confirm=true, import one valid current Unity YAML Animator Controller under the exact dependency-and-scene fingerprint returned by get_animator_controller_asset_import using the same target selector. Serialized-version/field-shape evidence and exact Unity state provenance are retained; executable static signed speed/cycle-offset/mirror settings use the shared preview/export runtime. Exact Motion, AvatarMask, and attached project-script matches bind automatically; explicit mappings remain available. All MonoBehaviours must map to scripts already attached to the selected node, unresolved masks require explicit ignore, stale state rejects, and staged masks roll back if controller creation fails.",
 			inputSchema: z
 				.object({
 					path: z.string().min(1).max(1024).describe("Project-relative Unity .controller or .animator asset path."),
+					targetNodeId: z.string().min(1).max(512).optional().describe("Same selected target node id used to create the exact inspection fingerprint."),
+					targetNodeName: z.string().min(1).max(512).optional().describe("Same unique target name used to create the exact inspection fingerprint."),
 					expectedFingerprint: z
 						.string()
 						.regex(/^[a-f0-9]{64}$/)
-						.describe("Exact current source/settings fingerprint from the inspection tool."),
+						.describe("Exact current controller/dependency/live-scene fingerprint from the inspection tool."),
 					motionBindings: z
 						.record(z.string().min(1), z.string().min(1))
 						.optional()
-						.describe("Unity binding key to existing Animation Group name. Suggested exact-name matches are used when omitted."),
+						.describe("Optional Unity binding key to existing AnimationGroup override. Exact GUID/fileID automatic matches are used when omitted."),
 					avatarMaskBindings: z.record(z.string().min(1), z.string().min(1)).optional().describe("Unity mask binding key to existing Babylon Avatar Mask id."),
+					behaviourBindings: z
+						.record(z.string().min(1), z.string().min(1))
+						.optional()
+						.describe("Unity behaviour binding key to an exact project-script key already attached to the selected target node."),
 					ignoreUnresolvedAvatarMasks: z.boolean().optional().describe("Explicitly remove unresolved Unity mask references instead of rejecting the import."),
 					controllerName: z.string().min(1).max(256).optional().describe("Optional scene controller name override."),
 					replaceExisting: z.boolean().optional().describe("Required to replace a same-name controller; false by default."),
@@ -239,11 +396,13 @@ export function registerAnimatorTools(server: McpServer): void {
 		{
 			title: "Create animator controller",
 			description:
-				"Create a persistent state machine over existing Animation Groups. States reference one clip, a 1D blend tree, or a two-parameter 2D blend tree with weighted child clips; transitions use parameter conditions.",
+				"Create a persistent state machine over existing Animation Groups. States reference one clip or a recursive 1D/2D/Direct Blend Tree and may set signed speed, cycle offset, Humanoid mirror, loop, tag, bounded automatic Humanoid ground-contact Foot IK, controller-snapshot Write Defaults restoration, and typed dynamic Speed/Mirror/Cycle Offset/Motion Time parameter bindings; Motion Time suppresses root motion. Transitions use typed parameter conditions.",
 			inputSchema: z
 				.object({
 					name: z.string().min(1),
 					targetNodeId: z.string().optional(),
+					humanoidAvatarId: z.string().min(1).max(256).optional().describe("Humanoid Avatar sampled by this controller's runtime muscle trace."),
+					behaviours: z.array(stateBehaviour).max(16).optional().describe("Ordered callbacks for the Base Layer state-machine boundary."),
 					baseIKPass: z.boolean().optional().describe("Call onAnimatorIK for the Base Layer after animation sampling."),
 					parameters: z.record(z.string(), value).optional(),
 					parameterTypes: z
@@ -270,7 +429,7 @@ export function registerAnimatorTools(server: McpServer): void {
 		"get_animator_controller",
 		{
 			title: "Get animator controller",
-			description: "Get base states, transitions, parameters, active state, and independent animation layers.",
+			description: "Get base states, static and dynamic playback bindings, Unity source evidence, transitions, parameters, active state, and independent animation layers.",
 			inputSchema: z.object(identity).strict(),
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
@@ -292,17 +451,112 @@ export function registerAnimatorTools(server: McpServer): void {
 		{
 			title: "Get Animator runtime debug snapshot",
 			description:
-				"Capture live base/layer active states, Entry destinations, exited state, elapsed and normalized time, current cross-fade or fade-to-exit progress and weights, typed parameter values, Animation Group playback/weight/frame evidence, StateMachineBehaviour and IK Pass callback/error telemetry, root-motion health, warnings, and engine frame delta for one Animator controller.",
+				"Capture live base/layer active states, static speed/cycle-offset/mirror/loop/tag settings and retained Unity state evidence, Entry destinations, exited state, elapsed and normalized time, current cross-fade or fade-to-exit progress and weights, typed parameter values, Animation Group playback/weight/frame evidence, StateMachineBehaviour and IK Pass callback/error telemetry, root-motion health, warnings, and engine frame delta for one Animator controller.",
 			inputSchema: z
 				.object({
 					...identity,
 					includeAllClips: z.boolean().optional().describe("Include every state clip instead of only active and transitioning clips."),
+					historyLimit: z.number().int().min(1).max(256).optional().describe("Newest bounded transition-history entries to return; defaults to 64."),
 				})
 				.strict()
 				.refine((input) => !!input.controllerId || !!input.controllerName, "Provide controllerId or controllerName."),
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("get_animator_runtime_debug", args)
+	);
+	server.registerTool(
+		"get_animator_humanoid_muscle_trace",
+		{
+			title: "Get Animator Humanoid muscle trace",
+			description:
+				"Read one controller's persisted Humanoid Avatar assignment, available scene Avatars, current normalized Unity-style muscle pose, and a newest-first page of up to 256 post-Animator/post-behaviour/post-IK/pre-limit samples. Each sample includes base/layer states, XYZ degrees and normalized values, per-axis normalized deltas, authored limits, violations, maxima, timing, overflow evidence, and an exact SHA-256 mutation fingerprint. Reads never advance or alter runtime state.",
+			inputSchema: z
+				.object({
+					...identity,
+					roles: z.array(humanBone).max(55).optional().describe("Optional unique Humanoid roles to include in current/latest/history muscle arrays."),
+					offset: z.number().int().min(0).max(255).optional().describe("Newest-first history offset; defaults to 0."),
+					limit: z.number().int().min(1).max(256).optional().describe("History samples to return; defaults to 16."),
+				})
+				.strict()
+				.refine((input) => !!input.controllerId || !!input.controllerName, "Provide controllerId or controllerName.")
+				.refine((input) => !input.roles || new Set(input.roles).size === input.roles.length, "roles must not contain duplicates."),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_animator_humanoid_muscle_trace", args)
+	);
+	server.registerTool(
+		"set_animator_humanoid_muscle_trace",
+		{
+			title: "Configure Animator Humanoid muscle trace",
+			description:
+				"Under the exact fingerprint returned by get_animator_humanoid_muscle_trace, assign or clear one persisted Humanoid Avatar and/or clear that controller's bounded runtime-only muscle history. Assignment requires a current Humanoid Avatar whose skeleton is loaded; changing it resets prior samples. Pause the Animator first when an exact stable lease is needed while live sampling is active.",
+			inputSchema: z
+				.object({
+					...identity,
+					expectedFingerprint: z
+						.string()
+						.regex(/^[a-f0-9]{64}$/)
+						.describe("Exact current fingerprint from get_animator_humanoid_muscle_trace."),
+					humanoidAvatarId: z.string().min(1).max(256).nullable().optional().describe("Avatar id to assign, or null to clear the assignment."),
+					clearHistory: z.boolean().optional().describe("True clears samples, dropped count, error, and sequence state."),
+					limit: z.number().int().min(1).max(256).optional().describe("History page size in the returned fresh snapshot."),
+				})
+				.strict()
+				.refine((input) => !!input.controllerId || !!input.controllerName, "Provide controllerId or controllerName.")
+				.refine((input) => input.humanoidAvatarId !== undefined || input.clearHistory === true, "Provide humanoidAvatarId (string or null) and/or clearHistory=true."),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_animator_humanoid_muscle_trace", args)
+	);
+	server.registerTool(
+		"set_animator_runtime_debug",
+		{
+			title: "Configure Animator runtime debugging",
+			description:
+				"Under the exact debugger fingerprint from get_animator_runtime_debug, atomically pause or resume one controller, replace up to 64 base/layer transition breakpoints, and optionally clear its bounded 256-entry transition history. Breakpoints match exact evaluated source/destination states, pause after the matching transition is applied, and remain runtime-only without changing the persisted controller graph.",
+			inputSchema: z
+				.object({
+					...identity,
+					expectedFingerprint: z
+						.string()
+						.regex(/^[a-f0-9]{64}$/)
+						.describe("Exact debugger fingerprint from get_animator_runtime_debug."),
+					paused: z.boolean().optional().describe("Pause or resume only this Animator controller and its active clips."),
+					breakpoints: z.array(runtimeDebugBreakpoint).max(64).optional().describe("Complete replacement transition-breakpoint list."),
+					clearHistory: z.boolean().optional().describe("True clears retained and dropped transition-history counts."),
+				})
+				.strict()
+				.refine((input) => !!input.controllerId || !!input.controllerName, "Provide controllerId or controllerName.")
+				.refine(
+					(input) => input.paused !== undefined || input.breakpoints !== undefined || input.clearHistory === true,
+					"Provide paused, breakpoints, or clearHistory=true."
+				),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_animator_runtime_debug", args)
+	);
+	server.registerTool(
+		"step_animator_runtime_debug",
+		{
+			title: "Step paused Animator runtime",
+			description:
+				"Under the exact debugger fingerprint, deterministically advance only one paused Animator controller by 1–120 fixed steps totaling at most five seconds. It updates clips, transitions, triggers, behaviours, IK, layers, fades, and root motion through the same preview backend, stops early on a breakpoint, remains paused, and returns fresh runtime/history evidence.",
+			inputSchema: z
+				.object({
+					...identity,
+					expectedFingerprint: z
+						.string()
+						.regex(/^[a-f0-9]{64}$/)
+						.describe("Exact debugger fingerprint from get_animator_runtime_debug."),
+					deltaSeconds: z.number().min(0.0001).max(1).optional().describe("Fixed time per step; defaults to 1/60 second."),
+					steps: z.number().int().min(1).max(120).optional().describe("Number of fixed steps; defaults to 1 and total time cannot exceed five seconds."),
+				})
+				.strict()
+				.refine((input) => !!input.controllerId || !!input.controllerName, "Provide controllerId or controllerName.")
+				.refine((input) => (input.deltaSeconds ?? 1 / 60) * (input.steps ?? 1) <= 5, "Animator debugger stepping cannot exceed five seconds."),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("step_animator_runtime_debug", args)
 	);
 	server.registerTool(
 		"open_animator_runtime_debugger",
@@ -321,12 +575,15 @@ export function registerAnimatorTools(server: McpServer): void {
 		"set_animator_controller",
 		{
 			title: "Set animator controller",
-			description: "Update states, transitions, parameters, target node, or active state after validating referenced clips.",
+			description:
+				"Update states (including static signed speed, cycle offset, mirror, loop, and tag), transitions, parameters, target node, or active state after validating referenced clips.",
 			inputSchema: z
 				.object({
 					...identity,
 					name: z.string().min(1).optional(),
 					targetNodeId: z.string().optional(),
+					humanoidAvatarId: z.string().min(1).max(256).nullable().optional().describe("Humanoid Avatar to trace, or null to clear the assignment."),
+					behaviours: z.array(stateBehaviour).max(16).optional().describe("Complete Base Layer state-machine behaviour list."),
 					baseIKPass: z.boolean().optional().describe("Call onAnimatorIK for the Base Layer after animation sampling."),
 					parameters: z.record(z.string(), value).optional(),
 					parameterTypes: z.record(z.string(), parameterType).optional(),
@@ -356,6 +613,7 @@ export function registerAnimatorTools(server: McpServer): void {
 					...identity,
 					subgraphId: z.string().min(1).max(256).optional().describe("Existing subgraph id to update; omit to create a generated id."),
 					name: z.string().min(1).max(256).optional(),
+					behaviours: z.array(stateBehaviour).max(16).optional().describe("Complete reusable state-machine behaviour list."),
 					states: z.array(state).min(1).max(64).optional(),
 					transitions: z.array(transition).max(512).optional(),
 					entryTransitions: z.array(entryTransition).max(64).optional(),
@@ -435,6 +693,7 @@ export function registerAnimatorTools(server: McpServer): void {
 					...identity,
 					layer: z.string().min(1).describe("Existing layer name."),
 					name: z.string().min(1).optional(),
+					behaviours: z.array(stateBehaviour).max(16).optional().describe("Complete layer state-machine behaviour list."),
 					weight: z.number().min(0).max(1).optional(),
 					maskTargetNames: z.array(z.string().min(1)).optional(),
 					avatarMaskId: z.string().min(1).max(256).nullable().optional().describe("Reusable Avatar Mask id, or null to clear it."),

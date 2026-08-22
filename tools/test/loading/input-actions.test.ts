@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { InputActions } from "../../src/loading/input-actions";
+import { Observable } from "@babylonjs/core/Misc/observable";
+
+import { configureInputActions, InputActions } from "../../src/loading/input-actions";
 
 describe("InputActions gamepad bindings", () => {
 	afterEach(() => {
@@ -125,7 +127,7 @@ describe("InputActions gamepad bindings", () => {
 		Object.assign(keyDown, { key: "q", code: "KeyQ" });
 		target.dispatchEvent(keyDown);
 		expect(await rebind).toBe("<keyboard>/keyq");
-		expect(actions.getMaps()[0].actions[0].bindings).toEqual(["<keyboard>/keyq"]);
+		expect(actions.getMaps()[0].actions[0].bindings.map((binding) => binding.path)).toEqual(["<keyboard>/keyq"]);
 	});
 
 	test("captures the next gamepad button as an interactive action rebind", async () => {
@@ -135,7 +137,7 @@ describe("InputActions gamepad bindings", () => {
 		const rebind = actions.rebindNextGamepad("Player", "Fire");
 		await vi.advanceTimersByTimeAsync(20);
 		expect(await rebind).toBe("<gamepad>/button1");
-		expect(actions.getMaps()[0].actions[0].bindings).toEqual(["<keyboard>/space", "<gamepad>/button1"]);
+		expect(actions.getMaps()[0].actions[0].bindings.map((binding) => binding.path)).toEqual(["<gamepad>/button1"]);
 		vi.useRealTimers();
 	});
 
@@ -159,10 +161,151 @@ describe("InputActions gamepad bindings", () => {
 		Object.assign(pointerDown, { pointerType: "touch", clientX: 10, clientY: 20 });
 		target.dispatchEvent(pointerDown);
 		expect(await rebind).toBe("<touch>/press");
-		expect(actions.getMaps()[0].actions[0].bindings).toEqual(["<keyboard>/space", "<touch>/press"]);
+		expect(actions.getMaps()[0].actions[0].bindings.map((binding) => binding.path)).toEqual(["<touch>/press"]);
 		const axisRebind = actions.rebindNextTouch("Mobile", "Vertical", undefined, "position/y");
 		target.dispatchEvent(pointerDown);
-		expect(await axisRebind).toBe("<touch>/position/y");
-		expect(actions.getMaps()[0].actions[1].bindings).toEqual(["<touch>/position/y"]);
+		expect(await axisRebind).toBeNull();
+		expect(actions.getMaps()[0].actions[1].bindings).toEqual([]);
+	});
+
+	test("preserves signed axes and evaluates normalized 2D composites", () => {
+		vi.stubGlobal("navigator", { getGamepads: () => [{ index: 0, id: "Pad", connected: true, mapping: "standard", buttons: [], axes: [-0.75, 0.5, 0, 0] }] });
+		const actions = new InputActions(
+			[
+				{
+					id: "player",
+					name: "Player",
+					actions: [
+						{ name: "Steer", type: "value", expectedControlType: "axis", processors: [{ type: "invert" }], bindings: ["<gamepad>/leftStick/x"] },
+						{
+							name: "Move",
+							type: "value",
+							expectedControlType: "vector2",
+							bindings: [
+								{
+									id: "wasd",
+									composite: {
+										type: "vector2",
+										parts: [
+											{ name: "Up", path: "<keyboard>/keyw" },
+											{ name: "Down", path: "<keyboard>/keys" },
+											{ name: "Left", path: "<keyboard>/keya" },
+											{ name: "Right", path: "<keyboard>/keyd" },
+										],
+									},
+								},
+							],
+						},
+					],
+				},
+			],
+			new EventTarget()
+		);
+		expect(actions.getValue("Player", "Steer")).toBeCloseTo(0.75);
+		actions.simulateControl("<keyboard>/keyw", 1);
+		actions.simulateControl("<keyboard>/keyd", 1);
+		expect(actions.getVector2("Player", "Move")[0]).toBeCloseTo(Math.SQRT1_2);
+		expect(actions.getVector2("Player", "Move")[1]).toBeCloseTo(Math.SQRT1_2);
+	});
+
+	test("emits hold phases, traces them, and preserves non-destructive overrides", () => {
+		const target = new EventTarget();
+		const authored = [
+			{
+				id: "player",
+				name: "Player",
+				actions: [
+					{
+						id: "charge",
+						name: "Charge",
+						type: "button" as const,
+						interactions: [{ type: "hold" as const, duration: 0.25 }],
+						bindings: [{ id: "charge-key", path: "<keyboard>/space" }],
+					},
+				],
+			},
+		];
+		const actions = new InputActions(authored, target);
+		const keyDown = new Event("keydown");
+		Object.assign(keyDown, { key: " ", code: "Space" });
+		target.dispatchEvent(keyDown);
+		actions.update(0.3);
+		const keyUp = new Event("keyup");
+		Object.assign(keyUp, { key: " ", code: "Space" });
+		target.dispatchEvent(keyUp);
+		expect(actions.getTrace().events.map((event) => event.phase)).toEqual(["started", "performed", "canceled"]);
+
+		expect(actions.applyBindingOverride("Player", "Charge", "charge-key", "<keyboard>/enter")).toBe(true);
+		const overrides = actions.saveBindingOverrides();
+		expect(actions.getMaps()[0].actions[0].bindings[0].path).toBe("<keyboard>/enter");
+		const restored = new InputActions(authored, new EventTarget());
+		expect(restored.loadBindingOverrides(overrides)).toBe(1);
+		expect(restored.getMaps()[0].actions[0].bindings[0].path).toBe("<keyboard>/enter");
+		expect(restored.clearBindingOverride("Player", "Charge", "charge-key")).toBe(true);
+		expect(restored.getMaps()[0].actions[0].bindings[0].path).toBe("<keyboard>/space");
+	});
+
+	test("runtime enable overrides authored state and honors initial-state suppression", () => {
+		const actions = new InputActions(
+			[
+				{
+					id: "player",
+					name: "Player",
+					enabled: false,
+					actions: [{ id: "jump", name: "Jump", initialStateCheck: false, bindings: [{ id: "jump-key", path: "<keyboard>/space" }] }],
+				},
+			],
+			new EventTarget()
+		);
+		actions.simulateControl("<keyboard>/space", 1);
+		expect(actions.isPressed("Player", "Jump")).toBe(false);
+		expect(actions.setMapEnabled("Player", true)).toBe(true);
+		expect(actions.isPressed("Player", "Jump")).toBe(true);
+		expect(actions.getTrace().events).toEqual([]);
+		actions.clearSimulatedControl("<keyboard>/space");
+		expect(actions.getTrace().events).toEqual([]);
+		actions.simulateControl("<keyboard>/space", 1);
+		expect(actions.getTrace().events.map((event) => event.phase)).toEqual(["started", "performed"]);
+		expect(actions.setActionEnabled("Player", "Jump", false)).toBe(true);
+		expect(actions.getActionState("Player", "Jump")?.phase).toBe("disabled");
+	});
+
+	test("configures fixed update through the animation fallback and disposes scene ownership", () => {
+		vi.stubGlobal("addEventListener", vi.fn());
+		vi.stubGlobal("removeEventListener", vi.fn());
+		const beforeAnimations = new Observable<void>();
+		const onDispose = new Observable<void>();
+		const scene: any = {
+			metadata: {
+				babylonEditorInputActionMaps: [{ name: "Player", actions: [{ name: "Jump", bindings: ["space"] }] }],
+				babylonEditorInputSystemSettings: { updateMode: "fixed" },
+			},
+			onBeforeAnimationsObservable: beforeAnimations,
+			onDisposeObservable: onDispose,
+			getEngine: () => ({ getDeltaTime: () => 16 }),
+		};
+		const runtime = configureInputActions(scene)!;
+		expect(scene.inputActions).toBe(runtime);
+		expect(beforeAnimations.observers).toHaveLength(1);
+		beforeAnimations.notifyObservers();
+		onDispose.notifyObservers();
+		expect(beforeAnimations.hasObservers()).toBe(false);
+		expect(globalThis.removeEventListener).toHaveBeenCalled();
+	});
+
+	test("reads mouse vectors and supports runtime map disabling", () => {
+		vi.stubGlobal("innerWidth", 200);
+		vi.stubGlobal("innerHeight", 100);
+		const target = new EventTarget();
+		const actions = new InputActions(
+			[{ id: "player", name: "Player", actions: [{ name: "Look", type: "passThrough", expectedControlType: "vector2", bindings: ["<mouse>/delta"] }] }],
+			target
+		);
+		const move = new Event("mousemove");
+		Object.assign(move, { clientX: 50, clientY: 25, movementX: -5, movementY: 3 });
+		target.dispatchEvent(move);
+		expect(actions.getVector2("Player", "Look")).toEqual([-5, 3]);
+		expect(actions.setMapEnabled("Player", false)).toBe(true);
+		expect(actions.getActionState("Player", "Look")).toMatchObject({ enabled: false, phase: "disabled" });
 	});
 });

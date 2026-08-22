@@ -2,7 +2,7 @@ import { dirname, isAbsolute, join } from "path/posix";
 import { pathExistsSync, readJSONSync } from "fs-extra";
 
 import { Node, TransformNode, Scene, Tools, serialize, SerializationHelper, Matrix, GetClass, SpriteManager, Texture, Sprite, Observer, ShaderStore } from "babylonjs";
-import { configureRotatedPackedSpriteManager, installRotatedPackedSpriteShaders } from "babylonjs-editor-tools";
+import { applySpriteManagerLocalSpace, configureRotatedPackedSpriteManager, installRotatedPackedSpriteShaders, restoreVariableSpriteAnimation } from "babylonjs-editor-tools";
 
 import { showAlert } from "../../ui/dialog";
 
@@ -166,6 +166,8 @@ export class SpriteManagerNode extends TransformNode {
 			const sprite = Sprite.Parse(parsedSprite, this.spriteManager);
 			sprite.uniqueId = parsedSprite.uniqueId;
 			sprite.metadata = parsedSprite.metadata;
+			// The editor consumes Babylon's umbrella package while Tools compiles against @babylonjs/core; both resolve to the same runtime object.
+			restoreVariableSpriteAnimation(sprite as any);
 		}
 	}
 
@@ -195,6 +197,7 @@ export class SpriteManagerNode extends TransformNode {
 	}
 
 	private _onBeforeRenderScene(): void {
+		applySpriteManagerLocalSpace(this as any);
 		const isEnabled = this.isEnabled(true) && this._scene.transformNodes.indexOf(this) !== -1;
 		const spriteManagerIndex = this._scene.spriteManagers?.indexOf(this.spriteManager!) ?? -1;
 

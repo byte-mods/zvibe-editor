@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { installDynamicImportedFont, loadImportedFontAsset } from "../../src/loading/fonts";
+import { installDynamicImportedFont, installImportedFontAsset, loadImportedFontAsset } from "../../src/loading/fonts";
 
 describe("font runtime importer", () => {
 	afterEach(() => vi.unstubAllGlobals());
@@ -8,7 +8,10 @@ describe("font runtime importer", () => {
 	test("resolves portable manifests and atlas pages relative to the build root", async () => {
 		const fetchMock = vi.fn(async (url: string) => {
 			if (url.endsWith(".bjsfont.json")) {
-				return { ok: true, json: async () => ({ renderMode: "msdf", family: "GameFont", manifestPath: "assets/game.font.json", dynamicFontPath: null }) };
+				return {
+					ok: true,
+					json: async () => ({ renderMode: "msdf", family: "GameFont", manifestPath: "assets/game.font.json", dynamicFontPath: null, sourceFontPath: "assets/game.ttf" }),
+				};
 			}
 			return {
 				ok: true,
@@ -38,9 +41,45 @@ describe("font runtime importer", () => {
 			manifestUrl: "/scene/assets/game.font.json",
 			pageUrls: ["/scene/assets/game.font-0.png", "/scene/assets/game.font-1.png"],
 			dynamicFontUrl: null,
+			sourceFontUrl: "/scene/assets/game.ttf",
 		});
 		expect(fetchMock).toHaveBeenNthCalledWith(1, "/scene/assets/game.ttf.bjsfont.json");
 		expect(fetchMock).toHaveBeenNthCalledWith(2, "/scene/assets/game.font.json");
+	});
+
+	test("installs retained source fallbacks for bitmap, SDF, and MSDF imports", async () => {
+		const add = vi.fn();
+		const check = vi.fn(() => false);
+		const load = vi.fn(async () => undefined);
+		const FontFaceMock = vi.fn(function (this: { load: typeof load }, _family: string, _source: string) {
+			this.load = load;
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: string) => ({
+				ok: true,
+				json: async () =>
+					url.endsWith(".bjsfont.json")
+						? { renderMode: "msdf", family: "AtlasFont", manifestPath: "assets/atlas.font.json", dynamicFontPath: null, sourceFontPath: "assets/atlas.ttf" }
+						: {
+								version: 1,
+								renderMode: "msdf",
+								family: "AtlasFont",
+								pages: [],
+								characters: [],
+								kernings: [],
+								missingCodepoints: [],
+								dynamicFontPath: null,
+								sourceFontPath: "atlas.ttf",
+							},
+			}))
+		);
+		vi.stubGlobal("FontFace", FontFaceMock);
+		vi.stubGlobal("document", { fonts: { add, check } });
+		await expect(installImportedFontAsset("/scene/", "assets/atlas.ttf")).resolves.toBe("AtlasFont");
+		expect(FontFaceMock).toHaveBeenCalledWith("AtlasFont", 'url("/scene/assets/atlas.ttf")');
+		expect(load).toHaveBeenCalledOnce();
+		expect(add).toHaveBeenCalledOnce();
 	});
 
 	test("installs dynamic font assets through FontFace", async () => {

@@ -1,131 +1,224 @@
-# Babylon.js Editor 5
+<div align="center">
+  <img src="editor/assets/zvibe_icon.svg" width="104" height="104" alt="Zvibe Editor logo" />
 
-**Focus more on creating and less on coding.**
+# Zvibe Editor
 
-## Introduction
+### A next-generation, open-source game development environment powered by Babylon.js
 
-The Babylon.js Editor is a desktop application used to create and edit 3D scenes using the Babylon.js 3D engine.
-The Editor is available on Windows, macOS and Linux.
+[![Version](https://img.shields.io/badge/version-1.0.0-8b5cf6?style=for-the-badge)](editor/package.json)
+[![License](https://img.shields.io/badge/license-Apache--2.0-22c55e?style=for-the-badge)](LICENSE)
+[![Babylon.js](https://img.shields.io/badge/Babylon.js-9.12.1-bb464b?style=for-the-badge)](https://www.babylonjs.com/)
+[![Electron](https://img.shields.io/badge/Electron-39-47848f?style=for-the-badge&logo=electron)](https://www.electronjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![MCP](https://img.shields.io/badge/MCP-1%2C722_tools-06b6d4?style=for-the-badge)](FEATURE-INVENTORY.md)
 
-It includes built-in templates, including a Next.js template, allowing you to bypass the tedious setup process and dive straight into building your project.
+[Features](#features) · [Quick start](#quick-start) · [Tutorials](#developer-tutorials) · [MCP](#ai-native-editor-automation) · [Architecture](#repository-architecture) · [Contributing](#contributing)
 
-The model-import pipeline supports exact artist-authored LOD groups as well as generated deformation-safe LODs. Both workflows are available from the Model Inspector and the local MCP server, and produce the same runtime links in editor and CLI builds.
+</div>
 
-Projects can load multiple authored scenes together under independent Hierarchy roots. Active and lighting scenes, per-scene dirty/save/revert/unload state, transform-preserving dependency moves, and exact runtime additive load/unload handles share one ownership model. The local MCP server exposes the same leased workspace lifecycle and cross-scene move workflows to Codex CLI and Claude CLI.
+Zvibe Editor is a cross-platform visual game editor for building Web, desktop, mobile, headless, XR, 2D, and 3D experiences with Babylon.js. It brings scene composition, production asset workflows, gameplay scripting, animation state machines, VFX, terrain, physics, navigation, profiling, testing, build pipelines, and AI-driven editor automation into one Electron application.
 
-Prefab instances include searchable single- and multi-instance Overrides windows for exact outer or nested boundaries. They group transform, serialized-component, and hierarchy differences with source values, conflict evidence, and leased Apply/Revert controls. Multi-instance changes support rollback-safe atomic mode for compatible independent sources and explicit per-target best-effort results. Prefab Stage opens assets in isolation or a locked live-scene context with persisted environment, appearance, override-display, and Auto Save settings. Core and specialized string, number, boolean, vector, color, list, slider, dimensions, asset, and entity controls show exact source status; whole custom-metadata, script, and runtime-physics component sections expose the same Apply/Revert actions. Runtime physics values are serialized from the live aggregate and reconstructed transactionally on Revert and prefab instantiation. Conflicted variants open a visual three-way merge that compares current base, authored override, resolved preview, and an optional exact live instance; every row requires an explicit safe Use Base, Keep Variant, or exact retarget choice before one rollback-aware write. A separate project-local review store gives Prefabs stable ownership, requested reviewers, bounded comments, exact-revision request rounds, approval/change-request evidence, collaboration identities, and automatic stale approval after content or recursive-base changes without modifying exported assets. The local MCP server exposes the same override, bulk, Stage, conflict-resolution, ownership, review-queue, comment, decision, and atomic source-edit workflows.
+It is designed for teams that want a Unity-style visual workflow while keeping the runtime open, portable, TypeScript-first, and built on Web standards.
 
-The asset browser and project exporter treat corrupt or mislabeled image files as recoverable assets: previews fall back to a generic image card, while builds skip invalid image data and report the affected path in the editor console. Export work always settles and closes its progress UI, and Play mode restores its controls if export, script compilation, or scene loading fails. Development reloads are scoped to application windows so Electron DevTools and internal renderers are not traversed by the legacy reloader. Unpackaged builds keep DevTools opt-in to avoid Electron protocol diagnostics for every new window: use `Cmd/Ctrl+Alt+I` for the focused window, or launch with `AUTO_OPEN_DEVTOOLS=true` when automatic opening is specifically needed.
+![Zvibe Editor with a complete racing game scene](website/public/documentation/tutorials/ide-overview.png)
 
-✌️ The website is available here: https://editor.babylonjs.com
+## Why Zvibe Editor?
 
-🏛️ The documentation is available here: https://editor.babylonjs.com/documentation
+- **Complete visual workflow** — compose scenes, inspect components, author assets, build gameplay, profile, and package without leaving the editor.
+- **TypeScript-first runtime** — attach strongly typed scripts with lifecycle methods, decorators, scene references, and designer-editable properties.
+- **AI-native by design** — Codex CLI and Claude-compatible clients can inspect and modify the live editor through 1,722 strict MCP tools.
+- **Web and desktop delivery** — build Web, PWA, Electron desktop, headless, Android, and iOS project targets through reproducible Build Profiles.
+- **Portable engine stack** — Babylon.js 9, WebGPU/WebGL, Havok, Recast/Detour, Electron, React, and open asset formats.
+- **Open source** — the repository is licensed under Apache 2.0 and preserves attribution to the upstream Babylon.js Editor project.
 
-## Download
+## Features
 
-**v5.4.2**
+| Area | Production capabilities |
+| --- | --- |
+| Scene authoring | Hierarchy, transforms, cameras, lights, components, multi-scene workflows, prefabs, instances, command palette, undo/redo |
+| Assets | Models, textures, materials, animation, audio, video, fonts, HDR/EXR, PSD/PSB, Aseprite, Alembic, FBX round trips, automatic reimport |
+| Materials and rendering | PBR materials, Shader Graph/node materials, subgraphs, variants, custom passes, render graphs, rendering profiles and volumes |
+| Animation and rigging | Timeline, curves, events, Animator controllers, parameters, transitions, blend trees, layers, masks, root motion, IK and rig layers |
+| VFX | CPU/GPU particles, VFX/node-particle graphs, trails, collisions, events, vector fields, templates and pooling lifecycle |
+| Worldbuilding | Primitives, editable geometry/ProBuilder workflows, terrain layers, vegetation, streaming tiles, splines and occlusion culling |
+| Physics | Havok 3D, 2D physics, constraints, contacts, vehicles, cloth, ragdolls, force visualization and deterministic simulation controls |
+| Navigation and AI | Recast NavMesh, areas, links, obstacles, crowds, agents, behavior trees/graphs, visual scripting and runtime debugging |
+| 2D and UI | Sprites, sprite sheets, tile palettes, sorting layers, sprite skinning, 2D lighting, GUI editor, UI Toolkit-style UXML/USS workflows |
+| Audio and cinematic | Spatial sound, SoundNodes, mixer routing, audio generation, video players, cinematic timeline, virtual cameras and capture |
+| Production tooling | Script debugger, Profiler, scene tests, visual regression, device simulation, project auditor, source control and collaboration |
+| Delivery | Addressables, asset streaming, localization, services, networking, runtime AI, XR, mobile tooling, Web/PWA/Electron/headless builds |
 
-- Windows x64: https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/updates/BabylonJS%20Editor%20Setup%205.4.2.exe
-- macOS Apple Chip: https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/updates/BabylonJS%20Editor-5.4.2-arm64.dmg
-- macOS Intel Chip: https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/updates/x64/BabylonJS%20Editor-5.4.2.dmg
-- Linux x64: https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/updates/BabylonJS%20Editor-5.4.2.AppImage
-- Linux arm64: https://babylonjs-editor.fra1.cdn.digitaloceanspaces.com/updates/BabylonJS%20Editor-5.4.2-arm64.AppImage
+For the generated feature-by-feature status, see [FEATURE-INVENTORY.md](FEATURE-INVENTORY.md). Unity 6.5 comparison boundaries are documented in [UNITY-6-5-PARITY.md](UNITY-6-5-PARITY.md), and implementation sequencing is tracked in [ROADMAP.md](ROADMAP.md).
 
-## Prerequisites
+## Editor workspaces
 
-### Prerequisites for Windows
+Zvibe Editor exposes permanent and contextual workspaces for the systems that own project state:
 
-On **Windows**, you need some tools to be present in the system like Python and C++ compiler. Windows users can easily install them by running the following command in PowerShell as administrator:
+- Scene Graph, Preview, Inspector, Assets Browser, Console, and Terminal
+- Animation Timeline, Animator, Visual Scripting, Behavior Trees, and Compute Graph
+- Shader Graph/Node Material and VFX/Node Particle editors
+- Terrain, NavMesh, Cinematic, Entities, Networking, Mobile, Services, and Runtime AI
+- Profiler, Script Debugger, Project Auditor, Build Profiles, Source Control, and Marketplace
+
+<table>
+  <tr>
+    <td width="50%"><img src="website/public/documentation/tutorials/animation-timeline.png" alt="Animation Timeline" /></td>
+    <td width="50%"><img src="website/public/documentation/tutorials/animator.png" alt="Animator workspace" /></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Animation Timeline</strong></td>
+    <td align="center"><strong>Animator state machines</strong></td>
+  </tr>
+</table>
+
+## Quick start
+
+### Requirements
+
+- Node.js 20 or newer
+- Yarn Classic 1.22
+- Git
+- macOS: Xcode Command Line Tools
+- Windows: Visual Studio Build Tools with Desktop C++ and the Windows SDK
+- Linux: `make`, Python, and a C/C++ build toolchain
+
+### Install, build, and launch
 
 ```bash
-# For more information see https://github.com/felixrieseberg/windows-build-tools
-npm install --global --production windows-build-tools
-```
-
-The following are also needed:
-
-- [Windows SDK](https://developer.microsoft.com/en-us/windows/downloads/windows-10-sdk) - only the "Desktop C++ Apps" components are needed to be installed
-- Spectre-mitigated libraries - In order to avoid the build error "MSB8040: Spectre-mitigated libraries are required for this project", open the Visual Studio Installer, press the Modify button, navigate to the "Individual components" tab, search "Spectre", and install an option like "MSVC v143 - VS 2022 C++ x64/x86 Spectre-mitigated libs (Latest)" (the exact option to install will depend on your version of Visual Studio as well as your operating system architecture)
-
-### Prerequisites for macOS
-
-On **macOS**, you need to install XCode in order to compile native modules used by the Editor.
-You can get XCode from the [AppStore](https://apps.apple.com/fr/app/xcode/id497799835?mt=12)
-
-### Prerequisites for Linux (apt)
-
-```bash
-sudo apt install -y make python build-essential
-```
-
-## Installing and building
-
-First, install the dependencies. This repository uses yarn classic.
-
-```bash
+git clone https://github.com/byte-mods/zvibe-editor.git
+cd zvibe-editor
 yarn install
-```
-
-To build the editor and its associated tools, use the "build" command:
-
-```bash
 yarn build
-```
-
-## Running
-
-Using the command line at the root of the repository, just type:
-
-```bash
 yarn start
 ```
 
-The devtools will open automatically.
+The packaged application identifies itself as **Zvibe Editor 1.0.0**.
 
-## Developing
-
-To watch the Editor and its dependencies, use the following command:
+### Development loop
 
 ```bash
+# Watch the editor, styles, tools, CLI, plugins, and MCP server
 yarn watch-editor-all
-```
 
-Using Visual Studio Code, you can also use a specific task to watch the Editor and other packages.
-Just type `Ctrl+Shift+B` (or `Cmd+Shift+B` on macOS) and select the task `watch-all-editor`.
+# Run unit and integration tests
+yarn test
 
-Before contributing, please ensure that all code is formatted correctly and respects the project's coding rules.
-You can lint files using the following command:
-
-```bash
+# Check formatting and lint rules across the monorepo
 yarn lint
+
+# Build every workspace, template, and the documentation website
+yarn build-all
 ```
 
-And you can fix all fixable issues using:
+## Developer tutorials
+
+The documentation website contains 13 guided courses, 60 practical sections, real editor/game screenshots, TypeScript examples, and complete verification checklists.
+
+Start it locally:
 
 ```bash
-yarn lint-fix
+yarn workspace babylonjs-editor-website dev
 ```
 
-## Packaging
+Then open the [tutorial hub](http://localhost:3000/documentation/tutorials). The complete authored tutorial source is available in [tutorial-data.ts](website/src/app/documentation/tutorials/tutorial-data.ts).
 
-Due to the native dependencies, builds on macOS must be performed on a macOS machine and builds on Windows must be performed on a Windows machine with all the requirements installed (XCode, C++ compilers etc.).
+| Learning path | What you build or learn | Local tutorial |
+| --- | --- | --- |
+| Complete IDE tour | Projects, panels, scene composition, units, saving, play mode, diagnostics | [Open](http://localhost:3000/documentation/tutorials/ide-tour) |
+| Assets and materials | Importers, textures, PBR, material variants, prefabs and overrides | [Open](http://localhost:3000/documentation/tutorials/assets-materials) |
+| Animation and Animator | Clips, curves, events, state machines, transitions, layers, masks and debugging | [Open](http://localhost:3000/documentation/tutorials/animation-animator) |
+| TypeScript gameplay | Script lifecycle, decorators, references, input, cleanup and debugging | [Open](http://localhost:3000/documentation/tutorials/scripting-fundamentals) |
+| Complete feature map | Author-test-save-build workflow across the entire IDE | [Open](http://localhost:3000/documentation/tutorials/feature-workflows) |
+| Worldbuilding and physics | ProBuilder, terrain, streaming, 3D/2D physics, ragdolls, cloth and NavMesh | [Open](http://localhost:3000/documentation/tutorials/worldbuilding-physics) |
+| Rendering and VFX | Lighting, Shader Graph, particles, trails, render profiles and visual profiling | [Open](http://localhost:3000/documentation/tutorials/rendering-vfx) |
+| Build and publish | Editor/project settings, Web, PWA, Electron and release verification | [Open](http://localhost:3000/documentation/tutorials/build-publish) |
+| Neon arcade racer | Car controller, checkpoints, rivals, nitro, HUD, lighting, audio and builds | [Open](http://localhost:3000/documentation/tutorials/racing-game) |
+| Third-person action game | Character motor, Animator, camera, NavMesh enemies, combat and checkpoints | [Open](http://localhost:3000/documentation/tutorials/third-person-game) |
+| 2D platformer | PNG/sprite import, tilemaps, 2D physics, animation, UI and PWA build | [Open](http://localhost:3000/documentation/tutorials/2d-platformer) |
+| MCP setup | Architecture, Codex/Claude configuration, leases, safety and readback | [Open](http://localhost:3000/documentation/tutorials/mcp-guide) |
+| MCP game workflow | Build, run, screenshot, diagnose, profile and package a game through MCP | [Open](http://localhost:3000/documentation/tutorials/mcp-game-workflow) |
 
-To package the Editor, just use the "**package**" command.
+![Playable Neon Apex example](website/public/documentation/tutorials/neon-apex-game.png)
+
+## AI-native editor automation
+
+The project-local MCP server lets external AI clients work through the same authoritative scene, asset, project, runtime, and UI owners used by the editor.
+
+```mermaid
+flowchart LR
+    A["Codex CLI or Claude-compatible client"] -->|stdio MCP| B["Zvibe MCP server"]
+    B -->|validated loopback request| C["Running Electron editor"]
+    C --> D["Scene, assets, scripts, settings and builds"]
+    C --> E["Structured readback, diagnostics and screenshots"]
+    E --> A
+```
+
+Current generated contract:
+
+- **1,722 tools** across **50 feature families** and **21 editor tabs**
+- Closed, bounded input schemas with read/write/destructive annotations
+- Exact revision and SHA-256 fingerprint leases for stale-write protection
+- Literal confirmation for destructive operations
+- Atomic batches, project-contained file operations, structured diagnostics and screenshots
+- Positive valid-state live-scenario coverage for every published tool
+
+The detailed contract and verification history live in [mcp/mcp-tools-contract.md](mcp/mcp-tools-contract.md), [MCP-DEVELOPMENT.md](MCP-DEVELOPMENT.md), and [FUNCTIONALITY-VERIFICATION.md](FUNCTIONALITY-VERIFICATION.md).
+
+### Codex CLI
+
+The repository includes `.codex/config.toml`:
+
+```toml
+[mcp_servers.zvibe-editor]
+command = "node"
+args = ["mcp/server/index.mjs"]
+cwd = "."
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+default_tools_approval_mode = "writes"
+```
+
+### Claude-compatible clients
+
+The repository includes `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "zvibe-editor": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["mcp/server/index.mjs"]
+    }
+  }
+}
+```
+
+Build the server before connecting a client:
 
 ```bash
-# For the current platform and architecture
+yarn build-mcp-server
+yarn workspace babylonjs-editor-mcp-server bundle
+yarn workspace babylonjs-editor-mcp-server validate
+```
+
+Always open the target project in Zvibe Editor first. Begin with `get_editor_status`, confirm the project/scene identity, inspect current state, make a bounded write, and reread the authoritative result. Visual work should end with a screenshot; runtime work should include Play/build evidence.
+
+## Build and package
+
+Build Profiles cover Web, PWA, Electron desktop, headless/server, Android project scaffolds, and iOS project generation. For local editor packaging:
+
+```bash
+# Current host/architecture without signing
 yarn package --noSign
 
-# By providing the target architecture
+# Explicit architectures
+yarn package --noSign --arm64
 yarn package --noSign --x64
-
-# For both architectures
-yarn package --noSign --arm64 --x64
 ```
 
-This will re-install the depdendencies to ensure they are up-to-date, build the Editor and its tools to finally package the Electron application for the desired target.
-
-In order to sign the application on **macOS**, you need to add a **.env** file at the root of the repository and set the following environment variables:
+Packaging is platform-bound. Build macOS artifacts on macOS and Windows artifacts on Windows. Signed macOS releases require these environment variables in a local `.env` file:
 
 ```env
 APPLE_ID=
@@ -133,15 +226,65 @@ APPLE_APP_SPECIFIC_PASSWORD=
 APPLE_TEAM_ID=
 ```
 
-Then use the package command by omitting the **--noSign** flag:
+Never commit signing credentials or `.env` files.
+
+## Repository architecture
+
+```text
+zvibe-editor/
+├── editor/       Electron main process, React renderer, inspectors and editor MCP actions
+├── tools/        Runtime loading, decorators, rendering, animation and gameplay services
+├── cli/          Project packing, asset processing, export and deployment helpers
+├── mcp/          1,722-tool Model Context Protocol server and live verification scenarios
+├── plugins/      Fab and Quixel marketplace integrations
+├── templates/    Next.js, Nuxt, Solid, vanilla Web and Electron game templates
+└── website/      Documentation, tutorials, downloads and project website
+```
+
+The root is a Yarn Classic workspace monorepo. Babylon.js engine packages are pinned together through root `resolutions`; keep them synchronized when upgrading the engine.
+
+## Verification
+
+Useful release gates:
 
 ```bash
-# For the current platform and architecture
-yarn package
-
-# By providing the target architecture
-yarn package --x64
-
-# For both architectures
-yarn package --arm64 --x64
+yarn format-check
+yarn lint
+yarn test
+yarn build-all
+yarn workspace babylonjs-editor-mcp-server validate
+node mcp/scripts/audit-semantic-live-coverage.mjs
 ```
+
+Live scenarios intentionally modify editor state and should run only against a disposable project:
+
+```bash
+yarn workspace babylonjs-editor-mcp-server all-live-scenarios
+```
+
+See [FUNCTIONALITY-VERIFICATION.md](FUNCTIONALITY-VERIFICATION.md) for the distinction between contract coverage, live editor verification, packaged application checks, and manual gameplay verification.
+
+## Contributing
+
+Contributions are welcome.
+
+1. Fork the repository and create a focused branch.
+2. Preserve existing public APIs and editor project compatibility unless the change explicitly introduces a migration.
+3. Add tests for new runtime, editor, CLI, and MCP behavior.
+4. Give every new MCP capability a strict schema, safety annotations, authoritative editor implementation, readback, and live scenario.
+5. Run formatting, lint, tests, and relevant production builds.
+6. Open a pull request describing behavior, verification evidence, compatibility boundaries, and screenshots for UI work.
+
+Development conventions and commands are documented in [AGENTS.md](AGENTS.md). Extension authors should also read [EDITOR-EXTENSIONS.md](EDITOR-EXTENSIONS.md).
+
+## License and attribution
+
+Zvibe Editor is distributed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
+
+This project is derived from the open-source [Babylon.js Editor](https://github.com/BabylonJS/Editor). Babylon.js, Electron, Havok, Recast/Detour, and other dependencies retain their respective licenses and trademarks. Zvibe Editor does not claim API, package, serialization, service, or binary identity with Unity.
+
+---
+
+<div align="center">
+  <strong>Build visually. Script openly. Automate safely. Ship everywhere.</strong>
+</div>

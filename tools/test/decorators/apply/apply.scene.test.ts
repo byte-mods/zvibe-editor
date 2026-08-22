@@ -4,6 +4,7 @@ import { Node, NullEngine, Scene, TransformNode } from "@babylonjs/core";
 
 import { applyDecorators } from "../../../src/decorators/apply";
 import { animationGroupFromScene, nodeFromDescendants, nodeFromScene } from "../../../src/decorators/scene";
+import { visibleAsArray, visibleAsList } from "../../../src/decorators/inspector";
 
 describe("decorators/apply", () => {
 	let engine: NullEngine;
@@ -72,5 +73,19 @@ describe("decorators/apply", () => {
 		applyDecorators(scene, transformNode, {}, instance, "");
 		expect(scene.getAnimationGroupByName).toHaveBeenCalledWith("MyAnimationGroup");
 		expect(instance.animationGroup).toBe(animationGroup);
+	});
+
+	test("should apply exported typed list and array values without sharing descriptors", () => {
+		class Temp extends Node {
+			@visibleAsArray("number")
+			public damage: number[] = [];
+
+			@visibleAsList("string")
+			public tags: string[] = [];
+		}
+		const instance = new Temp("Temp", scene);
+		applyDecorators(scene, transformNode, { key: "temp.ts", values: { damage: { value: [1, 2, 3] }, tags: { value: ["boss", "fire"] } } }, instance, "");
+		expect(instance.damage).toEqual([1, 2, 3]);
+		expect(instance.tags).toEqual(["boss", "fire"]);
 	});
 });

@@ -6,6 +6,7 @@ import sharp, { Sharp, SharpOptions } from "sharp";
 
 import {
 	ITextureImporterSettings,
+	ITextureImporterPixelTransformResult,
 	ITextureImportMipmap,
 	ITextureImportProbe,
 	ITextureImportResult,
@@ -15,12 +16,18 @@ import {
 	decodePsd,
 	decodeTga,
 	executeHighDynamicRangeTextureImport,
+	preserveTextureImporterAlphaCoverage,
 	resolveTextureImporterPlatformSettings,
 	TextureImporterPlatform,
 	toneMapHighDynamicRange,
 	textureImporterEffectiveColorSpace,
 	textureImporterEncodingOptions,
+	textureImporterAlphaCoverage,
+	textureImporterMipmapDimensions,
+	textureImporterOutputDimensions,
 	textureImporterOutputExtension,
+	textureImporterSpriteMetadata,
+	transformTextureImporterPixels,
 } from "babylonjs-editor-tools";
 
 const maximumSourceBytes = 512 * 1024 * 1024;
@@ -40,6 +47,11 @@ function importerKernel(settings: ITextureImporterSettings): keyof sharp.KernelE
 		default:
 			return sharp.kernel.lanczos3;
 	}
+}
+
+/** Maps the independent mip filter to stable Sharp kernels shared by editor and CLI execution. */
+function mipmapKernel(settings: ITextureImporterSettings): keyof sharp.KernelEnum {
+	return settings.mipmapFilter === "box" ? sharp.kernel.cubic : sharp.kernel.lanczos3;
 }
 
 interface IPreparedTextureSource {
@@ -82,13 +94,11 @@ async function prepareTextureSource(sourcePath: string, sourceBytes: number): Pr
 	};
 }
 
-function buildPipeline(source: IPreparedTextureSource, settings: ITextureImporterSettings, width?: number, height?: number): Sharp {
+/** Applies orientation and exact dimensions while leaving color/alpha semantics to the shared RGBA8 policy. */
+function buildPipeline(source: IPreparedTextureSource, settings: ITextureImporterSettings, width?: number, height?: number, mipmap = false): Sharp {
 	let pipeline = sharp(source.input, source.options).rotate();
-	if (width || height) {
-		pipeline = pipeline.resize({ width, height, fit: "inside", withoutEnlargement: true, kernel: importerKernel(settings) });
-	}
-	if (settings.alphaSource === "none") {
-		pipeline = pipeline.removeAlpha();
+	if (width && height) {
+		pipeline = pipeline.resize({ width, height, fit: "fill", withoutEnlargement: false, kernel: mipmap ? mipmapKernel(settings) : importerKernel(settings) });
 	}
 	return pipeline;
 }
@@ -111,8 +121,8 @@ async function probeTexture(path: string): Promise<ITextureImportProbe> {
 	}
 	return {
 		format: metadata.format ?? extname(path).replace(".", "").toLowerCase(),
-		width: metadata.width,
-		height: metadata.height,
+		width: metadata.autoOrient?.width ?? metadata.width,
+		height: metadata.autoOrient?.height ?? metadata.height,
 		channels: metadata.channels ?? 0,
 		hasAlpha: metadata.hasAlpha ?? metadata.channels === 4,
 		space: metadata.space ?? "unknown",
@@ -120,13 +130,41 @@ async function probeTexture(path: string): Promise<ITextureImportProbe> {
 	};
 }
 
-function mipmapDimensions(width: number, height: number): Array<{ width: number; height: number }> {
-	return [2 / 3, 1 / 3]
-		.map((scale) => ({ width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) }))
-		.filter(
-			(value, index, values) =>
-				value.width !== width && value.height !== height && values.findIndex((candidate) => candidate.width === value.width && candidate.height === value.height) === index
-		);
+interface IPreparedLdrTexture {
+	pipeline: Sharp;
+	pixels: Uint8Array | null;
+	transform: Omit<ITextureImporterPixelTransformResult, "pixels">;
+}
+
+/** Materializes RGBA8 only when authored semantics or sprite/coverage evidence actually require bounded pixel access. */
+async function prepareLdrTexture(source: IPreparedTextureSource, settings: ITextureImporterSettings, width: number, height: number): Promise<IPreparedLdrTexture> {
+	const pipeline = buildPipeline(source, settings, width, height);
+	const needsPixels =
+		settings.alphaSource === "grayscale" ||
+		settings.alphaIsTransparency ||
+		(settings.textureType === "normalMap" && settings.normalMapSource === "height") ||
+		settings.textureType === "sprite" ||
+		settings.mipmapPreserveCoverage;
+	if (!needsPixels) {
+		return {
+			pipeline: settings.alphaSource === "none" ? pipeline.removeAlpha() : pipeline,
+			pixels: null,
+			transform: {
+				alphaDerivedFromGrayscale: false,
+				alphaRemoved: settings.alphaSource === "none",
+				transparentColorsDilated: false,
+				normalMapGenerated: false,
+			},
+		};
+	}
+	const decoded = await pipeline.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+	const transformed = transformTextureImporterPixels(decoded.data, decoded.info.width, decoded.info.height, settings);
+	let transformedPipeline = sharp(Buffer.from(transformed.pixels), { raw: { width: decoded.info.width, height: decoded.info.height, channels: 4 } });
+	if (settings.alphaSource === "none") {
+		transformedPipeline = transformedPipeline.removeAlpha();
+	}
+	const { pixels, ...transform } = transformed;
+	return { pipeline: transformedPipeline, pixels, transform };
 }
 
 async function createReadableOutput(outputPath: string): Promise<{ bitmapPath: string; descriptorPath: string }> {
@@ -186,7 +224,7 @@ async function processHighDynamicRangeTexture(
 	const executed = await executeHighDynamicRangeTextureImport(await fs.readFile(sourcePath), format, settings);
 	const source = highDynamicRangeProbe(executed.source, sourceBytes);
 	const processed = executed.output;
-	const outputExtension = textureImporterOutputExtension(sourcePath);
+	const outputExtension = textureImporterOutputExtension(sourcePath, settings);
 	const outputPath = join(dirname(requestedOutputPath), `${basename(requestedOutputPath, extname(requestedOutputPath))}${outputExtension}`);
 	const previewPath = `${outputPath}.preview.png`;
 	const environmentPath = executed.equirectangular ? (format === "hdr" ? outputPath : `${outputPath}.environment.hdr`) : null;
@@ -202,6 +240,9 @@ async function processHighDynamicRangeTexture(
 	if (format === "exr" && settings.compression !== "none") {
 		warnings.push("Portable OpenEXR output uses deterministic uncompressed FLOAT scanlines; the generic texture compression preference is not applied to HDR precision data.");
 	}
+	if (settings.outputFormat !== "automatic") {
+		warnings.push(format.toUpperCase() + " precision output remains format-preserving; the LDR " + settings.outputFormat + " output override is not applied.");
+	}
 	await fs.ensureDir(temporaryRoot);
 	try {
 		await fs.writeFile(join(temporaryRoot, basename(outputPath)), executed.outputBytes);
@@ -214,7 +255,19 @@ async function processHighDynamicRangeTexture(
 			const name = `${basename(outputPath, outputExtension)}_${mipmap.image.width}_${mipmap.image.height}${outputExtension}`;
 			const temporaryPath = join(temporaryRoot, name);
 			await fs.writeFile(temporaryPath, mipmap.bytes);
-			mipmaps.push({ path: join(dirname(outputPath), name), width: mipmap.image.width, height: mipmap.image.height, bytes: (await fs.stat(temporaryPath)).size });
+			mipmaps.push({
+				path: join(dirname(outputPath), name),
+				width: mipmap.image.width,
+				height: mipmap.image.height,
+				bytes: (await fs.stat(temporaryPath)).size,
+				...(mipmap.alphaCoverageBefore !== undefined
+					? {
+							alphaCoverageBefore: mipmap.alphaCoverageBefore,
+							alphaCoverageAfter: mipmap.alphaCoverageAfter,
+							alphaCoverageScale: mipmap.alphaCoverageScale,
+						}
+					: {}),
+			});
 		}
 		const cubeFaces = executed.equirectangular
 			? await Promise.all(
@@ -254,6 +307,7 @@ async function processHighDynamicRangeTexture(
 		}
 		const outputBytes = await fs.readFile(outputPath);
 		const decodedOutput = await decodeHighDynamicRange(outputBytes, format);
+		const maxSizeDimensions = textureImporterOutputDimensions(source.width, source.height, { ...settings, nonPowerOfTwo: "none" });
 		return {
 			sourcePath,
 			outputPath,
@@ -265,6 +319,17 @@ async function processHighDynamicRangeTexture(
 			converted: true,
 			resized: executed.resized,
 			alphaRemoved: executed.alphaRemoved,
+			processing: {
+				outputFormat: format,
+				maxSizeApplied: maxSizeDimensions.width !== source.width || maxSizeDimensions.height !== source.height,
+				nonPowerOfTwoApplied: decodedOutput.width !== maxSizeDimensions.width || decodedOutput.height !== maxSizeDimensions.height,
+				fullMipChain: !settings.generateMipmaps || executed.mipmaps.length === textureImporterMipmapDimensions(decodedOutput.width, decodedOutput.height).length,
+				alphaDerivedFromGrayscale: settings.alphaSource === "grayscale",
+				transparentColorsDilated: executed.transparentColorsDilated,
+				normalMapGenerated: executed.normalMapGenerated,
+				mipmapCoveragePreserved: settings.mipmapPreserveCoverage && settings.alphaSource !== "none" && executed.mipmaps.length > 0,
+			},
+			sprite: textureImporterSpriteMetadata(decodedOutput.pixels, decodedOutput.width, decodedOutput.height, settings),
 			source,
 			output: highDynamicRangeProbe(decodedOutput, outputBytes.byteLength),
 			mipmaps,
@@ -312,40 +377,56 @@ export async function processImportedTexture(
 	}
 	const preparedSource = await prepareTextureSource(sourcePath, sourceDetails.size);
 	const source = preparedSource.probe ?? (await probeTexture(sourcePath));
-	const outputExtension = textureImporterOutputExtension(sourcePath);
+	const outputExtension = textureImporterOutputExtension(sourcePath, settings);
 	const outputPath = join(dirname(requestedOutputPath), `${basename(requestedOutputPath, extname(requestedOutputPath))}${outputExtension}`);
 	const temporaryRoot = join(dirname(outputPath), `.texture-import-${randomUUID()}`);
 	const temporaryOutput = join(temporaryRoot, basename(outputPath));
-	const resized = source.width > settings.maxSize || source.height > settings.maxSize;
+	const maxSizeDimensions = textureImporterOutputDimensions(source.width, source.height, { ...settings, nonPowerOfTwo: "none" });
+	const outputDimensions = textureImporterOutputDimensions(source.width, source.height, settings);
+	const resized = outputDimensions.width !== source.width || outputDimensions.height !== source.height;
 	const warnings: string[] = [...preparedSource.warnings];
 	const effectiveColorSpace = textureImporterEffectiveColorSpace(settings, sourcePath);
 	if (effectiveColorSpace !== settings.colorSpace) {
 		warnings.push(`${settings.textureType} textures are sampled as linear data; the authored ${settings.colorSpace} setting was overridden.`);
 	}
+	if (outputExtension === ".jpg" && source.hasAlpha && settings.alphaSource !== "none") {
+		warnings.push("JPEG output cannot retain alpha; transparent pixels are flattened by the encoder.");
+	}
 	await fs.ensureDir(temporaryRoot);
 	try {
-		await encodePipeline(
-			buildPipeline(preparedSource, settings, resized ? settings.maxSize : undefined, resized ? settings.maxSize : undefined),
-			outputExtension,
-			settings
-		).toFile(temporaryOutput);
+		const prepared = await prepareLdrTexture(preparedSource, settings, outputDimensions.width, outputDimensions.height);
+		await encodePipeline(prepared.pipeline, outputExtension, settings).toFile(temporaryOutput);
 		const temporaryProbe = await probeTexture(temporaryOutput);
+		const baseCoverage =
+			settings.mipmapPreserveCoverage && settings.alphaSource !== "none" && outputExtension !== ".jpg" && prepared.pixels
+				? textureImporterAlphaCoverage(prepared.pixels, settings.mipmapAlphaTestReference)
+				: 0;
 		const mipmaps: ITextureImportMipmap[] = [];
 		if (settings.generateMipmaps) {
-			for (const size of mipmapDimensions(temporaryProbe.width, temporaryProbe.height)) {
+			for (const size of textureImporterMipmapDimensions(temporaryProbe.width, temporaryProbe.height)) {
 				const name = `${basename(outputPath, outputExtension)}_${size.width}_${size.height}${outputExtension}`;
 				const temporaryPath = join(temporaryRoot, name);
-				await encodePipeline(
-					buildPipeline(
-						{ input: temporaryOutput, options: { animated: false, limitInputPixels: maximumInputPixels }, probe: null, warnings: [] },
-						settings,
-						size.width,
-						size.height
-					),
-					outputExtension,
-					settings
-				).toFile(temporaryPath);
-				mipmaps.push({ path: join(dirname(outputPath), name), width: size.width, height: size.height, bytes: (await fs.stat(temporaryPath)).size });
+				let mipPipeline = buildPipeline(
+					{ input: temporaryOutput, options: { animated: false, limitInputPixels: maximumInputPixels }, probe: null, warnings: [] },
+					settings,
+					size.width,
+					size.height,
+					true
+				);
+				let coverage: ReturnType<typeof preserveTextureImporterAlphaCoverage> | null = null;
+				if (settings.mipmapPreserveCoverage && settings.alphaSource !== "none" && outputExtension !== ".jpg") {
+					const decodedMip = await mipPipeline.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+					coverage = preserveTextureImporterAlphaCoverage(decodedMip.data, baseCoverage, settings.mipmapAlphaTestReference);
+					mipPipeline = sharp(decodedMip.data, { raw: { width: decodedMip.info.width, height: decodedMip.info.height, channels: 4 } });
+				}
+				await encodePipeline(mipPipeline, outputExtension, settings).toFile(temporaryPath);
+				mipmaps.push({
+					path: join(dirname(outputPath), name),
+					width: size.width,
+					height: size.height,
+					bytes: (await fs.stat(temporaryPath)).size,
+					...(coverage ? { alphaCoverageBefore: coverage.before, alphaCoverageAfter: coverage.after, alphaCoverageScale: coverage.scale } : {}),
+				});
 			}
 		}
 		let readableBitmapPath: string | null = null;
@@ -371,6 +452,7 @@ export async function processImportedTexture(
 			await fs.remove(`${outputPath}.rgba.json`);
 		}
 		const output = await probeTexture(outputPath);
+		const sprite = prepared.pixels ? textureImporterSpriteMetadata(prepared.pixels, output.width, output.height, settings) : null;
 		return {
 			sourcePath,
 			outputPath,
@@ -379,9 +461,26 @@ export async function processImportedTexture(
 			platform: resolved.platform,
 			platformOverrideApplied: resolved.overrideApplied,
 			effectiveColorSpace,
-			converted: extname(sourcePath).toLowerCase() !== outputExtension || resized || settings.alphaSource === "none" || settings.compression !== "none",
+			converted:
+				extname(sourcePath).toLowerCase() !== outputExtension ||
+				resized ||
+				settings.alphaSource !== "input" ||
+				settings.alphaIsTransparency ||
+				prepared.transform.normalMapGenerated ||
+				settings.compression !== "none",
 			resized,
-			alphaRemoved: source.hasAlpha && settings.alphaSource === "none",
+			alphaRemoved: source.hasAlpha && (settings.alphaSource === "none" || outputExtension === ".jpg"),
+			processing: {
+				outputFormat: outputExtension.slice(1),
+				maxSizeApplied: maxSizeDimensions.width !== source.width || maxSizeDimensions.height !== source.height,
+				nonPowerOfTwoApplied: outputDimensions.width !== maxSizeDimensions.width || outputDimensions.height !== maxSizeDimensions.height,
+				fullMipChain: !settings.generateMipmaps || mipmaps.length === textureImporterMipmapDimensions(output.width, output.height).length,
+				alphaDerivedFromGrayscale: prepared.transform.alphaDerivedFromGrayscale,
+				transparentColorsDilated: prepared.transform.transparentColorsDilated,
+				normalMapGenerated: prepared.transform.normalMapGenerated,
+				mipmapCoveragePreserved: mipmaps.some((mipmap) => mipmap.alphaCoverageBefore !== undefined),
+			},
+			sprite,
 			source,
 			output,
 			mipmaps,

@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<evaluation>
+  <qa_pair>
+    <question>Which MCP tool reads the exact Tile-Only policy, eligibility, and portable runtime evidence?</question>
+    <answer>get_on_tile_rendering</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which three validation modes are supported? Answer as a comma-separated list in schema order.</question>
+    <answer>off, warn, enforce</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which validation mode reversibly suppresses incompatible runtime features without deleting authored definitions?</question>
+    <answer>enforce</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which two exact leases guard every persisted On-Tile mutation?</question>
+    <answer>expectedRevision and expectedFingerprint</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which MCP tool lists built-in and trusted project-code fused renderer providers?</question>
+    <answer>list_on_tile_renderer_providers</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What is the maximum number of persisted On-Tile extension instances?</question>
+    <answer>32</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which MCP tool performs the no-write camera, backend, graph, and provider eligibility audit?</question>
+    <answer>validate_on_tile_rendering</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many portable composite passes execute built-in post-processing and all enabled extensions?</question>
+    <answer>1</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does runtime evidence estimate native tile-memory residency or platform GPU bandwidth when the browser does not expose it? Respond True or False.</question>
+    <answer>False</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does this portable implementation claim Unity URP, Scriptable Render Pipeline, or native GPU render-pass identity? Respond True or False.</question>
+    <answer>False</answer>
+  </qa_pair>
+</evaluation>

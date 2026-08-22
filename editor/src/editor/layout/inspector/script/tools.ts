@@ -21,11 +21,46 @@ export type VisibleInInspectorDecoratorConfiguration = {
 
 	acceptCubes?: boolean;
 	onlyCubes?: boolean;
+
+	elementType?: string;
+	minItems?: number;
+	maxItems?: number;
+	defaultItem?: unknown;
+	styleType?: string;
+	style?: Record<string, unknown>;
 };
 
 export const scriptValues = "values";
 
-export function computeDefaultValuesForObject(script: any, output: VisibleInInspectorDecoratorObject[]) {
+function defaultCollectionItem(type: string | undefined, authored: unknown): unknown {
+	if (authored !== undefined) {
+		return structuredClone(authored);
+	}
+	if (type === "boolean") {
+		return false;
+	}
+	if (type === "number" || type === "keymap") {
+		return 0;
+	}
+	if (type === "vector2") {
+		return [0, 0];
+	}
+	if (type === "vector3") {
+		return [0, 0, 0];
+	}
+	if (type === "color3") {
+		return [1, 1, 1];
+	}
+	if (type === "color4") {
+		return [1, 1, 1, 1];
+	}
+	if (type === "texture") {
+		return null;
+	}
+	return "";
+}
+
+export function computeDefaultValuesForObject(script: any, output: VisibleInInspectorDecoratorObject[]): void {
 	script[scriptValues] ??= {};
 
 	const attachedScripts = script[scriptValues];
@@ -144,6 +179,27 @@ export function computeDefaultValuesForObject(script: any, output: VisibleInInsp
 					value: attachedScripts[value.propertyKey]?.value ?? null,
 				};
 				break;
+
+			case "array":
+			case "list": {
+				const maximum = Math.max(1, Math.min(256, value.configuration.maxItems ?? 64));
+				const minimum = Math.max(0, Math.min(maximum, value.configuration.minItems ?? 0));
+				const authored = Array.isArray(attachedScripts[value.propertyKey]?.value)
+					? attachedScripts[value.propertyKey].value
+					: Array.isArray(value.defaultValue)
+						? value.defaultValue
+						: [];
+				const normalized = structuredClone(authored.slice(0, maximum));
+				while (normalized.length < minimum) {
+					normalized.push(defaultCollectionItem(value.configuration.elementType, value.configuration.defaultItem));
+				}
+				attachedScripts[value.propertyKey] = {
+					type: value.configuration.type,
+					description: value.configuration.description,
+					value: normalized,
+				};
+				break;
+			}
 		}
 	});
 }

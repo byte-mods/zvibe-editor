@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which MCP tool reads the bounded Linux LTO/IME and macOS frame-pacing capability contract?</question>
+      <answer>get_platform_player_capabilities</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two Linux LTO modes can an Electron Build Profile author?</question>
+      <answer>thin and full</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which desktop Linux IME mode is deliberately rejected for the Embedded Linux variant?</question>
+      <answer>fcitx5</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does Linux LTO rebuild the prebuilt Electron/Chromium runtime? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool reads one Electron profile's normalized platform-player build plan?</question>
+      <answer>get_build_profile_platform_player_plan</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which persisted Build Profile field opts into the macOS display-link policy?</question>
+      <answer>settings.platformPlayer.macos.useDisplayLink</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Without a native adapter, which backend supplies macOS frame-pacing evidence?</question>
+      <answer>chromium-request-animation-frame</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool records explicitly labeled simulated composition start, update, and end events?</question>
+      <answer>simulate_platform_player_ime</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which field must match before transient platform-player evidence is changed?</question>
+      <answer>expectedRuntimeRevision</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool captures bounded real requestAnimationFrame timing statistics?</question>
+      <answer>sample_platform_player_frame_pacing</answer>
+   </qa_pair>
+</evaluation>

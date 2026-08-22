@@ -293,10 +293,16 @@ export function registerNodeTools(server: McpServer): void {
 		"delete_node",
 		{
 			title: "Delete node",
-			description: "Remove a node and all of its descendants from the scene. This is destructive; verify the target with `get_node` first if unsure.",
+			description:
+				"Remove a node and all of its descendants from the scene. Materials and textures are preserved by default because they may be shared. " +
+				"Set disposeMaterialAndTextures only for an owned/disposable hierarchy, such as a temporary imported model whose asset files will also be deleted. This is destructive; verify the target with `get_node` first if unsure.",
 			inputSchema: z.object({
 				nodeId: z.string().optional().describe("Id of the target node (preferred)."),
 				nodeName: z.string().optional().describe("Name of the target node."),
+				disposeMaterialAndTextures: z
+					.boolean()
+					.optional()
+					.describe("Also dispose materials and textures owned by the recursive hierarchy. Defaults to false so shared resources remain available."),
 			}),
 			annotations: { destructiveHint: true, idempotentHint: true },
 		},

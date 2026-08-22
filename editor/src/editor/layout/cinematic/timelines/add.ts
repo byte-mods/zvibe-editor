@@ -120,14 +120,14 @@ export function addSoundKey(cinematicEditor: CinematicEditor, track: ICinematicT
 
 	const node = track.sound as SoundNode;
 
-	if (!node.sound?.buffer) {
+	if (!node.sound) {
 		return showAlert(
 			"Can't add sound track",
 			"The sound track is not ready yet, please wait until the sound is loaded. If this problem persists, please verify the sound file is correctly loaded."
 		);
 	}
 
-	const duration = node.sound.buffer.duration;
+	const duration = node.sound.duration;
 	const fps = cinematicEditor.cinematic.framesPerSecond;
 
 	const key = {

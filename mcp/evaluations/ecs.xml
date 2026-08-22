@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect the default ECS configuration. Which three system phases are supported? Answer as a comma-separated list in reported order.</question>
+      <answer>fixed, update, late</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect ECS capabilities and runtime evidence. Which portable storage layout is used for baked entities?</question>
+      <answer>typed archetype chunks</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the strict ECS authoring contract. Which two values guard every configuration mutation against stale external writes?</question>
+      <answer>revision and fingerprint</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect ECS field schemas. Which four vector-like field types are supported? Answer as a comma-separated list in reported order.</question>
+      <answer>vec2, vec3, vec4, quat</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect ECS baking behavior. Does an incremental bake preserve unchanged chunk object identity while rebuilding affected archetype buckets? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect ECS section behavior. What is the stable id of the built-in section that cannot be deleted?</question>
+      <answer>main</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect ECS runtime commands. Are queued structural changes published atomically only after every command validates? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect ECS execution settings. Which three execution modes are supported? Answer as a comma-separated list in reported order.</question>
+      <answer>auto, main-thread, worker</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect ECS compilation documentation and tool descriptions. Does the portable kernel claim Unity Burst LLVM or native binary identity? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect destructive ECS tool schemas. Is literal confirmation required before deleting the configuration, component types, fields, systems, sections, or runtime entities? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+</evaluation>

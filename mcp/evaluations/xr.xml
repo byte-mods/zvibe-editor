@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect the XR capability contract. Which portable immersive runtime does the editor implement?</question>
+      <answer>WebXR</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect XR capabilities and target-validation evidence. Which four native provider families remain outside the portable core? Answer as a comma-separated list in reported order.</question>
+      <answer>native-openxr, visionos, arcore, arkit</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect a default XR configuration. How many centimetre-based editor scene units represent one WebXR metre?</question>
+      <answer>100</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect XR session capabilities. Which two immersive session modes are supported? Answer as a comma-separated list in reported order.</question>
+      <answer>immersive-vr, immersive-ar</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the strict XR configuration mutation contract. May one native feature be requested as both required and optional? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect desktop XR simulation behavior. Are transient camera and grabbed-mesh transforms restored when simulation stops? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect XR simulation schemas and tool descriptions. Which units are used for persisted simulator position and rotation values?</question>
+      <answer>metres and degrees</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the enter_xr_session contract. Can an external CLI bypass the browser's real user-activation requirement? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect XR target validation. Does a normal build/authoring audit require probing the current headset or browser device? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect XR interaction capabilities. Which three authored mesh interaction modes are supported? Answer as a comma-separated list in reported order.</question>
+      <answer>select, grab, teleport</answer>
+   </qa_pair>
+</evaluation>

@@ -31,4 +31,9 @@ export default defineNuxtConfig({
 		},
 	},
 	telemetry: { enabled: false },
+	nitro: {
+		output: {
+			dir: process.env.BJS_EDITOR_OUTPUT_DIRECTORY ?? ".output",
+		},
+	},
 });

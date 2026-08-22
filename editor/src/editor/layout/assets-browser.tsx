@@ -7,9 +7,9 @@ import filenamify from "filenamify";
 
 import { AdvancedDynamicTexture } from "babylonjs-gui";
 import { INavMeshParametersV2 } from "babylonjs-addons/navigation/types";
-import { Material, NodeMaterial, Tools, NodeParticleSystemSet, RegisterSceneLoaderPlugin } from "babylonjs";
+import { Material, NodeMaterial, Tools, RegisterSceneLoaderPlugin } from "babylonjs";
 
-import { ICinematic, IRagDollConfiguration } from "babylonjs-editor-tools";
+import { createDefaultGUIAuthoringState, createDefaultScriptableAudioGeneratorGraph, IRagDollConfiguration, normalizeCinematicDocument } from "babylonjs-editor-tools";
 
 import { Fade } from "react-awesome-reveal";
 import { Grid } from "react-loader-spinner";
@@ -31,6 +31,7 @@ import { Tree, TreeNodeInfo } from "@blueprintjs/core";
 import { Editor } from "../main";
 
 import { execNodePty } from "../../tools/node-pty";
+import { openInExternalEditor } from "../../tools/external-editor";
 import { clearUndoRedo } from "../../tools/undoredo";
 import { isTexture } from "../../tools/guards/texture";
 import { renameScene } from "../../tools/scene/rename";
@@ -42,7 +43,7 @@ import { findAvailableFilename, normalizedGlob } from "../../tools/fs";
 import { loadSavedThumbnailsCache } from "../../tools/assets/thumbnail";
 import { assetsCache, saveAssetsCache } from "../../tools/assets/cache";
 import { getProjectAssetWatchPaths } from "../../tools/assets/watch";
-import { assetsAllSupportedExtensions } from "../../tools/assets/extensions";
+import { assetRootPlacementError, inspectAssetRootPlacement, isInsideAssetRoot } from "../../tools/assets/root-placement";
 import { checkProjectCachedCompressedTextures, processingCompressedTextures } from "../../tools/assets/ktx";
 import { applyAssetImporterPreset, getAssetDetails, listAssetImporterPresets, setAssetImporterPreset } from "../../mcp/assets/assets";
 import {
@@ -60,9 +61,14 @@ import {
 } from "../../mcp/assets/registry";
 import { applySemanticAssetMove, inspectSemanticAssetMove } from "../../mcp/assets/move";
 import { getAutoReimportOriginPaths, getAutoReimportStatus, IAutoReimportJob, processAutoReimportChanges, processAutoReimportOriginChanges } from "../../mcp/assets/auto-reimport";
+import { refreshGUIRetainedDocumentsForSource } from "../../mcp/gui/gui";
+import { writeScriptableAudioAsset } from "../../mcp/assets/scriptable-audio-assets";
+import { moveTextureChannelPreviewStates } from "../../mcp/assets/texture-channel-preview";
 
 import { ICommandPaletteType } from "../dialogs/command-palette/command-palette";
 import { getMaterialCommands, getMaterialsLibraryCommands } from "../dialogs/command-palette/material";
+import { VfxTemplateBrowser } from "../dialogs/vfx-template-browser";
+import { createCinematicDocumentFile } from "./cinematic/serialization/document";
 
 import { replaceWithSingleSceneWorkspace } from "../../project/load/workspace";
 import { saveProject, saveProjectConfiguration } from "../../project/save/save";
@@ -105,6 +111,7 @@ import { AssetBrowserCinematicItem } from "./assets-browser/items/cinematic-item
 import { AssetBrowserJavaScriptItem } from "./assets-browser/items/javascript-item";
 import { AssetsBrowserItem, IAssetsBrowserItemProps } from "./assets-browser/items/item";
 import { AssetBrowserParticleSystemItem } from "./assets-browser/items/particle-system-item";
+import { AssetBrowserAudioGeneratorItem } from "./assets-browser/items/audio-generator-item";
 
 import { listenGuiAssetsEvents } from "./assets-browser/events/gui";
 import { listenSceneAssetsEvents } from "./assets-browser/events/scene";
@@ -137,6 +144,7 @@ const MaterialSelectable = createSelectable(AssetBrowserMaterialItem);
 const CinematicSelectable = createSelectable(AssetBrowserCinematicItem);
 const JavascriptSelectable = createSelectable(AssetBrowserJavaScriptItem);
 const ParticleSystemSelectable = createSelectable(AssetBrowserParticleSystemItem);
+const AudioGeneratorSelectable = createSelectable(AssetBrowserAudioGeneratorItem);
 
 const directoryPackagesExtensions = [".scene", ".navmesh"];
 
@@ -183,6 +191,7 @@ export interface IEditorAssetsBrowserState {
 	filesTreeNodes: TreeNodeInfo[];
 
 	dragAndDroppingFiles: boolean;
+	vfxTemplateBrowserOpen: boolean;
 }
 
 export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IEditorAssetsBrowserState> {
@@ -230,53 +239,63 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			assetRegistryMetadata: {},
 
 			dragAndDroppingFiles: false,
+			vfxTemplateBrowserOpen: false,
 		};
 	}
 
 	public render(): ReactNode {
 		return (
-			<PanelGroup direction="horizontal" className="w-full h-full text-foreground">
-				<Panel order={1} minSize={20} className="w-full h-full" defaultSize={this.state.sizes[0]}>
-					<div className="flex flex-col w-full h-full">
-						<div className="relative flex items-center px-1 w-full h-10 min-h-10 bg-input">
-							<Input
-								placeholder="Search"
-								value={this.state.treeSearch}
-								onChange={(e) => {
-									this.setState({ treeSearch: e.currentTarget.value }, () => {
-										if (projectConfiguration.path) {
-											this._refreshFilesTreeNodes(projectConfiguration.path!);
-										}
-									});
-								}}
-								className={`
+			<>
+				<PanelGroup direction="horizontal" className="w-full h-full text-foreground">
+					<Panel order={1} minSize={20} className="w-full h-full" defaultSize={this.state.sizes[0]}>
+						<div className="flex flex-col w-full h-full">
+							<div className="relative flex items-center px-1 w-full h-10 min-h-10 bg-input">
+								<Input
+									placeholder="Search"
+									value={this.state.treeSearch}
+									onChange={(e) => {
+										this.setState({ treeSearch: e.currentTarget.value }, () => {
+											if (projectConfiguration.path) {
+												this._refreshFilesTreeNodes(projectConfiguration.path!);
+											}
+										});
+									}}
+									className={`
                                     w-full h-8 !border-none pl-7
                                     hover:border-border focus:border-border
                                     transition-all duration-300 ease-in-out    
                                 `}
-							/>
+								/>
 
-							<FaMagnifyingGlass className="absolute top-1/2 -translate-y-1/2 left-2 w-4 h-4" />
+								<FaMagnifyingGlass className="absolute top-1/2 -translate-y-1/2 left-2 w-4 h-4" />
+							</div>
+
+							<div className="flex-1 w-full h-full overflow-auto">
+								<Tree
+									contents={this.state.filesTreeNodes}
+									onNodeClick={(n) => this._handleNodeClicked(n)}
+									onNodeExpand={(n) => this._handleNodeExpanded(n)}
+									onNodeCollapse={(n) => this._handleNodeCollapsed(n)}
+									onNodeDoubleClick={(n) => this._handleNodeDoubleClicked(n)}
+								/>
+							</div>
 						</div>
+					</Panel>
 
-						<div className="flex-1 w-full h-full overflow-auto">
-							<Tree
-								contents={this.state.filesTreeNodes}
-								onNodeClick={(n) => this._handleNodeClicked(n)}
-								onNodeExpand={(n) => this._handleNodeExpanded(n)}
-								onNodeCollapse={(n) => this._handleNodeCollapsed(n)}
-								onNodeDoubleClick={(n) => this._handleNodeDoubleClicked(n)}
-							/>
-						</div>
-					</div>
-				</Panel>
+					<PanelResizeHandle className="w-2 bg-border/10 h-full cursor-pointer hover:bg-black/30 transition-all duration-300" />
 
-				<PanelResizeHandle className="w-2 bg-border/10 h-full cursor-pointer hover:bg-black/30 transition-all duration-300" />
-
-				<Panel order={2} className="w-full h-full" defaultSize={this.state.sizes[1]}>
-					{this._getFilesGridComponent()}
-				</Panel>
-			</PanelGroup>
+					<Panel order={2} className="w-full h-full" defaultSize={this.state.sizes[1]}>
+						{this._getFilesGridComponent()}
+					</Panel>
+				</PanelGroup>
+				<VfxTemplateBrowser
+					editor={this.props.editor}
+					open={this.state.vfxTemplateBrowserOpen}
+					folder={this.state.browsedPath && projectConfiguration.path ? relative(dirname(projectConfiguration.path), this.state.browsedPath) || "." : "assets"}
+					onClose={() => this.setState({ vfxTemplateBrowserOpen: false })}
+					onCreated={() => this.refresh()}
+				/>
+			</>
 		);
 	}
 
@@ -361,6 +380,19 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		this.refresh();
 	}
 
+	/** Enables or disables project-directory monitoring from Project Settings. */
+	public async configureProjectAssetWatching(enabled: boolean): Promise<void> {
+		if (!enabled) {
+			await this._projectWatcher?.close();
+			this._projectWatcher = null;
+			this.setState({ watchingAssets: false });
+			return;
+		}
+		if (projectConfiguration.path) {
+			this._watchProjectAssets(dirname(projectConfiguration.path));
+		}
+	}
+
 	/** Rebuilds optional external-origin watches and refreshes the displayed Auto Reimport status. */
 	public refreshAutoReimportWatchers(): Promise<void> {
 		const result = this._autoReimportWatchRefresh.then(() => this._refreshAutoReimportWatchers());
@@ -439,6 +471,17 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 					}
 					if (job?.failedCount) {
 						toast.error(`Auto Reimport completed with ${job.failedCount} failure${job.failedCount === 1 ? "" : "s"}.`);
+					}
+					const retainedSourcePaths = paths.filter((path) => [".uxml", ".uss"].includes(extname(path).toLowerCase()));
+					for (const sourcePath of retainedSourcePaths) {
+						const results = await refreshGUIRetainedDocumentsForSource(this.props.editor.layout.preview.scene, sourcePath, { editor: this.props.editor });
+						for (const result of results) {
+							if (result.error) {
+								toast.error(`Retained UI hot reload failed: ${String(result.error)}`);
+							} else if (result.changed) {
+								toast.success(`Retained UI hot reloaded from ${String(result.sourcePath)}.`);
+							}
+						}
 					}
 					await this._refreshAssetRegistryStatus();
 					await this.refreshAutoReimportWatchers();
@@ -537,7 +580,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 	 * Returns wether or not the currently browsed folder is the /assets folder.
 	 */
 	public isAssetsFolder(): boolean {
-		return this.state.browsedPath?.startsWith(join(dirname(projectConfiguration.path!), "/assets")) ?? false;
+		return this.state.browsedPath ? isInsideAssetRoot(this.state.browsedPath, join(dirname(projectConfiguration.path!), "/assets")) : false;
 	}
 
 	/**
@@ -656,7 +699,12 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			files: [],
 		});
 
-		this.setBrowsePath(this.state.browsedPath!);
+		const browsedPath = this.state.browsedPath ?? (projectConfiguration.path ? dirname(projectConfiguration.path) : null);
+		if (browsedPath) {
+			void this.setBrowsePath(browsedPath).catch((error) => {
+				console.error("Failed to refresh the Assets Browser.", error);
+			});
+		}
 
 		if (projectConfiguration.path) {
 			this._refreshFilesTreeNodes(projectConfiguration.path!);
@@ -711,6 +759,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		if (!rootUrl || !this.props.editor.state.projectPath) {
 			return;
 		}
+		moveTextureChannelPreviewStates(oldAbsolutePath, newAbsolutePath);
 
 		const oldRelativePath = oldAbsolutePath.replace(join(rootUrl, "/"), "");
 		const newRelativePath = newAbsolutePath.replace(join(rootUrl, "/"), "");
@@ -1258,6 +1307,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 
 				<ContextMenuSeparator />
 				<ContextMenuItem onClick={() => this._handleAddNodeParticleSystem()}>Node Particle System</ContextMenuItem>
+				<ContextMenuItem onClick={() => this._handleAddAudioGenerator()}>Audio Generator</ContextMenuItem>
 
 				{this.props.editor.state.enableExperimentalFeatures && (
 					<>
@@ -1409,7 +1459,14 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			importStatus: this.state.assetRegistryMetadata[filename]?.importStatus,
 		};
 
+		if (filename.toLowerCase().endsWith(".audio-generator.json")) {
+			return <AudioGeneratorSelectable {...props} />;
+		}
+
 		switch (extension) {
+			case ".abc":
+				return <DefaultSelectable {...props} />;
+
 			case ".x":
 			case ".dae":
 			case ".dxf":
@@ -1509,7 +1566,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		}
 
 		// Those are files.
-		let assetFileNotInAssetsFolder = false;
+		let assetPlacementWarning: string | null = null;
 
 		const filesToCopy: Record<string, string> = {};
 
@@ -1523,10 +1580,9 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			const absolutePath = join(this.state.browsedPath, basename(path));
 
 			if (!this.isAssetsFolder()) {
-				const extension = extname(path).toLowerCase();
-
-				if (assetsAllSupportedExtensions.includes(extension)) {
-					assetFileNotInAssetsFolder = true;
+				const placement = await inspectAssetRootPlacement(path, absolutePath, join(dirname(projectConfiguration.path!), "/assets"));
+				if (!placement.allowed) {
+					assetPlacementWarning ??= assetRootPlacementError(placement);
 					continue;
 				}
 			}
@@ -1534,13 +1590,13 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			filesToCopy[path] = absolutePath;
 		}
 
-		if (assetFileNotInAssetsFolder) {
+		if (assetPlacementWarning) {
 			showAlert(
 				"Warning",
 				<div>
-					You tried to import assets in a directory not located at least in the root "assets" folder.
+					{assetPlacementWarning}
 					<br />
-					To prevent broken references, these files were not copied. Please drag'n'drop them at least in the /assets folder.
+					Other safe project files were copied normally.
 				</div>,
 				true
 			);
@@ -1613,38 +1669,38 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			title: "Import Files & Folders",
 		});
 
-		let assetFileNotInAssetsFolder = false;
+		let assetPlacementWarning: string | null = null;
 
 		await Promise.all(
 			files.map(async (file) => {
 				const destination = join(this.state.browsedPath!, basename(file));
 
 				const fStat = await stat(file);
+				if (!this.isAssetsFolder()) {
+					const placement = await inspectAssetRootPlacement(file, destination, join(dirname(projectConfiguration.path!), "/assets"));
+					if (!placement.allowed) {
+						assetPlacementWarning ??= assetRootPlacementError(placement);
+						return;
+					}
+				}
+
 				if (fStat.isDirectory()) {
 					await copy(file, destination, {
 						recursive: true,
 					});
 				} else {
-					if (!this.isAssetsFolder()) {
-						const extension = extname(file).toLowerCase();
-						if (assetsAllSupportedExtensions.includes(extension)) {
-							assetFileNotInAssetsFolder = true;
-							return;
-						}
-					}
-
 					await copyFile(file, destination);
 				}
 			})
 		);
 
-		if (assetFileNotInAssetsFolder) {
+		if (assetPlacementWarning) {
 			showAlert(
 				"Warning",
 				<div>
-					You tried to import assets in a directory not located at least in the root "assets" folder.
+					{assetPlacementWarning}
 					<br />
-					To prevent broken references, these files were not copied. Please drag'n'drop them at least in the /assets folder.
+					Other safe project files were copied normally.
 				</div>,
 				true
 			);
@@ -1758,55 +1814,39 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		return this._refreshItems(this.state.browsedPath);
 	}
 
-	private async _handleAddNodeParticleSystem(): Promise<void> {
+	private _handleAddNodeParticleSystem(): void {
 		if (!this.state.browsedPath) {
 			return;
 		}
-
-		const npe = new NodeParticleSystemSet("New Node Particle System Set");
-		npe.setToDefault();
-		npe.id = Tools.RandomId();
-		npe.uniqueId = UniqueNumber.Get();
-
-		const pss = await npe.buildAsync(this.props.editor.layout.preview.scene, false);
-
-		const name = await findAvailableFilename(this.state.browsedPath, npe.name, ".npss");
-		await writeJSON(
-			join(this.state.browsedPath, name),
-			{
-				id: npe.id,
-				uniqueId: npe.uniqueId,
-				...npe.serialize(),
-			},
-			{
-				spaces: "\t",
-				encoding: "utf-8",
-			}
-		);
-
-		npe.dispose();
-		pss.dispose();
-
-		return this._refreshItems(this.state.browsedPath);
+		this.setState({ vfxTemplateBrowserOpen: true });
 	}
 
+	private async _handleAddAudioGenerator(): Promise<void> {
+		if (!this.state.browsedPath) {
+			return;
+		}
+		try {
+			const name = await findAvailableFilename(this.state.browsedPath, "New Audio Generator", ".audio-generator.json");
+			await writeScriptableAudioAsset(join(this.state.browsedPath, name), createDefaultScriptableAudioGeneratorGraph());
+			await this._refreshItems(this.state.browsedPath);
+			toast.success(`Created ${name}`);
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	/** Creates a path-seeded version-2 document instead of the original unversioned placeholder. */
 	private async _handleAddCinematic(): Promise<void> {
 		if (!this.state.browsedPath) {
 			return;
 		}
 
-		const cinematic = {
-			name: "New Cinematic",
-			tracks: [],
-			framesPerSecond: 60,
-			outputFramesPerSecond: 60,
-		} as ICinematic;
-
-		const name = await findAvailableFilename(this.state.browsedPath, cinematic.name, ".cinematic");
-		await writeJSON(join(this.state.browsedPath, name), cinematic, {
-			spaces: "\t",
-			encoding: "utf-8",
-		});
+		const name = await findAvailableFilename(this.state.browsedPath, "New Cinematic", ".cinematic");
+		const absolutePath = join(this.state.browsedPath, name);
+		const projectDirectory = this.props.editor.state.projectPath ? dirname(this.props.editor.state.projectPath) : this.state.browsedPath;
+		const identitySeed = relative(projectDirectory, absolutePath).replace(/\\/g, "/");
+		const cinematic = normalizeCinematicDocument({ name: "New Cinematic", tracks: [], framesPerSecond: 60, outputFramesPerSecond: 60 }, { identitySeed });
+		await createCinematicDocumentFile(absolutePath, cinematic, { identitySeed });
 
 		return this._refreshItems(this.state.browsedPath);
 	}
@@ -1876,6 +1916,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		data.uniqueId = gui.uniqueId;
 		data.content = gui.serializeContent();
 		data.guiType = "fullscreen";
+		data.zvibeGUIAuthoring = createDefaultGUIAuthoringState();
 
 		const name = await findAvailableFilename(this.state.browsedPath, gui.name, ".gui");
 		await writeJSON(join(this.state.browsedPath, name), data, {
@@ -2003,9 +2044,13 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 
 			return;
 		}
+		if (item.props.absolutePath.toLowerCase().endsWith(".audio-generator.json")) {
+			return;
+		}
 
 		const extension = extname(item.props.absolutePath).toLowerCase();
 		switch (extension) {
+			case ".abc":
 			case ".md":
 			case ".png":
 			case ".webp":
@@ -2036,6 +2081,10 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 
 			case ".prefab":
 				return openPrefabMode(this.props.editor, item.props.absolutePath);
+
+			case ".uxml":
+			case ".uss":
+				return openInExternalEditor(this.props.editor.state.externalEditorCommand, item.props.absolutePath);
 
 			case ".ts":
 			case ".tsx":

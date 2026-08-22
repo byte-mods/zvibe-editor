@@ -11,6 +11,7 @@ import { ScriptMap } from "../loader";
 import { configureSourceNodeFrom } from "../sound";
 import { configureTransformNodes } from "../transform-node";
 import { configureGameObjectComponents } from "../game-object-components";
+import { refreshAuthoredECSRuntime } from "../../ecs/runtime";
 import { configureGeneratedModelLodDeformations } from "../../assets/model-lods";
 import { _applyScriptsForObject, _removeRegisteredScriptInstance, getAllScriptsByClassForObject, scriptsDictionary } from "../script/apply";
 
@@ -210,6 +211,7 @@ export class AdvancedAssetContainer {
 		configureGeneratedModelLodDeformations({ meshes: newDescendants.filter((node) => node.getClassName() === "Mesh") });
 
 		configureGameObjectComponents(this.container.scene);
+		refreshAuthoredECSRuntime(this.container.scene);
 
 		// Apply scripts after everything else is set up to avoid issues with dependencies between scripts
 		newDescendants.forEach((node) => {

@@ -230,7 +230,9 @@ function rewriteTextReferences(content: string, context: ITextReferenceRewriteCo
 	let replacementCount = 0;
 	let semanticMatchCount = 0;
 	let updated = content.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g, (token, offset: number) => {
-		if ([".json", ".gltf", ".babylon", ".scene", ".prefab", ".material", ".gui", ".npss", ".animation", ".animations", ".animator", ".controller"].includes(extension)) {
+		if (
+			[".json", ".gltf", ".babylon", ".scene", ".prefab", ".material", ".gui", ".npss", ".animation", ".animations", ".anim", ".animator", ".controller"].includes(extension)
+		) {
 			const after = content.slice(offset + token.length).match(/^\s*(.)/)?.[1];
 			if (after === ":") {
 				return token;

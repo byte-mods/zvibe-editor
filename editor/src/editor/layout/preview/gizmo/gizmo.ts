@@ -1,5 +1,6 @@
 import {
 	GizmoCoordinatesMode,
+	GizmoAnchorPoint,
 	Node,
 	Observable,
 	PositionGizmo,
@@ -92,6 +93,7 @@ export class EditorPreviewGizmo {
 		if (this.currentGizmo) {
 			this.currentGizmo.scaleRatio = 2;
 			this.currentGizmo.coordinatesMode = this._coordinatesMode;
+			this.currentGizmo.anchorPoint = GizmoAnchorPoint.Pivot;
 
 			if (this._positionGizmo) {
 				// A bit of hacking.

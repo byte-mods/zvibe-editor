@@ -1,7 +1,7 @@
 import { Scene } from "@babylonjs/core/scene";
 import { AssetContainer } from "@babylonjs/core/assetContainer";
 
-export const servicesConfigurationVersion = 1;
+export const servicesConfigurationVersion = 3;
 
 /**
  * The service categories a project can configure. These mirror the families a
@@ -9,9 +9,20 @@ export const servicesConfigurationVersion = 1;
  * project-provided SDK consumes it, exactly like the network replication
  * component. The editor deliberately ships no vendor SDK and stores no secret.
  */
-export type ProjectServiceCategory = "auth" | "cloudSave" | "analytics" | "iap" | "ads" | "matchmaking";
+export type ProjectServiceCategory = "auth" | "cloudSave" | "analytics" | "iap" | "ads" | "matchmaking" | "leaderboards" | "remoteConfig" | "contentDelivery" | "cloudFunctions";
 
-export const projectServiceCategories: readonly ProjectServiceCategory[] = ["auth", "cloudSave", "analytics", "iap", "ads", "matchmaking"];
+export const projectServiceCategories: readonly ProjectServiceCategory[] = [
+	"auth",
+	"cloudSave",
+	"analytics",
+	"iap",
+	"ads",
+	"matchmaking",
+	"leaderboards",
+	"remoteConfig",
+	"contentDelivery",
+	"cloudFunctions",
+];
 
 export interface IProjectServiceSettings extends Record<string, unknown> {
 	enabled: boolean;
@@ -29,10 +40,14 @@ export interface IProjectServiceSettings extends Record<string, unknown> {
 
 export type IProjectServicesConfiguration = {
 	version: typeof servicesConfigurationVersion;
+	/** Active service environment sent with every generic REST request. */
+	environment: string;
 } & Record<ProjectServiceCategory, IProjectServiceSettings>;
 
 const maximumStringLength = 512;
 const maximumOptionEntries = 64;
+const serviceOptionNamePattern = /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/;
+const secretOptionNamePattern = /(?:secret|password|private[_.-]?key|access[_.-]?token|refresh[_.-]?token)/i;
 
 function normalizeString(value: unknown): string {
 	return typeof value === "string" ? value.trim().slice(0, maximumStringLength) : "";
@@ -53,7 +68,7 @@ function normalizeOptions(value: unknown): Record<string, unknown> {
 		if (Object.keys(options).length >= maximumOptionEntries) {
 			break;
 		}
-		if (!key || key.length > 128) {
+		if (!serviceOptionNamePattern.test(key) || secretOptionNamePattern.test(key)) {
 			continue;
 		}
 		if (typeof entry === "string") {
@@ -73,7 +88,6 @@ function normalizeService(value: unknown): IProjectServiceSettings {
 	const endpoint = normalizeString(service.endpoint);
 
 	return {
-		...service,
 		// A service cannot be enabled without a provider to route to; this makes
 		// "enabled" mean "actually usable" for the runtime rather than a flag the
 		// SDK has to re-validate.
@@ -92,7 +106,10 @@ function normalizeService(value: unknown): IProjectServiceSettings {
  */
 export function normalizeProjectServicesConfiguration(value: unknown): IProjectServicesConfiguration {
 	const source = (value && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
-	const configuration = { version: servicesConfigurationVersion } as IProjectServicesConfiguration;
+	const configuration = {
+		version: servicesConfigurationVersion,
+		environment: normalizeString(source.environment) || "development",
+	} as IProjectServicesConfiguration;
 	projectServiceCategories.forEach((category) => {
 		configuration[category] = normalizeService(source[category]);
 	});

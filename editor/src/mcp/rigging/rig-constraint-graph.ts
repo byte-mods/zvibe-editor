@@ -176,6 +176,13 @@ function buildRigConstraintGraph(scene: Scene, layerId: string, ignoreStoredPosi
 			sourceToConstraint(constraint.sourceNodeIdA, "Source A");
 			sourceToConstraint(constraint.sourceNodeIdB, "Source B");
 			constraintToBone(constraint.boneName, "Drives");
+		} else if (constraint.type === "customJob") {
+			for (const [index, nodeId] of (constraint.nodeIds ?? []).entries()) {
+				sourceToConstraint(nodeId, `Node handle ${index + 1}`);
+			}
+			for (const [index, boneName] of (constraint.boneNames ?? []).entries()) {
+				constraintToBone(boneName, `Bone handle ${index + 1}`);
+			}
 		}
 	}
 	for (const node of nodes.values()) {

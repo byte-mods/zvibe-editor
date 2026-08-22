@@ -1,4 +1,4 @@
-import { Scene } from "babylonjs";
+import { AbstractMesh, Material, Scene } from "babylonjs";
 
 import { isInstancedMesh } from "../guards/nodes";
 
@@ -7,7 +7,40 @@ import { isInstancedMesh } from "../guards/nodes";
  * This is useful to ensure that all materials are compiled and ready to use to avoid lag in the editor.
  * @param scene The scene to force compile all materials
  */
-export function forceCompileAllSceneMaterials(scene: Scene) {
+async function forceCompilationUntilSceneDisposes(scene: Scene, material: Material, mesh: AbstractMesh): Promise<void> {
+	if (scene.isDisposed) {
+		return;
+	}
+
+	await new Promise<void>((resolve, reject) => {
+		let settled = false;
+		const observer = scene.onDisposeObservable.addOnce(() => {
+			settled = true;
+			resolve();
+		});
+		material
+			.forceCompilationAsync(mesh, {
+				clipPlane: !!scene.clipPlane,
+				useInstances: mesh.hasInstances,
+			})
+			.then(
+				() => {
+					if (!settled) {
+						scene.onDisposeObservable.remove(observer);
+						resolve();
+					}
+				},
+				(error) => {
+					if (!settled) {
+						scene.onDisposeObservable.remove(observer);
+						reject(error);
+					}
+				}
+			);
+	});
+}
+
+export async function forceCompileAllSceneMaterials(scene: Scene): Promise<void> {
 	return Promise.all(
 		scene.materials.map(async (material) => {
 			const meshes = material.getBindedMeshes();
@@ -18,12 +51,9 @@ export function forceCompileAllSceneMaterials(scene: Scene) {
 						return;
 					}
 
-					await material.forceCompilationAsync(mesh, {
-						clipPlane: !!scene.clipPlane,
-						useInstances: mesh.hasInstances,
-					});
+					await forceCompilationUntilSceneDisposes(scene, material, mesh);
 				})
 			);
 		})
-	);
+	).then(() => undefined);
 }

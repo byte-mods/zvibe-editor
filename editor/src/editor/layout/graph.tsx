@@ -18,6 +18,7 @@ import { FaCamera, FaImage, FaLightbulb, FaBone, FaRegLightbulb } from "react-ic
 
 import { AdvancedDynamicTexture } from "babylonjs-gui";
 import { BaseTexture, Node, Scene, Tools, IParticleSystem, Sprite, Skeleton, TransformNode, AbstractMesh, Light } from "babylonjs";
+import { normalizeEntityComponentData } from "babylonjs-editor-tools";
 
 import { Editor } from "../main";
 
@@ -921,6 +922,14 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 
 	private _parseSceneNode(node: Node, scenePath: string, noChildren?: boolean): TreeNodeInfo | null {
 		const isLegacyHierarchy = scenePath === "legacy";
+		const entityDescriptor = node.metadata?.babylonEditorComponentStack?.components?.find((component: any) => component.type === "entity" && component.enabled);
+		if (
+			entityDescriptor &&
+			normalizeEntityComponentData(entityDescriptor.data ?? {}).hiddenInHierarchy &&
+			node.getScene().metadata?.babylonEditorECS?.settings?.showHiddenEntitiesInHierarchy !== true
+		) {
+			return null;
+		}
 		if ((isMesh(node) && (node._masterMesh || !isNodeVisibleInGraph(node))) || isCollisionMesh(node) || isCollisionInstancedMesh(node)) {
 			return null;
 		}
@@ -1285,6 +1294,10 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 			const absolutePaths = this.props.editor.layout.assets.state.selectedKeys;
 
 			absolutePaths.forEach((absolutePath) => {
+				if (absolutePath.toLowerCase().endsWith(".audio-generator.json")) {
+					void applySoundAsset(this.props.editor, this.props.editor.layout.preview.scene, absolutePath).then(() => this.props.editor.layout.graph.refresh());
+					return;
+				}
 				const extension = extname(absolutePath).toLowerCase();
 
 				switch (extension) {

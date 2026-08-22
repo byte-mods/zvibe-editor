@@ -1,4 +1,4 @@
-import { dirname, extname, join, normalize } from "path/posix";
+import { dirnamePortablePath as dirname, extnamePortablePath as extname, joinPortablePath as join, normalizePortablePath as normalize } from "./portable-path";
 
 export interface IMaterialImporterSettings {
 	validateTextures: boolean;
@@ -142,6 +142,20 @@ export function collectBabylonMaterialTextureCandidates(data: Record<string, unk
 	const candidates: IMaterialTextureCandidate[] = [];
 	collectTextureObjectCandidates(data, "", candidates, new Set());
 	return candidates;
+}
+
+/** Rewrites project-contained Babylon texture references to absolute paths before Material.Parse loads them. */
+export function resolveBabylonMaterialTextureReferencesForLoading(sourcePath: string, data: Record<string, unknown>, projectRoot: string): string[] {
+	const resolvedPaths = new Set<string>();
+	for (const candidate of collectBabylonMaterialTextureCandidates(data)) {
+		const reference = classifyMaterialTextureReference(sourcePath, candidate.value);
+		if (reference.kind === "project" && reference.resolvedPath) {
+			const absolutePath = join(projectRoot, reference.resolvedPath);
+			candidate.setValue?.(absolutePath);
+			resolvedPaths.add(absolutePath);
+		}
+	}
+	return [...resolvedPaths].sort();
 }
 
 /** Parses map directives from Wavefront MTL without treating directive options as texture paths. */

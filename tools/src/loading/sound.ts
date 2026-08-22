@@ -1,5 +1,6 @@
 import { Scene } from "@babylonjs/core/scene";
 import { Observer } from "@babylonjs/core/Misc/observable";
+import { Tools } from "@babylonjs/core/Misc/tools";
 import { Database } from "@babylonjs/core/Offline/database";
 import { SoundState } from "@babylonjs/core/AudioV2/soundState";
 import { AssetContainer } from "@babylonjs/core/assetContainer";
@@ -12,6 +13,9 @@ import { StreamingSound } from "@babylonjs/core/AudioV2/abstractAudio/streamingS
 import { _GetAudioEngine, CreateSoundAsync, CreateSoundBufferAsync, CreateStreamingSoundAsync } from "@babylonjs/core/AudioV2/abstractAudio/audioEngineV2";
 
 import { SoundNode } from "../tools/sound";
+import { cloneScriptableAudioSoundAsync, createScriptableAudioSoundFromUrlAsync, isScriptableAudioGeneratorPath, ScriptableAudioStreamingSound } from "./scriptable-audio-playback";
+
+type RuntimeSound = StaticSound | StreamingSound | ScriptableAudioStreamingSound;
 
 let registered = false;
 let registeredUpdateObserver: Observer<Scene> | null = null;
@@ -78,29 +82,42 @@ function loadSoundBuffer(scene: Scene, soundAbsolutePath: string) {
 	});
 }
 
-export function configureSourceNodeFrom(source: SoundNode, target: SoundNode) {
+function configureClonedSound(source: SoundNode, target: SoundNode, sound: RuntimeSound): void {
+	sound.volume = source.volume;
+	sound._isSpatial = source.sound!._isSpatial;
+	if (sound._isSpatial) {
+		sound.spatial.attach(target);
+		sound.spatial.maxDistance = source.sound!.spatial.maxDistance;
+		sound.spatial.panningModel = source.sound!.spatial.panningModel;
+		sound.spatial.distanceModel = source.sound!.spatial.distanceModel;
+	}
+	target.sound = sound;
+	target.isSoundNode = true;
+	target.soundRelativePath = source.soundRelativePath;
+	target.autoUpdateSpatial = source.autoUpdateSpatial;
+	soundInstances.push(target);
+	registerUpdateSoundsObserver(target.getScene());
+	registerSoundNodeEvents(target);
+	configureSoundNodePrototype(target, sound);
+}
+
+export function configureSourceNodeFrom(source: SoundNode, target: SoundNode): void {
 	if (!source.soundRelativePath || !source.sound) {
 		return;
 	}
-	if (!(source.sound instanceof StaticSound)) {
-		CreateStreamingSoundAsync(source.soundRelativePath, source.soundRelativePath, { spatialAutoUpdate: false }).then((sound) => {
-			sound.volume = source.volume;
-			sound._isSpatial = source.sound!._isSpatial;
-			if (sound._isSpatial) {
-				sound.spatial.attach(target);
-				sound.spatial.maxDistance = source.sound!.spatial.maxDistance;
-				sound.spatial.panningModel = source.sound!.spatial.panningModel;
-				sound.spatial.distanceModel = source.sound!.spatial.distanceModel;
+	if (isScriptableAudioGeneratorPath(source.soundRelativePath)) {
+		void cloneScriptableAudioSoundAsync(source.sound).then((sound) => {
+			if (!sound) {
+				throw new Error(`Generated sound "${source.soundRelativePath}" has no playback owner.`);
 			}
-			target.sound = sound;
-			target.isSoundNode = true;
-			target.soundRelativePath = source.soundRelativePath;
-			target.autoUpdateSpatial = source.autoUpdateSpatial;
-			soundInstances.push(target);
-			registerUpdateSoundsObserver(target.getScene());
-			registerSoundNodeEvents(target);
-			configureSoundNodePrototype(target, sound);
+			configureClonedSound(source, target, sound);
 		});
+		return;
+	}
+	if (!(source.sound instanceof StaticSound)) {
+		void CreateStreamingSoundAsync(source.soundRelativePath, source.soundRelativePath, { spatialAutoUpdate: false }).then((sound) =>
+			configureClonedSound(source, target, sound)
+		);
 		return;
 	}
 
@@ -113,27 +130,8 @@ export function configureSourceNodeFrom(source: SoundNode, target: SoundNode) {
 			spatialAutoUpdate: false,
 		})
 		.then(() => {
-			sound.volume = source.volume;
-			sound._isSpatial = source.sound!._isSpatial;
-
-			if (sound._isSpatial) {
-				sound.spatial.attach(target);
-				sound.spatial.maxDistance = source.sound!.spatial.maxDistance;
-				sound.spatial.panningModel = source.sound!.spatial.panningModel;
-				sound.spatial.distanceModel = source.sound!.spatial.distanceModel;
-			}
-
-			target.sound = sound;
-			target.isSoundNode = true;
-			target.soundRelativePath = source.soundRelativePath;
-			target.autoUpdateSpatial = source.autoUpdateSpatial;
-
-			soundInstances.push(target);
-			registerUpdateSoundsObserver(target.getScene());
+			configureClonedSound(source, target, sound);
 		});
-
-	registerSoundNodeEvents(target);
-	configureSoundNodePrototype(target, sound);
 }
 
 async function loadRuntimeConfiguration(soundAbsolutePath: string): Promise<{ loadType: "decompressOnLoad" | "compressedInMemory" | "streaming" }> {
@@ -151,7 +149,7 @@ async function loadRuntimeConfiguration(soundAbsolutePath: string): Promise<{ lo
 	return cachedRuntimeConfigurations.get(soundAbsolutePath)!;
 }
 
-export function configureSoundNodePrototype(instance: SoundNode, sound: StaticSound | StreamingSound) {
+export function configureSoundNodePrototype(instance: SoundNode, sound: RuntimeSound): void {
 	Object.defineProperty(instance, "volume", {
 		get: () => {
 			return sound.volume;
@@ -162,9 +160,9 @@ export function configureSoundNodePrototype(instance: SoundNode, sound: StaticSo
 	});
 
 	Object.defineProperty(instance, "playbackRate", {
-		get: () => (sound instanceof StaticSound ? sound.playbackRate : 1),
+		get: () => (sound instanceof StaticSound || sound instanceof ScriptableAudioStreamingSound ? sound.playbackRate : 1),
 		set: (playbackRate) => {
-			if (sound instanceof StaticSound) {
+			if (sound instanceof StaticSound || sound instanceof ScriptableAudioStreamingSound) {
 				sound.playbackRate = playbackRate;
 			}
 		},
@@ -182,6 +180,21 @@ export function configureSoundNodePrototype(instance: SoundNode, sound: StaticSo
 	instance.setVolume = (volume, options) => sound.setVolume(volume, options);
 
 	instance.attachTo = (node, useBoundingBox, attachmentType) => sound.spatial.attach(node, useBoundingBox, attachmentType);
+}
+
+async function loadParsedSound(scene: Scene, name: string, soundAbsolutePath: string, rootUrl: string): Promise<RuntimeSound> {
+	if (isScriptableAudioGeneratorPath(soundAbsolutePath)) {
+		return createScriptableAudioSoundFromUrlAsync(name, soundAbsolutePath, rootUrl, { spatialAutoUpdate: false });
+	}
+	const configuration = await loadRuntimeConfiguration(soundAbsolutePath);
+	if (configuration.loadType === "streaming") {
+		return CreateStreamingSoundAsync(name, soundAbsolutePath, { spatialAutoUpdate: false });
+	}
+	if (!cachedSoundBuffers.has(soundAbsolutePath)) {
+		cachedSoundBuffers.set(soundAbsolutePath, loadSoundBuffer(scene, soundAbsolutePath));
+	}
+	const buffer = await cachedSoundBuffers.get(soundAbsolutePath)!;
+	return CreateSoundAsync(name, buffer!, { spatialAutoUpdate: false });
 }
 
 export function registerAudioParser() {
@@ -206,23 +219,8 @@ export function registerAudioParser() {
 				const soundAbsolutePath = `${rootUrl}${transformNode.soundRelativePath}`;
 
 				scene.addPendingData(soundAbsolutePath);
-				loadRuntimeConfiguration(soundAbsolutePath).then((configuration) => {
-					let promise: Promise<StaticSound | StreamingSound>;
-					if (configuration.loadType === "streaming") {
-						promise = CreateStreamingSoundAsync(transformNode.soundRelativePath, soundAbsolutePath, { spatialAutoUpdate: false });
-					} else {
-						if (!cachedSoundBuffers.has(soundAbsolutePath)) {
-							cachedSoundBuffers.set(soundAbsolutePath, loadSoundBuffer(scene, soundAbsolutePath));
-						}
-						promise = cachedSoundBuffers.get(soundAbsolutePath)!.then((buffer) =>
-							CreateSoundAsync(transformNode.soundRelativePath, buffer!, {
-								spatialAutoUpdate: false,
-							})
-						);
-					}
-					promise.then((sound) => {
-						scene.removePendingData(soundAbsolutePath);
-
+				void loadParsedSound(scene, transformNode.soundRelativePath, soundAbsolutePath, rootUrl)
+					.then((sound) => {
 						if (instance.isDisposed()) {
 							return sound.dispose();
 						}
@@ -247,8 +245,9 @@ export function registerAudioParser() {
 						registerSoundNodeEvents(instance);
 						configureSoundNodePrototype(instance, sound);
 						registerUpdateSoundsObserver(scene);
-					});
-				});
+					})
+					.catch((error: unknown) => Tools.Error(`Unable to load sound "${transformNode.soundRelativePath}": ${error instanceof Error ? error.message : String(error)}`))
+					.finally(() => scene.removePendingData(soundAbsolutePath));
 			}
 		});
 	});

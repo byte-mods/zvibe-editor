@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>After comparing the importer capability summary with one inspected sprite document, how many source color-depth families can the native Aseprite decoder normalize?</question>
+      <answer>3</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>How many distinct hierarchy-layer kinds can survive from an Aseprite source when group organization, ordinary raster art, and tilemaps are all used?</question>
+      <answer>3</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>How many Aseprite compositing blend modes are implemented by the bounded native renderer?</question>
+      <answer>19</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the hard maximum number of animation frames accepted from one Aseprite document?</question>
+      <answer>10000</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the hard maximum number of hierarchy layers accepted from one Aseprite document?</question>
+      <answer>4096</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the largest supported width or height of one generated Aseprite atlas?</question>
+      <answer>8192</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the maximum number of cel user-data events retained for one generated sprite frame before import rejects the document?</question>
+      <answer>32</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which read-only MCP tool returns the exact source/settings/dependency lease and independent layer, tag, slice, tileset, and frame pages before artifact publication?</question>
+      <answer>inspect_aseprite_import</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which read-only MCP tool pages one selected Aseprite instance's SpriteManager streams, animation timing summaries, and playback cursors?</question>
+      <answer>get_aseprite_instance</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which exact direction identifier represents reverse traversal followed by alternating forward and reverse passes without duplicating endpoints?</question>
+      <answer>pingpong_reverse</answer>
+   </qa_pair>
+</evaluation>

@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which Babylon engine executes exported scenes in the production dedicated-server target?</question>
+      <answer>NullEngine</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which transport path hosts server-authoritative gameplay clients?</question>
+      <answer>WebSocket /session</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two container engines are supported by built-in workflows?</question>
+      <answer>Docker, Podman</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which orchestration format does the editor generate for fleets?</question>
+      <answer>Kubernetes Deployment and Service YAML</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Are console SDKs or credentials bundled into Zvibe Editor? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Where are licensed console-provider command manifests discovered?</question>
+      <answer>.zvibe/console-providers</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>How are credential requirements persisted?</question>
+      <answer>environment-variable names only</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What exact state binds an external workflow plan?</question>
+      <answer>configuration revision, headless scaffold revision, deployment artifact revision, console-provider fingerprint</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does workflow execution invoke a command shell? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which licensed-console prerequisites remain external?</question>
+      <answer>platform-holder approval, proprietary SDK, devkit, credentials, certification services</answer>
+   </qa_pair>
+</evaluation>

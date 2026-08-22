@@ -12,12 +12,15 @@ import { Editor } from "../../main";
 
 import { checkProjectCachedCompressedTextures } from "../../../tools/assets/ktx";
 
-import { saveProjectConfiguration } from "../../../project/save/save";
 import { projectConfiguration } from "../../../project/configuration";
-import { listInstalledExternalEditors } from "../../../mcp/project/project";
+import { listInstalledExternalEditors, setProjectSettings } from "../../../mcp/project/project";
+import { updateEditorUserPreferences } from "../../preferences";
 
-import { EditorEditProjectPluginComponent } from "./plugins/component";
+import { EditorExtensionsSettings } from "./extensions";
+import { EditorProjectServicesSettings } from "./services";
 import { EditorEditProjectTextureComponent } from "./textures/component";
+import { EditorProjectSettingsComponent } from "./project-settings";
+import { EditorGraphicsSettings } from "./graphics";
 
 export interface IEditorEditProjectComponentProps {
 	/**
@@ -49,19 +52,34 @@ export class EditorEditProjectComponent extends Component<IEditorEditProjectComp
 	public render(): ReactNode {
 		return (
 			<AlertDialog open={this.props.open}>
-				<AlertDialogContent className="flex flex-col justify-center">
+				<AlertDialogContent className="flex flex-col justify-center max-w-5xl max-h-[90vh]">
 					<AlertDialogHeader>
-						<AlertDialogTitle className="text-3xl font-[400]">Edit Project</AlertDialogTitle>
+						<AlertDialogTitle className="text-3xl font-[400]">Project Settings</AlertDialogTitle>
 					</AlertDialogHeader>
 
-					<div className="py-5">
+					<div className="py-5 overflow-y-auto pr-2">
 						<Tabs defaultValue="editor" className="w-full">
 							<TabsList className="w-full">
 								<TabsTrigger className="w-full" value="editor">
 									Editor
 								</TabsTrigger>
-								<TabsTrigger className="w-full" value="plugins">
-									Plugins
+								<TabsTrigger className="w-full" value="extensions">
+									Extensions
+								</TabsTrigger>
+								<TabsTrigger className="w-full" value="services">
+									Services
+								</TabsTrigger>
+								<TabsTrigger className="w-full" value="player">
+									Player
+								</TabsTrigger>
+								<TabsTrigger className="w-full" value="graphics">
+									Graphics
+								</TabsTrigger>
+								<TabsTrigger className="w-full" value="asset-pipeline">
+									Asset Pipeline
+								</TabsTrigger>
+								<TabsTrigger className="w-full" value="play-mode">
+									Play Mode
 								</TabsTrigger>
 							</TabsList>
 
@@ -109,8 +127,23 @@ export class EditorEditProjectComponent extends Component<IEditorEditProjectComp
 								</div>
 								<EditorEditProjectTextureComponent editor={this.props.editor} />
 							</TabsContent>
-							<TabsContent value="plugins">
-								<EditorEditProjectPluginComponent editor={this.props.editor} />
+							<TabsContent value="extensions">
+								<EditorExtensionsSettings editor={this.props.editor} />
+							</TabsContent>
+							<TabsContent value="services">
+								<EditorProjectServicesSettings editor={this.props.editor} />
+							</TabsContent>
+							<TabsContent value="player">
+								<EditorProjectSettingsComponent editor={this.props.editor} page="player" />
+							</TabsContent>
+							<TabsContent value="graphics">
+								<EditorGraphicsSettings editor={this.props.editor} />
+							</TabsContent>
+							<TabsContent value="asset-pipeline">
+								<EditorProjectSettingsComponent editor={this.props.editor} page="assetPipeline" />
+							</TabsContent>
+							<TabsContent value="play-mode">
+								<EditorProjectSettingsComponent editor={this.props.editor} page="playMode" />
 							</TabsContent>
 						</Tabs>
 					</div>
@@ -128,11 +161,22 @@ export class EditorEditProjectComponent extends Component<IEditorEditProjectComp
 		);
 	}
 
-	private _handleSave(): void {
+	private async _handleSave(): Promise<void> {
 		projectConfiguration.compressedTexturesEnabled = this.props.editor.state.compressedTexturesEnabled;
+		const currentSettings = this.props.editor.state.projectSettings;
+		const currentPreferences = this.props.editor.state.editorUserPreferences;
+		const preferences =
+			currentPreferences.externalTools.scriptEditorCommand === this.props.editor.state.externalEditorCommand
+				? currentPreferences
+				: updateEditorUserPreferences(currentPreferences, currentPreferences.revision, {
+						externalTools: { ...currentPreferences.externalTools, scriptEditorCommand: this.props.editor.state.externalEditorCommand },
+					});
+		await setProjectSettings(this.props.editor.layout.preview.scene, { expectedRevision: currentSettings.revision, settings: currentSettings }, { editor: this.props.editor });
+		if (preferences !== currentPreferences) {
+			await this.props.editor.setEditorUserPreferences(preferences);
+		}
 
-		saveProjectConfiguration(this.props.editor);
-		checkProjectCachedCompressedTextures(this.props.editor);
+		await checkProjectCachedCompressedTextures(this.props.editor);
 
 		toast.success("Project preferences saved");
 
@@ -145,7 +189,9 @@ export class EditorEditProjectComponent extends Component<IEditorEditProjectComp
 		try {
 			const result = await listInstalledExternalEditors(this.props.editor.layout.preview.scene, {});
 			this.setState({ detectedExternalEditors: result.editors });
-			if (result.editors.length === 0) toast.info("No supported external editors were detected");
+			if (result.editors.length === 0) {
+				toast.info("No supported external editors were detected");
+			}
 		} catch (error) {
 			toast.error(`Failed to detect external editors: ${error instanceof Error ? error.message : String(error)}`);
 		} finally {

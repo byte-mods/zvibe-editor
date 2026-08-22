@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, normalize, relative } from "path/posix";
 import { pathExists } from "fs-extra";
 import { Scene } from "babylonjs";
 
-import { openPrefabMode, type IOpenPrefabModeOptions } from "../../editor/layout/assets-browser/viewers/prefab-mode";
+import { closePrefabMode, openPrefabMode, type IOpenPrefabModeOptions } from "../../editor/layout/assets-browser/viewers/prefab-mode";
 import { IMCPActionOptions } from "../action";
 import { inspectPrefabInstanceLinks } from "./prefabs";
 import { getPrefabStageSettingsForEditor, replacePrefabStageSettingsForEditor } from "./stage-settings";
@@ -71,4 +71,9 @@ export async function openPrefabStage(scene: Scene, data: any, options: IMCPActi
 	const mode = instance ? (data.mode ?? options.editor.state.prefabStage.mode) : "isolation";
 	openPrefabMode(options.editor, resolved.absolutePath, { instance, mode });
 	return { opened: true, path: resolved.path, mode, instance: instance ?? null };
+}
+
+/** Closes the active shared Prefab Stage without mutating its asset. */
+export function closePrefabStage(_scene: Scene, _data: any, _options: IMCPActionOptions): any {
+	return { closed: closePrefabMode() };
 }

@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { NullEngine, Scene, TransformNode } from "babylonjs";
 
-vi.mock("babylonjs-editor-tools", () => ({}));
+vi.mock("babylonjs-editor-tools", () => ({
+	configureNavAgents: vi.fn(async () => undefined),
+	getNavigationCrowdController: vi.fn(() => null),
+}));
 
 import { createNavAgent, listNavAgents, setNavAgent } from "../../src/mcp/navmesh/navmesh";
 
@@ -23,8 +26,12 @@ describe("mcp/nav agents", () => {
 
 	test("persists local crowd avoidance settings and edits them without clearing agent state", async () => {
 		const node = new TransformNode("Agent", scene);
-		const agent = await createNavAgent(scene, { id: "agent", nodeId: node.id, navMeshPath: "assets/world.navmesh", radius: 20, avoidanceRadius: 50, avoidanceWeight: 2 }, options);
-		const updated = setNavAgent(scene, { id: agent.id, avoidanceEnabled: false, avoidanceWeight: 0.5 }, options);
+		const agent = await createNavAgent(
+			scene,
+			{ id: "agent", nodeId: node.id, navMeshPath: "assets/world.navmesh", radius: 20, avoidanceRadius: 50, avoidanceWeight: 2 },
+			options
+		);
+		const updated = await setNavAgent(scene, { id: agent.id, avoidanceEnabled: false, avoidanceWeight: 0.5 }, options);
 
 		expect(updated).toMatchObject({ id: "agent", avoidanceEnabled: false, avoidanceRadius: 50, avoidanceWeight: 0.5 });
 		expect(listNavAgents(scene).agents).toEqual([expect.objectContaining({ id: "agent", avoidanceEnabled: false, avoidanceRadius: 50, avoidanceWeight: 0.5 })]);

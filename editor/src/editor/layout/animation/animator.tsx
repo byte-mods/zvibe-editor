@@ -2,6 +2,7 @@ import { Component, MouseEvent, ReactNode } from "react";
 
 import { Scene, Tools } from "babylonjs";
 import { getAnimatorBlendTreeAnimationGroups } from "babylonjs-editor-tools";
+import { toast } from "sonner";
 
 import { Button } from "../../../ui/shadcn/ui/button";
 import { Input } from "../../../ui/shadcn/ui/input";
@@ -12,6 +13,7 @@ import {
 	deleteAnimatorController,
 	deleteAnimatorSubgraph,
 	getAnimatorCompiledGraph,
+	getAnimatorHumanoidMuscleTraceForController,
 	getAnimatorRuntimeDebug,
 	listAnimatorControllers,
 	setAnimatorController,
@@ -25,7 +27,10 @@ import {
 	setAnimatorParameterDefinition,
 	resetAnimatorTrigger,
 	setAnimatorRootMotion,
+	setAnimatorHumanoidMuscleTrace,
+	setAnimatorRuntimeDebug,
 	setAnimatorTrigger,
+	stepAnimatorRuntimeDebug,
 	setAnimatorStateAvatarMask,
 	setAnimatorStateBehaviours,
 	setAnimatorStateMask,
@@ -62,6 +67,24 @@ interface IAnimatorState {
 	animationGroup?: string;
 	loop?: boolean;
 	speed?: number;
+	cycleOffset?: number;
+	mirror?: boolean;
+	speedParameter?: string | null;
+	mirrorParameter?: string | null;
+	cycleOffsetParameter?: string | null;
+	timeParameter?: string | null;
+	tag?: string;
+	footIK?: boolean;
+	writeDefaultValues?: boolean;
+	unitySource?: {
+		fileId: string;
+		serializedVersion: number | null;
+		footIKField: "m_IKOnFeet" | "m_FootIK" | null;
+		speedParameter: string | null;
+		mirrorParameter: string | null;
+		cycleOffsetParameter: string | null;
+		timeParameter: string | null;
+	};
 	behaviours?: { id: string; scriptKey: string; enabled?: boolean }[];
 	maskTargetNames?: string[];
 	avatarMaskId?: string;
@@ -99,6 +122,7 @@ interface IAnimatorController {
 	id: string;
 	name: string;
 	targetNodeId?: string;
+	humanoidAvatarId?: string;
 	parameters: Record<string, string | number | boolean>;
 	parameterTypes?: Record<string, "float" | "int" | "bool" | "trigger" | "string">;
 	baseIKPass?: boolean;
@@ -165,6 +189,10 @@ export interface IEditorAnimatorPanelState {
 	graphDrag: { controllerId: string; state: string; startPointer: [number, number]; startPosition: [number, number]; position: [number, number] } | null;
 	debugEnabled: boolean;
 	debugRevision: number;
+	debugBreakpointLayer: string;
+	debugBreakpointFrom: string;
+	debugBreakpointTo: string;
+	muscleRoleFilter: string;
 }
 
 /**
@@ -183,6 +211,10 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 			graphDrag: null,
 			debugEnabled: props.requestedDebugEnabled === true,
 			debugRevision: 0,
+			debugBreakpointLayer: "$base",
+			debugBreakpointFrom: "",
+			debugBreakpointTo: "",
+			muscleRoleFilter: "",
 		};
 	}
 
@@ -252,6 +284,9 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 
 	private _renderController(scene: Scene, controller: IAnimatorController): ReactNode {
 		const targetNodes = scene.getNodes().filter((node: any) => node.position);
+		const humanoidAvatars = ((scene.metadata?.babylonEditorHumanoidAvatars as Array<{ id: string; name: string; animationType: string }> | undefined) ?? []).filter(
+			(avatar) => avatar.animationType === "humanoid"
+		);
 		return (
 			<>
 				<div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
@@ -274,6 +309,25 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 					<Button variant="destructive" size="sm" onClick={() => this._delete(scene, controller)}>
 						Delete
 					</Button>
+				</div>
+				<div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded border border-input p-2">
+					<div>
+						<div className="text-sm font-medium">Humanoid Avatar</div>
+						<div className="text-xs text-muted-foreground">Controller-bound source for Unity-style live muscle tracing.</div>
+					</div>
+					<select
+						className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+						value={controller.humanoidAvatarId ?? ""}
+						onChange={(event) => this._setHumanoidAvatar(scene, controller, event.target.value || null)}
+						aria-label="Animator Humanoid Avatar"
+					>
+						<option value="">None — muscle tracing disabled</option>
+						{humanoidAvatars.map((avatar) => (
+							<option key={avatar.id} value={avatar.id}>
+								{avatar.name}
+							</option>
+						))}
+					</select>
 				</div>
 				<label className="flex items-center gap-2 text-sm">
 					<input type="checkbox" checked={controller.baseIKPass === true} onChange={(event) => this._update(scene, controller, { baseIKPass: event.target.checked })} />
@@ -430,6 +484,8 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 
 	private _renderRuntimeDebugger(scene: Scene, controller: IAnimatorController): ReactNode {
 		const snapshot = getAnimatorRuntimeDebug(scene, { controllerId: controller.id, includeAllClips: true });
+		const muscleTrace = getAnimatorHumanoidMuscleTraceForController(scene, { controllerId: controller.id, limit: 8 });
+		const runtimeDebugger = snapshot.debugger;
 		const baseProgress = Math.max(0, Math.min(1, snapshot.base.loopProgress ?? 0));
 		return (
 			<section className="space-y-2 rounded border border-input p-3" data-debug-revision={this.state.debugRevision}>
@@ -440,7 +496,17 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 					</div>
 					<div className="flex gap-2">
 						<Button size="sm" variant={this.state.debugEnabled ? "default" : "secondary"} onClick={() => this.setState({ debugEnabled: !this.state.debugEnabled })}>
-							{this.state.debugEnabled ? "Live · 4 Hz" : "Paused"}
+							{this.state.debugEnabled ? "Polling · 4 Hz" : "Polling off"}
+						</Button>
+						<Button
+							size="sm"
+							variant={runtimeDebugger.paused ? "default" : "secondary"}
+							onClick={() => this._setRuntimeDebugPaused(scene, controller, !runtimeDebugger.paused)}
+						>
+							{runtimeDebugger.paused ? "Resume Runtime" : "Pause Runtime"}
+						</Button>
+						<Button size="sm" variant="secondary" disabled={!runtimeDebugger.paused} onClick={() => this._stepRuntimeDebug(scene, controller)}>
+							Step 1/60s
 						</Button>
 						<Button size="sm" variant="secondary" onClick={() => this.setState((state) => ({ debugRevision: state.debugRevision + 1 }))}>
 							Refresh
@@ -469,6 +535,74 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 
 				<div className="h-2 overflow-hidden rounded bg-secondary">
 					<div className="h-full bg-primary transition-[width]" style={{ width: `${baseProgress * 100}%` }} />
+				</div>
+
+				<div className="space-y-2 rounded border border-input p-2 text-xs">
+					<div className="flex flex-wrap items-center gap-2">
+						<span className="font-medium">Transition Breakpoints</span>
+						<select
+							className="h-8 rounded border border-border bg-background px-2"
+							value={this.state.debugBreakpointLayer}
+							onChange={(event) => this.setState({ debugBreakpointLayer: event.target.value })}
+							aria-label="Animator breakpoint layer"
+						>
+							<option value="$base">Base</option>
+							{(controller.layers ?? []).map((layer) => (
+								<option key={layer.name} value={layer.name}>
+									{layer.name}
+								</option>
+							))}
+						</select>
+						<Input
+							className="h-8 w-36"
+							placeholder="From (optional)"
+							value={this.state.debugBreakpointFrom}
+							onChange={(event) => this.setState({ debugBreakpointFrom: event.target.value })}
+							aria-label="Animator breakpoint source state"
+						/>
+						<Input
+							className="h-8 w-36"
+							placeholder="To (optional)"
+							value={this.state.debugBreakpointTo}
+							onChange={(event) => this.setState({ debugBreakpointTo: event.target.value })}
+							aria-label="Animator breakpoint destination state"
+						/>
+						<Button size="sm" variant="secondary" onClick={() => this._addRuntimeDebugBreakpoint(scene, controller)}>
+							Add Breakpoint
+						</Button>
+						<Button size="sm" variant="ghost" disabled={!runtimeDebugger.historyCount} onClick={() => this._clearRuntimeDebugHistory(scene, controller)}>
+							Clear History
+						</Button>
+					</div>
+					<div className="flex flex-wrap gap-2">
+						{runtimeDebugger.breakpoints.map((breakpoint: any) => (
+							<button
+								key={breakpoint.id}
+								className="rounded bg-secondary px-2 py-1 text-left hover:bg-destructive/20"
+								onClick={() => this._removeRuntimeDebugBreakpoint(scene, controller, breakpoint.id)}
+								title="Remove transition breakpoint"
+							>
+								{breakpoint.layer}: {breakpoint.from ?? "*"} → {breakpoint.to ?? "*"}
+							</button>
+						))}
+						{!runtimeDebugger.breakpoints.length && <span className="text-muted-foreground">No breakpoints.</span>}
+					</div>
+					<div className="space-y-1">
+						<div className="font-medium">
+							Transition History ({runtimeDebugger.historyCount}
+							{runtimeDebugger.droppedHistoryCount ? ` + ${runtimeDebugger.droppedHistoryCount} dropped` : ""})
+						</div>
+						{runtimeDebugger.history
+							.slice(-16)
+							.reverse()
+							.map((entry: any) => (
+								<div key={entry.sequence} className={`rounded px-2 py-1 ${entry.hitBreakpointIds.length ? "bg-amber-500/20" : "bg-secondary"}`}>
+									#{entry.sequence} · {entry.layer} · {entry.from} → {entry.to} · {entry.runtimeSeconds.toFixed(3)}s{entry.interrupted ? " · interrupted" : ""}
+									{entry.hitBreakpointIds.length ? ` · hit ${entry.hitBreakpointIds.join(", ")}` : ""}
+								</div>
+							))}
+						{!runtimeDebugger.history.length && <div className="text-muted-foreground">No transitions captured yet.</div>}
+					</div>
 				</div>
 
 				{snapshot.base.transition && (
@@ -557,8 +691,191 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 					{snapshot.ikPasses.layers.reduce((sum: number, layer: any) => sum + layer.callbackCalls, 0)} callbacks ·{" "}
 					{snapshot.ikPasses.layers.reduce((sum: number, layer: any) => sum + layer.errorCount, 0)} errors
 				</div>
+				{this._renderHumanoidMuscleTrace(scene, controller, muscleTrace)}
 			</section>
 		);
+	}
+
+	private _renderHumanoidMuscleTrace(scene: Scene, controller: IAnimatorController, trace: any): ReactNode {
+		const roles = trace.current?.muscles.map((muscle: any) => ({ role: muscle.role, label: muscle.label })) ?? [];
+		const currentMuscles = (trace.current?.muscles ?? []).filter((muscle: any) => !this.state.muscleRoleFilter || muscle.role === this.state.muscleRoleFilter);
+		return (
+			<div className="space-y-2 rounded border border-input p-2 text-xs">
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<div>
+						<div className="font-medium">Humanoid Muscle Trace</div>
+						<div className="text-muted-foreground">Post Animator/behaviour/IK, before muscle-limit clamping · newest-first 256-sample buffer.</div>
+					</div>
+					<div className="flex items-center gap-2">
+						<select
+							className="h-8 rounded border border-border bg-background px-2"
+							value={this.state.muscleRoleFilter}
+							onChange={(event) => this.setState({ muscleRoleFilter: event.target.value })}
+							aria-label="Humanoid muscle role filter"
+						>
+							<option value="">All mapped muscles</option>
+							{roles.map((role: any) => (
+								<option key={role.role} value={role.role}>
+									{role.label}
+								</option>
+							))}
+						</select>
+						<Button size="sm" variant="ghost" disabled={!trace.history.total} onClick={() => this._clearHumanoidMuscleTrace(scene, controller)}>
+							Clear Trace
+						</Button>
+					</div>
+				</div>
+				{trace.enabled ? (
+					<>
+						<div className="grid gap-2 md:grid-cols-4">
+							<div className="rounded bg-secondary px-2 py-1">Avatar: {trace.avatarName ?? trace.avatarId}</div>
+							<div className="rounded bg-secondary px-2 py-1">Mapped: {trace.current?.mappedMuscleCount ?? 0}</div>
+							<div className="rounded bg-secondary px-2 py-1">Active: {trace.current?.activeMuscleCount ?? 0}</div>
+							<div className={`rounded px-2 py-1 ${trace.latest?.limitViolationCount ? "bg-destructive/20" : "bg-secondary"}`}>
+								Violations: {trace.latest?.limitViolationCount ?? 0}
+							</div>
+						</div>
+						<div className="grid gap-1">
+							{currentMuscles.slice(0, 16).map((muscle: any) => (
+								<div
+									key={muscle.role}
+									className={`grid grid-cols-[minmax(8rem,1fr)_auto_auto] gap-2 rounded px-2 py-1 ${muscle.withinLimits ? "bg-secondary" : "bg-destructive/20"}`}
+								>
+									<span>{muscle.label}</span>
+									<span className="font-mono">n [{muscle.normalized.map((value: number) => Number(value).toFixed(3)).join(", ")}]</span>
+									<span className="font-mono">° [{muscle.degrees.map((value: number) => Number(value).toFixed(1)).join(", ")}]</span>
+								</div>
+							))}
+							{currentMuscles.length > 16 && (
+								<div className="text-muted-foreground">Showing 16 of {currentMuscles.length}; choose a role to inspect it directly.</div>
+							)}
+						</div>
+						<div className="space-y-1">
+							<div className="font-medium">
+								Samples ({trace.history.total}
+								{trace.droppedSampleCount ? ` + ${trace.droppedSampleCount} dropped` : ""})
+							</div>
+							{trace.history.items.map((sample: any) => (
+								<div key={sample.sequence} className={`rounded px-2 py-1 ${sample.limitViolationCount ? "bg-destructive/20" : "bg-secondary"}`}>
+									#{sample.sequence} · {sample.runtimeSeconds.toFixed(3)}s · {sample.baseState ?? "Exited"} · max |n|{" "}
+									{sample.maximumAbsoluteNormalized.toFixed(3)} · max Δ {sample.maximumAbsoluteDeltaNormalized.toFixed(3)} · {sample.limitViolationCount}{" "}
+									violation(s)
+								</div>
+							))}
+							{!trace.history.total && <div className="text-muted-foreground">Awaiting the first running or stepped Animator sample.</div>}
+						</div>
+						{trace.lastError && <div className="text-destructive">Trace error: {trace.lastError}</div>}
+					</>
+				) : (
+					<div className="text-muted-foreground">Assign a Humanoid Avatar above to enable controller-integrated tracing.</div>
+				)}
+			</div>
+		);
+	}
+
+	private _setHumanoidAvatar(scene: Scene, controller: IAnimatorController, humanoidAvatarId: string | null): void {
+		try {
+			const current = getAnimatorHumanoidMuscleTraceForController(scene, { controllerId: controller.id, limit: 1 });
+			setAnimatorHumanoidMuscleTrace(scene, { controllerId: controller.id, expectedFingerprint: current.fingerprint, humanoidAvatarId }, { editor: this.props.editor });
+			this.setState((state) => ({ debugEnabled: true, debugRevision: state.debugRevision + 1 }));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private _clearHumanoidMuscleTrace(scene: Scene, controller: IAnimatorController): void {
+		try {
+			const current = getAnimatorHumanoidMuscleTraceForController(scene, { controllerId: controller.id, limit: 1 });
+			setAnimatorHumanoidMuscleTrace(scene, { controllerId: controller.id, expectedFingerprint: current.fingerprint, clearHistory: true }, { editor: this.props.editor });
+			this.setState((state) => ({ debugRevision: state.debugRevision + 1 }));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private _setRuntimeDebugPaused(scene: Scene, controller: IAnimatorController, paused: boolean): void {
+		try {
+			const snapshot = getAnimatorRuntimeDebug(scene, { controllerId: controller.id });
+			setAnimatorRuntimeDebug(scene, { controllerId: controller.id, expectedFingerprint: snapshot.debugger.fingerprint, paused }, { editor: this.props.editor });
+			this.setState((state) => ({ debugEnabled: true, debugRevision: state.debugRevision + 1 }));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private _stepRuntimeDebug(scene: Scene, controller: IAnimatorController): void {
+		try {
+			const snapshot = getAnimatorRuntimeDebug(scene, { controllerId: controller.id });
+			stepAnimatorRuntimeDebug(
+				scene,
+				{ controllerId: controller.id, expectedFingerprint: snapshot.debugger.fingerprint, deltaSeconds: 1 / 60, steps: 1 },
+				{ editor: this.props.editor }
+			);
+			this.setState((state) => ({ debugRevision: state.debugRevision + 1 }));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private _addRuntimeDebugBreakpoint(scene: Scene, controller: IAnimatorController): void {
+		const from = this.state.debugBreakpointFrom.trim();
+		const to = this.state.debugBreakpointTo.trim();
+		if (!from && !to) {
+			toast.error("Enter a source state, destination state, or both.");
+			return;
+		}
+		try {
+			const snapshot = getAnimatorRuntimeDebug(scene, { controllerId: controller.id });
+			setAnimatorRuntimeDebug(
+				scene,
+				{
+					controllerId: controller.id,
+					expectedFingerprint: snapshot.debugger.fingerprint,
+					breakpoints: [
+						...snapshot.debugger.breakpoints,
+						{
+							id: Tools.RandomId(),
+							layer: this.state.debugBreakpointLayer,
+							...(from ? { from } : {}),
+							...(to ? { to } : {}),
+							enabled: true,
+						},
+					],
+				},
+				{ editor: this.props.editor }
+			);
+			this.setState((state) => ({ debugBreakpointFrom: "", debugBreakpointTo: "", debugRevision: state.debugRevision + 1 }));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private _removeRuntimeDebugBreakpoint(scene: Scene, controller: IAnimatorController, id: string): void {
+		try {
+			const snapshot = getAnimatorRuntimeDebug(scene, { controllerId: controller.id });
+			setAnimatorRuntimeDebug(
+				scene,
+				{
+					controllerId: controller.id,
+					expectedFingerprint: snapshot.debugger.fingerprint,
+					breakpoints: snapshot.debugger.breakpoints.filter((breakpoint: any) => breakpoint.id !== id),
+				},
+				{ editor: this.props.editor }
+			);
+			this.setState((state) => ({ debugRevision: state.debugRevision + 1 }));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private _clearRuntimeDebugHistory(scene: Scene, controller: IAnimatorController): void {
+		try {
+			const snapshot = getAnimatorRuntimeDebug(scene, { controllerId: controller.id });
+			setAnimatorRuntimeDebug(scene, { controllerId: controller.id, expectedFingerprint: snapshot.debugger.fingerprint, clearHistory: true }, { editor: this.props.editor });
+			this.setState((state) => ({ debugRevision: state.debugRevision + 1 }));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		}
 	}
 
 	private _renderRootMotion(scene: Scene, controller: IAnimatorController): ReactNode {
@@ -1105,6 +1422,9 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 											Remove
 										</Button>
 									</div>
+									{this._renderStatePlayback(controller, state, (replacement) =>
+										this._replaceSubgraphState(scene, controller, subgraph, state.name, replacement)
+									)}
 									{this._renderStateBehaviours(scene, controller, state, { subgraphId: subgraph.id })}
 								</div>
 							))}
@@ -1464,6 +1784,7 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 						</div>
 					)}
 					{this._renderStateMask(scene, controller, state)}
+					{this._renderStatePlayback(controller, state, (replacement) => this._replaceState(scene, controller, state.name, replacement))}
 					{this._renderStateBehaviours(scene, controller, state)}
 					{this._renderGraphPosition(scene, controller, state)}
 					<div className="flex items-center justify-between gap-2">
@@ -1598,8 +1919,138 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 					</Button>
 				</div>
 				{this._renderStateMask(scene, controller, state)}
+				{this._renderStatePlayback(controller, state, (replacement) => this._replaceState(scene, controller, state.name, replacement))}
 				{this._renderStateBehaviours(scene, controller, state)}
 				{this._renderGraphPosition(scene, controller, state)}
+			</div>
+		);
+	}
+
+	private _renderStatePlayback(controller: IAnimatorController, state: IAnimatorState, onChange: (replacement: IAnimatorState) => void): ReactNode {
+		const source = state.unitySource;
+		const runtimeBindings = {
+			Speed: state.speedParameter === undefined ? source?.speedParameter : state.speedParameter,
+			Mirror: state.mirrorParameter === undefined ? source?.mirrorParameter : state.mirrorParameter,
+			"Cycle Offset": state.cycleOffsetParameter === undefined ? source?.cycleOffsetParameter : state.cycleOffsetParameter,
+			Time: state.timeParameter === undefined ? source?.timeParameter : state.timeParameter,
+		};
+		const floatParameters = Object.keys(controller.parameters).filter(
+			(name) => (controller.parameterTypes?.[name] ?? (typeof controller.parameters[name] === "number" ? "float" : "string")) === "float"
+		);
+		const boolParameters = Object.keys(controller.parameters).filter(
+			(name) => (controller.parameterTypes?.[name] ?? (typeof controller.parameters[name] === "boolean" ? "bool" : "string")) === "bool"
+		);
+		const bindings = source
+			? (
+					[
+						["Speed", source.speedParameter],
+						["Mirror", source.mirrorParameter],
+						["Cycle Offset", source.cycleOffsetParameter],
+						["Time", source.timeParameter],
+					] as Array<[string, string | null]>
+				).filter((entry): entry is [keyof typeof runtimeBindings, string] => !!entry[1])
+			: [];
+		return (
+			<div className="space-y-2 rounded border border-input/40 p-2 text-xs">
+				<div className="font-medium text-muted-foreground">State Playback</div>
+				<div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+					<label className="space-y-1">
+						<span className="text-muted-foreground">Speed</span>
+						<Input
+							type="number"
+							step="any"
+							value={String(state.speed ?? 1)}
+							onChange={(event) => onChange({ ...state, speed: Number(event.target.value) })}
+							aria-label={`${state.name} playback speed`}
+						/>
+					</label>
+					<label className="space-y-1">
+						<span className="text-muted-foreground">Cycle Offset</span>
+						<Input
+							type="number"
+							min={0}
+							max={1}
+							step="0.01"
+							value={String(state.cycleOffset ?? 0)}
+							onChange={(event) => onChange({ ...state, cycleOffset: Number(event.target.value) || undefined })}
+							aria-label={`${state.name} cycle offset`}
+						/>
+					</label>
+					<label className="flex items-end gap-2 pb-2">
+						<input type="checkbox" checked={state.loop ?? true} onChange={(event) => onChange({ ...state, loop: event.target.checked })} />
+						Loop
+					</label>
+					<label className="flex items-end gap-2 pb-2">
+						<input type="checkbox" checked={state.mirror ?? false} onChange={(event) => onChange({ ...state, mirror: event.target.checked || undefined })} />
+						Mirror
+					</label>
+					<label className="flex items-end gap-2 pb-2">
+						<input type="checkbox" checked={state.footIK ?? false} onChange={(event) => onChange({ ...state, footIK: event.target.checked || undefined })} />
+						Foot IK
+					</label>
+					<label className="flex items-end gap-2 pb-2">
+						<input
+							type="checkbox"
+							checked={state.writeDefaultValues ?? false}
+							onChange={(event) => onChange({ ...state, writeDefaultValues: event.target.checked || undefined })}
+						/>
+						Write Defaults
+					</label>
+				</div>
+				<div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+					{(
+						[
+							["Speed Parameter", "speedParameter", floatParameters],
+							["Mirror Parameter", "mirrorParameter", boolParameters],
+							["Cycle Parameter", "cycleOffsetParameter", floatParameters],
+							["Time Parameter", "timeParameter", floatParameters],
+						] as Array<[string, "speedParameter" | "mirrorParameter" | "cycleOffsetParameter" | "timeParameter", string[]]>
+					).map(([label, field, choices]) => (
+						<label className="space-y-1" key={field}>
+							<span className="text-muted-foreground">{label}</span>
+							<select
+								className="h-8 w-full rounded border border-input bg-background px-2"
+								value={state[field] ?? ""}
+								onChange={(event) => onChange({ ...state, [field]: event.target.value || null })}
+								aria-label={`${state.name} ${label.toLowerCase()}`}
+							>
+								<option value="">None</option>
+								{choices.map((name) => (
+									<option key={name} value={name}>
+										{name}
+									</option>
+								))}
+							</select>
+						</label>
+					))}
+				</div>
+				<label className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
+					<span className="text-muted-foreground">Tag</span>
+					<Input
+						value={state.tag ?? ""}
+						maxLength={256}
+						onChange={(event) => onChange({ ...state, tag: event.target.value || undefined })}
+						aria-label={`${state.name} tag`}
+					/>
+				</label>
+				{source && (
+					<div className="rounded bg-muted/40 p-2 text-muted-foreground">
+						Unity state fileID {source.fileId} · serializedVersion {source.serializedVersion ?? "unversioned"}
+						{source.footIKField && ` · Foot IK field ${source.footIKField}`}
+						{state.footIK !== undefined && ` · Foot IK ${state.footIK ? "on" : "off"} (bounded ground-contact runtime)`}
+						{state.writeDefaultValues !== undefined && ` · Write Defaults ${state.writeDefaultValues ? "on" : "off"} (bounded controller-default runtime)`}
+						{bindings.map(([label, parameter]) => (
+							<div key={label} className="text-amber-300">
+								{label} parameter “{parameter}” preserved
+								{runtimeBindings[label] === parameter
+									? " and executed at runtime."
+									: runtimeBindings[label]
+										? `; runtime uses “${runtimeBindings[label]}”.`
+										: "; runtime binding is disabled."}
+							</div>
+						))}
+					</div>
+				)}
 			</div>
 		);
 	}
@@ -2318,6 +2769,7 @@ export class EditorAnimatorPanel extends Component<IEditorAnimatorPanelProps, IE
 								Remove
 							</Button>
 						</div>
+						{this._renderStatePlayback(controller, state, (replacement) => this._replaceLayerState(scene, controller, layer, state.name, replacement))}
 						{this._renderStateBehaviours(scene, controller, state, { layer: layer.name })}
 					</div>
 				))}

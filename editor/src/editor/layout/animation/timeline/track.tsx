@@ -38,6 +38,7 @@ type ICurveTangentDrag = {
 	firstFrame: number;
 	svg: SVGSVGElement;
 };
+type ICurveTangentDragInput = Omit<ICurveTangentDrag, "initialValue" | "svg">;
 
 export class EditorAnimationTimelineItem extends Component<IEditorAnimationTimelineItemProps, IEditorAnimationTimelineItemState> {
 	/**
@@ -132,7 +133,7 @@ export class EditorAnimationTimelineItem extends Component<IEditorAnimationTimel
 																	fill={curveColors[component]}
 																	strokeWidth="0.5"
 																	onMouseDown={(event) =>
-																		this._startCurveTangentDrag(event, key, component, direction, minimum, maximum, frameSpan, firstFrame)
+																		this._startCurveTangentDrag(event, { key, component, direction, minimum, maximum, frameSpan, firstFrame })
 																	}
 																/>
 															</g>
@@ -297,13 +298,17 @@ export class EditorAnimationTimelineItem extends Component<IEditorAnimationTimel
 
 	private _getCurveComponents(): number[] {
 		const value = this.props.animation.getKeys()[0]?.value;
-		if (typeof value === "number") return [0];
+		if (typeof value === "number") {
+			return [0];
+		}
 		const components = value?.asArray?.();
 		return Array.isArray(components) ? components.map((_: number, index: number) => index).slice(0, 4) : [];
 	}
 
 	private _getCurveKeyComponent(key: IAnimationKey, component: number): number {
-		if (typeof key.value === "number") return key.value;
+		if (typeof key.value === "number") {
+			return key.value;
+		}
 		return key.value?.asArray?.()[component] ?? 0;
 	}
 
@@ -313,14 +318,18 @@ export class EditorAnimationTimelineItem extends Component<IEditorAnimationTimel
 			return;
 		}
 		const values = key.value?.asArray?.();
-		if (!Array.isArray(values) || typeof key.value?.copyFromFloats !== "function") return;
+		if (!Array.isArray(values) || typeof key.value?.copyFromFloats !== "function") {
+			return;
+		}
 		values[component] = scalar;
 		key.value.copyFromFloats(...values);
 	}
 
 	private _getCurveTangentComponent(key: IAnimationKey, direction: -1 | 1, component: number): number {
 		const tangent = direction < 0 ? key.inTangent : key.outTangent;
-		if (typeof tangent === "number") return tangent;
+		if (typeof tangent === "number") {
+			return tangent;
+		}
 		return tangent?.asArray?.()[component] ?? 0;
 	}
 
@@ -332,7 +341,9 @@ export class EditorAnimationTimelineItem extends Component<IEditorAnimationTimel
 		}
 		const existing = key[property] ?? key.value;
 		const values = existing?.asArray?.();
-		if (!Array.isArray(values) || typeof existing?.clone !== "function" || typeof existing?.copyFromFloats !== "function") return;
+		if (!Array.isArray(values) || typeof existing?.clone !== "function" || typeof existing?.copyFromFloats !== "function") {
+			return;
+		}
 		const tangent = existing.clone();
 		const tangentValues = tangent.asArray();
 		tangentValues[component] = scalar;
@@ -344,35 +355,24 @@ export class EditorAnimationTimelineItem extends Component<IEditorAnimationTimel
 		event.preventDefault();
 		event.stopPropagation();
 		const svg = event.currentTarget.ownerSVGElement;
-		if (!svg) return;
+		if (!svg) {
+			return;
+		}
 		this._curveValueDrag = { key, component, initialValue: this._getCurveKeyComponent(key, component), minimum, maximum, svg };
 		window.addEventListener("mousemove", this._onCurveValueDrag);
 		window.addEventListener("mouseup", this._stopCurveValueDrag, { once: true });
 	}
 
-	private _startCurveTangentDrag(
-		event: ReactMouseEvent<SVGCircleElement>,
-		key: IAnimationKey,
-		component: number,
-		direction: -1 | 1,
-		minimum: number,
-		maximum: number,
-		frameSpan: number,
-		firstFrame: number
-	): void {
+	private _startCurveTangentDrag(event: ReactMouseEvent<SVGCircleElement>, input: ICurveTangentDragInput): void {
 		event.preventDefault();
 		event.stopPropagation();
 		const svg = event.currentTarget.ownerSVGElement;
-		if (!svg) return;
+		if (!svg) {
+			return;
+		}
 		this._curveTangentDrag = {
-			key,
-			component,
-			direction,
-			initialValue: this._getCurveTangentComponent(key, direction, component),
-			minimum,
-			maximum,
-			frameSpan,
-			firstFrame,
+			...input,
+			initialValue: this._getCurveTangentComponent(input.key, input.direction, input.component),
 			svg,
 		};
 		window.addEventListener("mousemove", this._onCurveTangentDrag);
@@ -381,13 +381,19 @@ export class EditorAnimationTimelineItem extends Component<IEditorAnimationTimel
 
 	private _onCurveTangentDrag = (event: MouseEvent): void => {
 		const drag = this._curveTangentDrag;
-		if (!drag) return;
+		if (!drag) {
+			return;
+		}
 		const bounds = drag.svg.getBoundingClientRect();
-		if (!bounds.width || !bounds.height) return;
+		if (!bounds.width || !bounds.height) {
+			return;
+		}
 		const keyX = ((drag.key.frame - drag.firstFrame) / drag.frameSpan) * bounds.width;
 		const keyY = (36 - ((this._getCurveKeyComponent(drag.key, drag.component) - drag.minimum) / Math.max(0.00001, drag.maximum - drag.minimum)) * 32) * (bounds.height / 36);
 		const frameDelta = ((event.clientX - bounds.left - keyX) / bounds.width) * drag.frameSpan;
-		if (Math.abs(frameDelta) < 0.001 || Math.sign(frameDelta) !== drag.direction) return;
+		if (Math.abs(frameDelta) < 0.001 || Math.sign(frameDelta) !== drag.direction) {
+			return;
+		}
 		const valueDelta = -((event.clientY - bounds.top - keyY) / bounds.height) * Math.max(0.00001, drag.maximum - drag.minimum) * (36 / 32);
 		this._setCurveTangentComponent(drag.key, drag.direction, drag.component, valueDelta / frameDelta);
 		this.props.animationEditor.timelines.forceUpdate();
@@ -398,9 +404,13 @@ export class EditorAnimationTimelineItem extends Component<IEditorAnimationTimel
 		window.removeEventListener("mousemove", this._onCurveTangentDrag);
 		const drag = this._curveTangentDrag;
 		this._curveTangentDrag = null;
-		if (!drag) return;
+		if (!drag) {
+			return;
+		}
 		const value = this._getCurveTangentComponent(drag.key, drag.direction, drag.component);
-		if (value === drag.initialValue) return;
+		if (value === drag.initialValue) {
+			return;
+		}
 		registerUndoRedo({
 			executeRedo: false,
 			undo: () => this._setCurveTangentComponent(drag.key, drag.direction, drag.component, drag.initialValue),
@@ -410,9 +420,13 @@ export class EditorAnimationTimelineItem extends Component<IEditorAnimationTimel
 	};
 
 	private _onCurveValueDrag = (event: MouseEvent): void => {
-		if (!this._curveValueDrag) return;
+		if (!this._curveValueDrag) {
+			return;
+		}
 		const bounds = this._curveValueDrag.svg.getBoundingClientRect();
-		if (!bounds?.height) return;
+		if (!bounds?.height) {
+			return;
+		}
 		const ratio = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
 		const { key, component, minimum, maximum } = this._curveValueDrag;
 		this._setCurveKeyComponent(key, component, maximum - ratio * Math.max(0.00001, maximum - minimum));
@@ -424,7 +438,9 @@ export class EditorAnimationTimelineItem extends Component<IEditorAnimationTimel
 		window.removeEventListener("mousemove", this._onCurveValueDrag);
 		const drag = this._curveValueDrag;
 		this._curveValueDrag = null;
-		if (!drag || this._getCurveKeyComponent(drag.key, drag.component) === drag.initialValue) return;
+		if (!drag || this._getCurveKeyComponent(drag.key, drag.component) === drag.initialValue) {
+			return;
+		}
 		const value = this._getCurveKeyComponent(drag.key, drag.component);
 		registerUndoRedo({
 			executeRedo: false,

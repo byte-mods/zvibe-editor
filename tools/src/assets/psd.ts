@@ -1098,6 +1098,182 @@ export interface IPsdSmartObjectLayerInfo {
 	executionModel: "bounded-smart-object-v1";
 }
 
+export interface IPsdPuppetWarpUnitPoint {
+	x: { value: number; units: string };
+	y: { value: number; units: string };
+}
+
+export interface IPsdPuppetWarpBoundaryPath {
+	pathComponents: Array<{
+		shapeOperation: string;
+		paths: Array<{
+			closed: boolean;
+			points: Array<{
+				anchor: IPsdPuppetWarpUnitPoint;
+				forward: IPsdPuppetWarpUnitPoint;
+				backward: IPsdPuppetWarpUnitPoint;
+				smooth: boolean;
+			}>;
+		}>;
+	}>;
+}
+
+export interface IPsdPuppetWarpInfo {
+	rigidType: boolean;
+	bounds: [{ x: number; y: number }, { x: number; y: number }, { x: number; y: number }, { x: number; y: number }];
+	shapes: Array<{
+		rigidType: boolean;
+		meshVersionMajor: number;
+		meshVersionMinor: number;
+		originalVertices: Array<{ x: number; y: number }>;
+		deformedVertices: Array<{ x: number; y: number }>;
+		triangleIndices: number[];
+		pinOffsets: Array<{ x: number; y: number }>;
+		finalPinPositions: Array<{ x: number; y: number }>;
+		pinVertexIndices: number[];
+		pinPositions: Array<{ x: number; y: number }>;
+		pinRotationsDegrees: number[];
+		pinOverlays: boolean[];
+		pinDepths: number[];
+		selectedPins: number[];
+		meshQuality: number;
+		meshExpansion: number;
+		meshRigidity: number;
+		imageResolution: number;
+		boundaryPath: IPsdPuppetWarpBoundaryPath;
+	}>;
+	vertexEncoding: "little-endian-float32-pairs";
+	indexEncoding: "little-endian-uint32-triangles";
+}
+
+export interface IPsdOilPaintInfo {
+	descriptorVariant: "modern" | "legacyPlugin";
+	lightingOn: boolean;
+	stylization: number;
+	cleanliness: number;
+	brushScale: number;
+	bristleDetail: number;
+	lightDirectionDegrees: number;
+	shine: number;
+	legacyPlugin: {
+		kernelName: string;
+		gpuEnabled: boolean;
+		lightingEnabled: boolean;
+		filterPath: string;
+		parameters: Array<{ suffix: string; name: string; parameterType: number; value: number }>;
+	} | null;
+}
+
+export interface IPsdLiquifyInfo {
+	meshVersion: 2 | 3;
+	signature: "yfqLhseM";
+	formatMarker: 2;
+	headerBytes: 24 | 64;
+	meshWidth: number;
+	meshHeight: number;
+	imageWidth: number;
+	imageHeight: number;
+	repeatedImageWidth: number | null;
+	repeatedImageHeight: number | null;
+	reservedHeaderWords: number[];
+	meshByteLength: number;
+	trailingPaddingBytes: 0 | 8;
+	displacementEncoding: "little-endian-float32-pairs" | "little-endian-zero-run-rle-float32-pairs";
+	displacementCount: number;
+	nonzeroDisplacementCount: number;
+	rlePacketCount: number | null;
+	minimumDisplacement: { x: number; y: number };
+	maximumDisplacement: { x: number; y: number };
+	/** Exact decoded runtime field. Parsed PSD values keep this non-enumerable so MCP evidence stays bounded. */
+	displacements: Float32Array;
+}
+
+export interface IPsdDisplacementMapBindingEvidence {
+	filterIndex: number;
+	sourcePath: string;
+	sourceHash: string;
+	sourceBytes: number;
+	format: "psd" | "psb";
+	documentVersion: 1 | 2;
+	depth: 8 | 16 | 32;
+	colorMode: "rgb" | "grayscale";
+	channelMapping: "red-horizontal-green-vertical" | "grayscale-both-axes";
+	width: number;
+	height: number;
+	executionModel: "bounded-explicit-psd-displacement-map-binding-v1";
+}
+
+export interface IPsdDisplacementMapBinding extends IPsdDisplacementMapBindingEvidence {
+	/** Exact RGBA8 map raster. Extraction evidence keeps this runtime field out of serialized MCP responses. */
+	pixels: Uint8Array;
+}
+
+export interface IPsdDisplaceInfo {
+	horizontalScalePercent: number;
+	verticalScalePercent: number;
+	displacementMap: "stretchToFit" | "tile";
+	undefinedAreas: "wrapAround" | "repeatEdgePixels";
+	displacementFile: {
+		signature: string;
+		path: string;
+	};
+	mapBinding: IPsdDisplacementMapBindingEvidence | null;
+}
+
+export interface IPsdShearInfo {
+	curvePoints: Array<{ x: number; y: number }>;
+	curveStartIndex: number;
+	curveEndIndex: number;
+	undefinedAreas: "wrapAround" | "repeatEdgePixels";
+}
+
+export interface IPsdWaveInfo {
+	numberOfGenerators: number;
+	type: "sine" | "triangle" | "square";
+	wavelength: { minimum: number; maximum: number };
+	amplitude: { minimum: number; maximum: number };
+	scale: { horizontalPercent: number; verticalPercent: number };
+	randomSeed: number;
+	undefinedAreas: "wrapAround" | "repeatEdgePixels";
+}
+
+export interface IPsdHsbHslInfo {
+	inputMode: "rgb" | "hsb" | "hsl";
+	rowOrder: "rgb" | "hsb" | "hsl";
+}
+
+export interface IPsdPerspectiveWarpInfo {
+	vertices: Array<{ x: number; y: number }>;
+	warpedVertices: Array<{ x: number; y: number }>;
+	quads: Array<[number, number, number, number]>;
+	connectedEdgeCount: number;
+}
+
+export type PsdSmartFilterCurvesChannel = "composite" | "red" | "green" | "blue";
+
+export type IPsdSmartFilterCurvesAdjustment =
+	| {
+			channels: PsdSmartFilterCurvesChannel[];
+			mode: "curve";
+			points: Array<{ input: number; output: number; curved: boolean }>;
+	  }
+	| {
+			channels: PsdSmartFilterCurvesChannel[];
+			mode: "mapping";
+			values: number[];
+	  };
+
+export interface IPsdSmartFilterCurvesInfo {
+	presetKind: "custom" | "default";
+	adjustments: IPsdSmartFilterCurvesAdjustment[];
+}
+
+export interface IPsdSmartFilterBrightnessContrastInfo {
+	brightness: number;
+	contrast: number;
+	useLegacy: boolean;
+}
+
 export interface IPsdSmartFilterInfo {
 	index: number;
 	name: string;
@@ -1110,8 +1286,12 @@ export interface IPsdSmartFilterInfo {
 		| "colorHalftone"
 		| "clouds"
 		| "crystallize"
+		| "curves"
+		| "brightnessContrast"
+		| "customConvolution"
 		| "differenceClouds"
 		| "deInterlace"
+		| "displace"
 		| "diffuse"
 		| "fibers"
 		| "despeckle"
@@ -1123,8 +1303,10 @@ export interface IPsdSmartFilterInfo {
 		| "fragment"
 		| "gaussianBlur"
 		| "highPass"
+		| "hsbHsl"
 		| "invert"
 		| "lensFlare"
+		| "liquify"
 		| "maximum"
 		| "mezzotint"
 		| "median"
@@ -1132,7 +1314,19 @@ export interface IPsdSmartFilterInfo {
 		| "motionBlur"
 		| "mosaic"
 		| "ntscColors"
+		| "offset"
+		| "oilPaint"
+		| "perspectiveWarp"
+		| "pinch"
+		| "polarCoordinates"
 		| "pointillize"
+		| "puppetWarp"
+		| "ripple"
+		| "shear"
+		| "spherize"
+		| "twirl"
+		| "wave"
+		| "zigzag"
 		| "radialBlur"
 		| "reduceNoise"
 		| "sharpen"
@@ -1161,6 +1355,7 @@ export interface IPsdSmartFilterInfo {
 	clouds?: { randomSeed: number } | null;
 	differenceClouds?: { randomSeed: number } | null;
 	deInterlace?: { eliminate: "oddLines" | "evenLines"; newFieldsBy: "duplication" | "interpolation" } | null;
+	displace?: IPsdDisplaceInfo | null;
 	diffuse?: { mode: "normal" | "darkenOnly" | "lightenOnly" | "anisotropic"; randomSeed: number } | null;
 	fibers?: { variance: number; strength: number; randomSeed: number } | null;
 	lensFlare?: {
@@ -1168,6 +1363,7 @@ export interface IPsdSmartFilterInfo {
 		position: { x: number; y: number };
 		lensType: "50-300mm zoom" | "32mm prime" | "105mm prime" | "movie prime";
 	} | null;
+	liquify?: IPsdLiquifyInfo | null;
 	smartSharpen?: {
 		amountPercent: number;
 		radius: number;
@@ -1183,6 +1379,22 @@ export interface IPsdSmartFilterInfo {
 	unsharpMask?: { amountPercent: number; amountUnits: string; radius: number; radiusUnits: string; threshold: number } | null;
 	colorHalftone?: { radius: number; anglesDegrees: [number, number, number, number] } | null;
 	crystallize?: { cellSize: number; randomSeed: number } | null;
+	customConvolution?: { scale: number; offset: number; matrix: number[] } | null;
+	offset?: { horizontalPixels: number; verticalPixels: number; undefinedAreas: "setToTransparent" | "repeatEdgePixels" | "wrapAround" } | null;
+	oilPaint?: IPsdOilPaintInfo | null;
+	pinch?: { amountPercent: number } | null;
+	polarCoordinates?: { conversion: "rectangularToPolar" | "polarToRectangular" } | null;
+	puppetWarp?: IPsdPuppetWarpInfo | null;
+	ripple?: { amountPercent: number; size: "small" | "medium" | "large" } | null;
+	shear?: IPsdShearInfo | null;
+	spherize?: { amountPercent: number; mode: "normal" | "horizontalOnly" | "verticalOnly" } | null;
+	twirl?: { angleDegrees: number } | null;
+	wave?: IPsdWaveInfo | null;
+	zigzag?: { amountPercent: number; ridges: number; style: "aroundCenter" | "outFromCenter" | "pondRipples" } | null;
+	hsbHsl?: IPsdHsbHslInfo | null;
+	perspectiveWarp?: IPsdPerspectiveWarpInfo | null;
+	curves?: IPsdSmartFilterCurvesInfo | null;
+	brightnessContrast?: IPsdSmartFilterBrightnessContrastInfo | null;
 	dustAndScratches?: { radius: number; threshold: number } | null;
 	emboss?: { angleDegrees: number; heightPixels: number; amountPercent: number } | null;
 	extrude?: {
@@ -1240,11 +1452,14 @@ export type PsdSmartFilterAlgorithmExecutionModel =
 	| "bounded-cmyk-screen-color-halftone-smart-filter-v1"
 	| "bounded-seeded-fractal-clouds-smart-filter-v1"
 	| "bounded-seeded-voronoi-crystallize-smart-filter-v1"
+	| "bounded-custom-5x5-convolution-smart-filter-v1"
 	| "bounded-seeded-difference-clouds-smart-filter-v1"
 	| "bounded-field-reconstruction-de-interlace-smart-filter-v1"
+	| "bounded-explicit-map-displace-smart-filter-v1"
 	| "bounded-seeded-four-mode-diffuse-smart-filter-v1"
 	| "bounded-seeded-anisotropic-fibers-smart-filter-v1"
 	| "bounded-parameterized-lens-flare-smart-filter-v1"
+	| "bounded-authored-displacement-liquify-smart-filter-v1"
 	| "bounded-adaptive-smart-sharpen-v1"
 	| "bounded-thresholded-gaussian-unsharp-mask-v1"
 	| "bounded-despeckle-smart-filter-v1"
@@ -1267,6 +1482,21 @@ export type PsdSmartFilterAlgorithmExecutionModel =
 	| "bounded-motion-blur-smart-filter-v1"
 	| "bounded-premultiplied-mosaic-smart-filter-v1"
 	| "bounded-ntsc-colors-smart-filter-v1"
+	| "bounded-three-mode-offset-smart-filter-v1"
+	| "bounded-anisotropic-kuwahara-oil-paint-smart-filter-v1"
+	| "bounded-radial-power-pinch-smart-filter-v1"
+	| "bounded-aspect-correct-polar-coordinates-smart-filter-v1"
+	| "bounded-authored-triangle-mesh-puppet-warp-v1"
+	| "bounded-two-axis-sinusoidal-ripple-smart-filter-v1"
+	| "bounded-monotone-cubic-shear-smart-filter-v1"
+	| "bounded-axis-selective-spherical-spherize-smart-filter-v1"
+	| "bounded-radial-falloff-twirl-smart-filter-v1"
+	| "bounded-seeded-multi-generator-wave-smart-filter-v1"
+	| "bounded-aspect-correct-radial-zigzag-smart-filter-v1"
+	| "bounded-channel-model-hsb-hsl-smart-filter-v1"
+	| "bounded-piecewise-projective-perspective-warp-v1"
+	| "bounded-authored-channel-curves-smart-filter-v1"
+	| "bounded-modern-legacy-brightness-contrast-smart-filter-v1"
 	| "bounded-seeded-authored-canvas-pointillize-smart-filter-v2"
 	| "bounded-radial-blur-smart-filter-v1"
 	| "bounded-channel-chroma-deblock-reduce-noise-smart-filter-v1"
@@ -1754,7 +1984,9 @@ const MAXIMUM_PSD_SMART_FILTER_SAMPLE_VISITS = 64 * 1024 * 1024;
 const MAXIMUM_PSD_PATTERN_DIMENSION = 16_384;
 const MAXIMUM_PSD_PATTERN_PIXELS = 16_777_216;
 const MAXIMUM_PSD_PATTERN_CHANNELS = 64;
-const MAXIMUM_PSD_DESCRIPTOR_DEPTH = 16;
+// Puppet Warp boundary paths legitimately nest through filter/list/shape/path/component/subpath/point objects.
+// Keep a finite ceiling while accepting that real Photoshop writer structure.
+const MAXIMUM_PSD_DESCRIPTOR_DEPTH = 32;
 const MAXIMUM_PSD_DESCRIPTOR_ITEMS = 4096;
 const MAXIMUM_PSD_DESCRIPTOR_STRING_BYTES = 1024 * 1024;
 const MAXIMUM_PSD_VECTOR_MASK_SUBPATHS = 512;
@@ -2947,6 +3179,11 @@ interface IPsdDescriptorEnumValue {
 	value: string;
 }
 
+interface IPsdDescriptorPathValue {
+	signature: string;
+	path: string;
+}
+
 interface IPsdDescriptorObjectValue {
 	name: string;
 	classId: string;
@@ -2967,6 +3204,7 @@ type PsdDescriptorValue =
 	| Uint8Array
 	| IPsdDescriptorUnitValue
 	| IPsdDescriptorEnumValue
+	| IPsdDescriptorPathValue
 	| IPsdDescriptorObjectValue
 	| IPsdDescriptorObjectArrayValue
 	| PsdDescriptorValue[];
@@ -3124,6 +3362,34 @@ function readPsdDescriptorValue(bytes: Uint8Array, cursor: IPsdDescriptorCursor,
 		const value = bytes.slice(cursor.offset, cursor.offset + length);
 		cursor.offset += length;
 		return value;
+	}
+	if (type === "Pth ") {
+		const length = readInt32(bytes, cursor.offset, `${label} byte length`);
+		cursor.offset += 4;
+		if (length < 12 || length > MAXIMUM_PSD_DESCRIPTOR_STRING_BYTES) {
+			throw new Error(`Unsupported PSD: ${label} file path length ${length} exceeds the bounded descriptor path limit.`);
+		}
+		assertRange(bytes, cursor.offset, length, label);
+		const start = cursor.offset;
+		const signature = readAscii(bytes, cursor.offset, 4, `${label} signature`);
+		cursor.offset += 4;
+		const view = new DataView(bytes.buffer, bytes.byteOffset + cursor.offset, 8);
+		const repeatedLength = view.getInt32(0, true);
+		const characterCount = view.getInt32(4, true);
+		cursor.offset += 8;
+		const byteLength = characterCount * 2;
+		if (repeatedLength !== length || characterCount < 0 || !Number.isSafeInteger(byteLength) || 12 + byteLength !== length) {
+			throw new Error(`Malformed PSD: ${label} file path length fields do not match its exact payload.`);
+		}
+		let path = "";
+		for (let index = 0; index < characterCount; ++index) {
+			path += String.fromCharCode(new DataView(bytes.buffer, bytes.byteOffset + cursor.offset + index * 2, 2).getUint16(0, true));
+		}
+		cursor.offset += byteLength;
+		if (cursor.offset !== start + length) {
+			throw new Error(`Malformed PSD: ${label} file path did not consume its exact declared payload.`);
+		}
+		return { signature, path };
 	}
 	if (type === "ObAr") {
 		const version = readInt32(bytes, cursor.offset, `${label} version`);
@@ -4407,6 +4673,1469 @@ function descriptorNumberList(object: IPsdDescriptorObjectValue, key: string): n
 	return Array.isArray(value) && value.every((item) => typeof item === "number" && Number.isFinite(item)) ? (value as number[]) : [];
 }
 
+function parsePsdDisplaceDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): IPsdDisplaceInfo {
+	if (object.classId !== "Dspl") {
+		throw new Error(`Displace requires the Dspl descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1148416108) {
+		throw new Error(`Displace requires filterID 1148416108, received ${filterId}.`);
+	}
+	const allowedKeys = new Set(["HrzS", "VrtS", "DspM", "UndA", "DspF"]);
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Displace descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const unknownKeys = object.entries.filter((entry) => !allowedKeys.has(entry.key)).map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Displace descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const exactEntry = (key: string, type: string): { key: string; type: string; value: PsdDescriptorValue } => {
+		const entries = object.entries.filter((entry) => entry.key === key);
+		if (entries.length !== 1 || entries[0].type !== type) {
+			throw new Error(`Displace requires exactly one ${key} ${type} descriptor value.`);
+		}
+		return entries[0];
+	};
+	const horizontalEntry = exactEntry("HrzS", "long");
+	const verticalEntry = exactEntry("VrtS", "long");
+	const horizontalScalePercent = horizontalEntry.value;
+	const verticalScalePercent = verticalEntry.value;
+	if (
+		typeof horizontalScalePercent !== "number" ||
+		!Number.isInteger(horizontalScalePercent) ||
+		horizontalScalePercent < -999 ||
+		horizontalScalePercent > 999 ||
+		typeof verticalScalePercent !== "number" ||
+		!Number.isInteger(verticalScalePercent) ||
+		verticalScalePercent < -999 ||
+		verticalScalePercent > 999
+	) {
+		throw new Error("Displace horizontal and vertical scales must be exact integers from -999 to 999 percent.");
+	}
+	const exactEnum = (key: "DspM" | "UndA"): IPsdDescriptorEnumValue => {
+		const entry = exactEntry(key, "enum");
+		if (!entry.value || typeof entry.value !== "object" || Array.isArray(entry.value) || !("enumType" in entry.value)) {
+			throw new Error(`Displace ${key} must be one exact enum descriptor value.`);
+		}
+		const value = entry.value as IPsdDescriptorEnumValue;
+		if (value.enumType !== key) {
+			throw new Error(`Displace ${key} enum type must be ${key}, received ${value.enumType || "empty"}.`);
+		}
+		return value;
+	};
+	const mapValue = exactEnum("DspM").value;
+	const areaValue = exactEnum("UndA").value;
+	const displacementMaps = { StrF: "stretchToFit", Tile: "tile" } as const;
+	const undefinedAreas = { WrpA: "wrapAround", RptE: "repeatEdgePixels" } as const;
+	if (!(mapValue in displacementMaps)) {
+		throw new Error(`Displace DspM value ${mapValue || "empty"} is unsupported; Stretch To Fit or Tile is required.`);
+	}
+	if (!(areaValue in undefinedAreas)) {
+		throw new Error(`Displace UndA value ${areaValue || "empty"} is unsupported; Wrap Around or Repeat Edge Pixels is required.`);
+	}
+	const pathEntry = exactEntry("DspF", "Pth ");
+	if (!pathEntry.value || typeof pathEntry.value !== "object" || Array.isArray(pathEntry.value) || !("signature" in pathEntry.value) || !("path" in pathEntry.value)) {
+		throw new Error("Displace DspF must be one exact Photoshop file-path descriptor.");
+	}
+	const displacementFile = pathEntry.value as IPsdDescriptorPathValue;
+	if (!/^[\x20-\x7e]{4}$/.test(displacementFile.signature) || !displacementFile.path || displacementFile.path.length > 4096 || displacementFile.path.includes("\0")) {
+		throw new Error("Displace DspF requires a printable four-byte signature and a non-empty path of at most 4,096 characters with no NUL bytes.");
+	}
+	return {
+		horizontalScalePercent,
+		verticalScalePercent,
+		displacementMap: displacementMaps[mapValue as keyof typeof displacementMaps],
+		undefinedAreas: undefinedAreas[areaValue as keyof typeof undefinedAreas],
+		displacementFile: { signature: displacementFile.signature, path: displacementFile.path },
+		mapBinding: null,
+	};
+}
+
+function parsePsdPinchDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): { amountPercent: number } {
+	if (object.classId !== "Pnch") {
+		throw new Error(`Pinch requires the Pnch descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1349411688) {
+		throw new Error(`Pinch requires filterID 1349411688, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Pinch descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const unknownKeys = object.entries.filter((entry) => entry.key !== "Amnt").map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Pinch descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const amountEntries = object.entries.filter((entry) => entry.key === "Amnt");
+	if (amountEntries.length !== 1 || amountEntries[0].type !== "long" || typeof amountEntries[0].value !== "number") {
+		throw new Error("Pinch requires exactly one Amnt long descriptor value.");
+	}
+	const amountPercent = amountEntries[0].value;
+	if (!Number.isInteger(amountPercent) || amountPercent < -100 || amountPercent > 100) {
+		throw new Error("Pinch amount must be one exact integer from -100 to 100 percent.");
+	}
+	return { amountPercent };
+}
+
+function parsePsdPolarCoordinatesDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): { conversion: "rectangularToPolar" | "polarToRectangular" } {
+	if (object.classId !== "Plr ") {
+		throw new Error(`Polar Coordinates requires the Plr descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1349284384) {
+		throw new Error(`Polar Coordinates requires filterID 1349284384, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Polar Coordinates descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const unknownKeys = object.entries.filter((entry) => entry.key !== "Cnvr").map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Polar Coordinates descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const conversionEntries = object.entries.filter((entry) => entry.key === "Cnvr");
+	if (conversionEntries.length !== 1 || conversionEntries[0].type !== "enum") {
+		throw new Error("Polar Coordinates requires exactly one Cnvr enum descriptor value.");
+	}
+	const conversionValue = conversionEntries[0].value;
+	if (!conversionValue || typeof conversionValue !== "object" || Array.isArray(conversionValue) || !("enumType" in conversionValue)) {
+		throw new Error("Polar Coordinates Cnvr must be one exact enum descriptor value.");
+	}
+	const conversionEnum = conversionValue as IPsdDescriptorEnumValue;
+	if (conversionEnum.enumType !== "Cnvr") {
+		throw new Error(`Polar Coordinates Cnvr enum type must be Cnvr, received ${conversionEnum.enumType || "empty"}.`);
+	}
+	const conversions = { RctP: "rectangularToPolar", PlrR: "polarToRectangular" } as const;
+	if (!(conversionEnum.value in conversions)) {
+		throw new Error(`Polar Coordinates Cnvr value ${conversionEnum.value || "empty"} is unsupported; Rectangular To Polar or Polar To Rectangular is required.`);
+	}
+	return { conversion: conversions[conversionEnum.value as keyof typeof conversions] };
+}
+
+function parsePsdRippleDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): { amountPercent: number; size: "small" | "medium" | "large" } {
+	if (object.classId !== "Rple") {
+		throw new Error(`Ripple requires the Rple descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1383099493) {
+		throw new Error(`Ripple requires filterID 1383099493, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Ripple descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const unknownKeys = object.entries.filter((entry) => entry.key !== "Amnt" && entry.key !== "RplS").map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Ripple descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const amountEntries = object.entries.filter((entry) => entry.key === "Amnt");
+	if (amountEntries.length !== 1 || amountEntries[0].type !== "long" || typeof amountEntries[0].value !== "number") {
+		throw new Error("Ripple requires exactly one Amnt long descriptor value.");
+	}
+	const amountPercent = amountEntries[0].value;
+	if (!Number.isInteger(amountPercent) || amountPercent < -999 || amountPercent > 999) {
+		throw new Error("Ripple amount must be one exact integer from -999 to 999 percent.");
+	}
+	const sizeEntries = object.entries.filter((entry) => entry.key === "RplS");
+	if (sizeEntries.length !== 1 || sizeEntries[0].type !== "enum") {
+		throw new Error("Ripple requires exactly one RplS enum descriptor value.");
+	}
+	const sizeValue = sizeEntries[0].value;
+	if (!sizeValue || typeof sizeValue !== "object" || Array.isArray(sizeValue) || !("enumType" in sizeValue)) {
+		throw new Error("Ripple RplS must be one exact enum descriptor value.");
+	}
+	const sizeEnum = sizeValue as IPsdDescriptorEnumValue;
+	if (sizeEnum.enumType !== "RplS") {
+		throw new Error(`Ripple RplS enum type must be RplS, received ${sizeEnum.enumType || "empty"}.`);
+	}
+	const sizes = { "Sml ": "small", "Mdm ": "medium", "Lrg ": "large" } as const;
+	if (!(sizeEnum.value in sizes)) {
+		throw new Error(`Ripple RplS value ${sizeEnum.value || "empty"} is unsupported; Small, Medium, or Large is required.`);
+	}
+	return { amountPercent, size: sizes[sizeEnum.value as keyof typeof sizes] };
+}
+
+function parsePsdShearDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): IPsdShearInfo {
+	if (object.classId !== "Shr ") {
+		throw new Error(`Shear requires the Shr descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1399353888) {
+		throw new Error(`Shear requires filterID 1399353888, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Shear descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const allowedKeys = new Set(["ShrP", "UndA", "ShrS", "ShrE"]);
+	const unknownKeys = object.entries.filter((entry) => !allowedKeys.has(entry.key)).map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Shear descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const pointsEntries = object.entries.filter((entry) => entry.key === "ShrP");
+	if (pointsEntries.length !== 1 || pointsEntries[0].type !== "VlLs" || !Array.isArray(pointsEntries[0].value)) {
+		throw new Error("Shear requires exactly one ShrP descriptor list.");
+	}
+	const pointValues = pointsEntries[0].value;
+	if (pointValues.length < 2 || pointValues.length > 255) {
+		throw new Error("Shear ShrP must contain from 2 through 255 curve points.");
+	}
+	const curvePoints = pointValues.map((value, index): { x: number; y: number } => {
+		if (!value || typeof value !== "object" || Array.isArray(value) || !("entries" in value)) {
+			throw new Error(`Shear curve point ${index} must be one Pnt descriptor object.`);
+		}
+		const point = value as IPsdDescriptorObjectValue;
+		if (point.classId !== "Pnt ") {
+			throw new Error(`Shear curve point ${index} requires class Pnt, received ${point.classId || "empty"}.`);
+		}
+		const pointDuplicateKeys = duplicateDescriptorKeys(point);
+		if (pointDuplicateKeys.length) {
+			throw new Error(`Shear curve point ${index} contains duplicate key(s): ${pointDuplicateKeys.join(", ")}.`);
+		}
+		const pointUnknownKeys = point.entries.filter((entry) => entry.key !== "Hrzn" && entry.key !== "Vrtc").map((entry) => entry.key);
+		if (pointUnknownKeys.length) {
+			throw new Error(`Shear curve point ${index} contains unsupported key(s): ${pointUnknownKeys.join(", ")}.`);
+		}
+		const horizontalEntries = point.entries.filter((entry) => entry.key === "Hrzn");
+		const verticalEntries = point.entries.filter((entry) => entry.key === "Vrtc");
+		if (
+			horizontalEntries.length !== 1 ||
+			horizontalEntries[0].type !== "doub" ||
+			typeof horizontalEntries[0].value !== "number" ||
+			verticalEntries.length !== 1 ||
+			verticalEntries[0].type !== "doub" ||
+			typeof verticalEntries[0].value !== "number"
+		) {
+			throw new Error(`Shear curve point ${index} requires exact Hrzn/Vrtc double values.`);
+		}
+		const x = horizontalEntries[0].value;
+		const y = verticalEntries[0].value;
+		if (!Number.isInteger(x) || Math.abs(x) > 1_000_000 || !Number.isInteger(y) || y < 0 || y > 128) {
+			throw new Error(`Shear curve point ${index} requires an integer horizontal displacement within ±1000000 and an integer vertical coordinate from 0 through 128.`);
+		}
+		return { x, y };
+	});
+	for (let index = 1; index < curvePoints.length; ++index) {
+		if (curvePoints[index].y <= curvePoints[index - 1].y) {
+			throw new Error("Shear curve points must be strictly ordered by ascending vertical coordinate.");
+		}
+	}
+	const undefinedAreaEntries = object.entries.filter((entry) => entry.key === "UndA");
+	if (undefinedAreaEntries.length !== 1 || undefinedAreaEntries[0].type !== "enum") {
+		throw new Error("Shear requires exactly one UndA enum descriptor value.");
+	}
+	const undefinedAreaValue = undefinedAreaEntries[0].value;
+	if (!undefinedAreaValue || typeof undefinedAreaValue !== "object" || Array.isArray(undefinedAreaValue) || !("enumType" in undefinedAreaValue)) {
+		throw new Error("Shear UndA must be one exact enum descriptor value.");
+	}
+	const undefinedAreaEnum = undefinedAreaValue as IPsdDescriptorEnumValue;
+	if (undefinedAreaEnum.enumType !== "UndA") {
+		throw new Error(`Shear UndA enum type must be UndA, received ${undefinedAreaEnum.enumType || "empty"}.`);
+	}
+	const undefinedAreas = { WrpA: "wrapAround", RptE: "repeatEdgePixels" } as const;
+	if (!(undefinedAreaEnum.value in undefinedAreas)) {
+		throw new Error(`Shear UndA value ${undefinedAreaEnum.value || "empty"} is unsupported; Wrap Around or Repeat Edge Pixels is required.`);
+	}
+	const startEntries = object.entries.filter((entry) => entry.key === "ShrS");
+	const endEntries = object.entries.filter((entry) => entry.key === "ShrE");
+	if (
+		startEntries.length !== 1 ||
+		startEntries[0].type !== "long" ||
+		typeof startEntries[0].value !== "number" ||
+		endEntries.length !== 1 ||
+		endEntries[0].type !== "long" ||
+		typeof endEntries[0].value !== "number"
+	) {
+		throw new Error("Shear requires exact ShrS/ShrE long curve-index values.");
+	}
+	const curveStartIndex = startEntries[0].value;
+	const curveEndIndex = endEntries[0].value;
+	if (!Number.isInteger(curveStartIndex) || !Number.isInteger(curveEndIndex) || curveStartIndex < 0 || curveEndIndex >= curvePoints.length || curveStartIndex >= curveEndIndex) {
+		throw new Error("Shear ShrS/ShrE must select an ordered nonempty interval within the ShrP point list.");
+	}
+	return {
+		curvePoints,
+		curveStartIndex,
+		curveEndIndex,
+		undefinedAreas: undefinedAreas[undefinedAreaEnum.value as keyof typeof undefinedAreas],
+	};
+}
+
+function parsePsdSpherizeDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): { amountPercent: number; mode: "normal" | "horizontalOnly" | "verticalOnly" } {
+	if (object.classId !== "Sphr") {
+		throw new Error(`Spherize requires the Sphr descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1399875698) {
+		throw new Error(`Spherize requires filterID 1399875698, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Spherize descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const unknownKeys = object.entries.filter((entry) => entry.key !== "Amnt" && entry.key !== "SphM").map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Spherize descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const amountEntries = object.entries.filter((entry) => entry.key === "Amnt");
+	if (amountEntries.length !== 1 || amountEntries[0].type !== "long" || typeof amountEntries[0].value !== "number") {
+		throw new Error("Spherize requires exactly one Amnt long descriptor value.");
+	}
+	const amountPercent = amountEntries[0].value;
+	if (!Number.isInteger(amountPercent) || amountPercent < -100 || amountPercent > 100) {
+		throw new Error("Spherize amount must be one exact integer from -100 to 100 percent.");
+	}
+	const modeEntries = object.entries.filter((entry) => entry.key === "SphM");
+	if (modeEntries.length !== 1 || modeEntries[0].type !== "enum") {
+		throw new Error("Spherize requires exactly one SphM enum descriptor value.");
+	}
+	const modeValue = modeEntries[0].value;
+	if (!modeValue || typeof modeValue !== "object" || Array.isArray(modeValue) || !("enumType" in modeValue)) {
+		throw new Error("Spherize SphM must be one exact enum descriptor value.");
+	}
+	const modeEnum = modeValue as IPsdDescriptorEnumValue;
+	if (modeEnum.enumType !== "SphM") {
+		throw new Error(`Spherize SphM enum type must be SphM, received ${modeEnum.enumType || "empty"}.`);
+	}
+	const modes = { Nrml: "normal", HrzO: "horizontalOnly", VrtO: "verticalOnly" } as const;
+	if (!(modeEnum.value in modes)) {
+		throw new Error(`Spherize SphM value ${modeEnum.value || "empty"} is unsupported; Normal, Horizontal Only, or Vertical Only is required.`);
+	}
+	return { amountPercent, mode: modes[modeEnum.value as keyof typeof modes] };
+}
+
+function parsePsdTwirlDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): { angleDegrees: number } {
+	if (object.classId !== "Twrl") {
+		throw new Error(`Twirl requires the Twrl descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1417114220) {
+		throw new Error(`Twirl requires filterID 1417114220, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Twirl descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const unknownKeys = object.entries.filter((entry) => entry.key !== "Angl").map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Twirl descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const angleEntries = object.entries.filter((entry) => entry.key === "Angl");
+	if (angleEntries.length !== 1 || angleEntries[0].type !== "long" || typeof angleEntries[0].value !== "number") {
+		throw new Error("Twirl requires exactly one Angl long descriptor value.");
+	}
+	const angleDegrees = angleEntries[0].value;
+	if (!Number.isInteger(angleDegrees) || angleDegrees < -999 || angleDegrees > 999) {
+		throw new Error("Twirl angle must be one exact integer from -999 through 999 degrees.");
+	}
+	return { angleDegrees };
+}
+
+function parsePsdWaveDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): IPsdWaveInfo {
+	if (object.classId !== "Wave") {
+		throw new Error(`Wave requires the Wave descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1466005093) {
+		throw new Error(`Wave requires filterID 1466005093, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Wave descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const allowedKeys = new Set(["Wvtp", "NmbG", "WLMn", "WLMx", "AmMn", "AmMx", "SclH", "SclV", "UndA", "RndS"]);
+	const unknownKeys = object.entries.filter((entry) => !allowedKeys.has(entry.key)).map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Wave descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const exactLong = (key: string): number => {
+		const entries = object.entries.filter((entry) => entry.key === key);
+		if (entries.length !== 1 || entries[0].type !== "long" || typeof entries[0].value !== "number" || !Number.isInteger(entries[0].value)) {
+			throw new Error(`Wave requires exactly one ${key} long descriptor value.`);
+		}
+		return entries[0].value;
+	};
+	const exactEnum = (key: string, enumType: string): string => {
+		const entries = object.entries.filter((entry) => entry.key === key);
+		if (entries.length !== 1 || entries[0].type !== "enum") {
+			throw new Error(`Wave requires exactly one ${key} enum descriptor value.`);
+		}
+		const value = entries[0].value;
+		if (!value || typeof value !== "object" || Array.isArray(value) || !("enumType" in value)) {
+			throw new Error(`Wave ${key} must be one exact enum descriptor value.`);
+		}
+		const descriptorValue = value as IPsdDescriptorEnumValue;
+		if (descriptorValue.enumType !== enumType) {
+			throw new Error(`Wave ${key} enum type must be ${enumType}, received ${descriptorValue.enumType || "empty"}.`);
+		}
+		return descriptorValue.value;
+	};
+	const numberOfGenerators = exactLong("NmbG");
+	const minimumWavelength = exactLong("WLMn");
+	const maximumWavelength = exactLong("WLMx");
+	const minimumAmplitude = exactLong("AmMn");
+	const maximumAmplitude = exactLong("AmMx");
+	const horizontalScalePercent = exactLong("SclH");
+	const verticalScalePercent = exactLong("SclV");
+	const randomSeed = exactLong("RndS");
+	if (numberOfGenerators < 1 || numberOfGenerators > 999) {
+		throw new Error("Wave generator count must be one exact integer from 1 through 999.");
+	}
+	if (minimumWavelength < 1 || maximumWavelength > 999 || minimumWavelength >= maximumWavelength) {
+		throw new Error("Wave wavelength requires exact integers from 1 through 999 with minimum less than maximum.");
+	}
+	if (minimumAmplitude < 1 || maximumAmplitude > 999 || minimumAmplitude >= maximumAmplitude) {
+		throw new Error("Wave amplitude requires exact integers from 1 through 999 with minimum less than maximum.");
+	}
+	if (horizontalScalePercent < 1 || horizontalScalePercent > 100 || verticalScalePercent < 1 || verticalScalePercent > 100) {
+		throw new Error("Wave horizontal and vertical scale require exact integers from 1 through 100 percent.");
+	}
+	if (randomSeed < -2_147_483_648 || randomSeed > 2_147_483_647) {
+		throw new Error("Wave random seed must be one exact signed 32-bit integer.");
+	}
+	const typeValue = exactEnum("Wvtp", "Wvtp");
+	const types = { WvSn: "sine", WvTr: "triangle", WvSq: "square" } as const;
+	if (!(typeValue in types)) {
+		throw new Error(`Wave Wvtp value ${typeValue || "empty"} is unsupported; Sine, Triangle, or Square is required.`);
+	}
+	const undefinedAreaValue = exactEnum("UndA", "UndA");
+	const undefinedAreas = { WrpA: "wrapAround", RptE: "repeatEdgePixels" } as const;
+	if (!(undefinedAreaValue in undefinedAreas)) {
+		throw new Error(`Wave UndA value ${undefinedAreaValue || "empty"} is unsupported; Wrap Around or Repeat Edge Pixels is required.`);
+	}
+	return {
+		numberOfGenerators,
+		type: types[typeValue as keyof typeof types],
+		wavelength: { minimum: minimumWavelength, maximum: maximumWavelength },
+		amplitude: { minimum: minimumAmplitude, maximum: maximumAmplitude },
+		scale: { horizontalPercent: horizontalScalePercent, verticalPercent: verticalScalePercent },
+		randomSeed,
+		undefinedAreas: undefinedAreas[undefinedAreaValue as keyof typeof undefinedAreas],
+	};
+}
+
+function parsePsdZigZagDescriptor(
+	object: IPsdDescriptorObjectValue,
+	filterId: number | null
+): { amountPercent: number; ridges: number; style: "aroundCenter" | "outFromCenter" | "pondRipples" } {
+	if (object.classId !== "ZgZg") {
+		throw new Error(`ZigZag requires the ZgZg descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1516722791) {
+		throw new Error(`ZigZag requires filterID 1516722791, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`ZigZag descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const unknownKeys = object.entries.filter((entry) => entry.key !== "Amnt" && entry.key !== "NmbR" && entry.key !== "ZZTy").map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`ZigZag descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const amountEntries = object.entries.filter((entry) => entry.key === "Amnt");
+	const ridgeEntries = object.entries.filter((entry) => entry.key === "NmbR");
+	if (
+		amountEntries.length !== 1 ||
+		amountEntries[0].type !== "long" ||
+		typeof amountEntries[0].value !== "number" ||
+		!Number.isInteger(amountEntries[0].value) ||
+		ridgeEntries.length !== 1 ||
+		ridgeEntries[0].type !== "long" ||
+		typeof ridgeEntries[0].value !== "number" ||
+		!Number.isInteger(ridgeEntries[0].value)
+	) {
+		throw new Error("ZigZag requires exactly one Amnt long and one NmbR long descriptor value.");
+	}
+	const amountPercent = amountEntries[0].value;
+	const ridges = ridgeEntries[0].value;
+	if (amountPercent < -100 || amountPercent > 100) {
+		throw new Error("ZigZag amount must be one exact integer from -100 through 100 percent.");
+	}
+	if (ridges < 0 || ridges > 20) {
+		throw new Error("ZigZag ridges must be one exact integer from 0 through 20.");
+	}
+	const styleEntries = object.entries.filter((entry) => entry.key === "ZZTy");
+	if (styleEntries.length !== 1 || styleEntries[0].type !== "enum") {
+		throw new Error("ZigZag requires exactly one ZZTy enum descriptor value.");
+	}
+	const styleValue = styleEntries[0].value;
+	if (!styleValue || typeof styleValue !== "object" || Array.isArray(styleValue) || !("enumType" in styleValue)) {
+		throw new Error("ZigZag ZZTy must be one exact enum descriptor value.");
+	}
+	const styleEnum = styleValue as IPsdDescriptorEnumValue;
+	if (styleEnum.enumType !== "ZZTy") {
+		throw new Error(`ZigZag ZZTy enum type must be ZZTy, received ${styleEnum.enumType || "empty"}.`);
+	}
+	const styles = { ArnC: "aroundCenter", OtFr: "outFromCenter", PndR: "pondRipples" } as const;
+	if (!(styleEnum.value in styles)) {
+		throw new Error(`ZigZag ZZTy value ${styleEnum.value || "empty"} is unsupported; Around Center, Out From Center, or Pond Ripples is required.`);
+	}
+	return { amountPercent, ridges, style: styles[styleEnum.value as keyof typeof styles] };
+}
+
+function parsePsdHsbHslDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): IPsdHsbHslInfo {
+	if (object.classId !== "HsbP") {
+		throw new Error(`HSB/HSL requires the HsbP descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1215521360) {
+		throw new Error(`HSB/HSL requires filterID 1215521360, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`HSB/HSL descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const unknownKeys = object.entries.filter((entry) => entry.key !== "Inpt" && entry.key !== "Otpt").map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`HSB/HSL descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const exactMode = (key: "Inpt" | "Otpt", label: string): IPsdHsbHslInfo["inputMode"] => {
+		const entries = object.entries.filter((entry) => entry.key === key);
+		if (entries.length !== 1 || entries[0].type !== "enum") {
+			throw new Error(`HSB/HSL requires exactly one ${key} ClrS enum descriptor value.`);
+		}
+		const value = entries[0].value;
+		if (!value || typeof value !== "object" || Array.isArray(value) || !("enumType" in value)) {
+			throw new Error(`HSB/HSL ${key} must be one exact ClrS enum descriptor value.`);
+		}
+		const descriptorValue = value as IPsdDescriptorEnumValue;
+		if (descriptorValue.enumType !== "ClrS") {
+			throw new Error(`HSB/HSL ${key} enum type must be ClrS, received ${descriptorValue.enumType || "empty"}.`);
+		}
+		const modes = { RGBC: "rgb", HSBl: "hsb", HSLC: "hsl" } as const;
+		if (!(descriptorValue.value in modes)) {
+			throw new Error(`HSB/HSL ${label} ${descriptorValue.value || "empty"} is unsupported; RGB, HSB, or HSL is required.`);
+		}
+		return modes[descriptorValue.value as keyof typeof modes];
+	};
+	return { inputMode: exactMode("Inpt", "input mode"), rowOrder: exactMode("Otpt", "row order") };
+}
+
+function parsePsdPerspectiveWarpDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): IPsdPerspectiveWarpInfo {
+	if (object.classId !== "perspectiveWarpTransform") {
+		throw new Error(`Perspective Warp requires the perspectiveWarpTransform descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 442) {
+		throw new Error(`Perspective Warp requires filterID 442, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Perspective Warp descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const supportedKeys = new Set(["vertices", "warpedVertices", "quads"]);
+	const unknownKeys = object.entries.filter((entry) => !supportedKeys.has(entry.key)).map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Perspective Warp descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const exactList = (key: "vertices" | "warpedVertices" | "quads"): PsdDescriptorValue[] => {
+		const entries = object.entries.filter((entry) => entry.key === key);
+		if (entries.length !== 1 || entries[0].type !== "VlLs" || !Array.isArray(entries[0].value)) {
+			throw new Error(`Perspective Warp requires exactly one ${key} VlLs descriptor list.`);
+		}
+		return entries[0].value;
+	};
+	const parsePoint = (value: PsdDescriptorValue, label: string): { x: number; y: number } => {
+		if (!value || typeof value !== "object" || Array.isArray(value) || !("classId" in value)) {
+			throw new Error(`Perspective Warp ${label} must be one Pnt descriptor object.`);
+		}
+		const point = value as IPsdDescriptorObjectValue;
+		if (point.classId !== "Pnt ") {
+			throw new Error(`Perspective Warp ${label} class must be Pnt , received ${point.classId || "empty"}.`);
+		}
+		const duplicates = duplicateDescriptorKeys(point);
+		if (duplicates.length) {
+			throw new Error(`Perspective Warp ${label} contains duplicate key(s): ${duplicates.join(", ")}.`);
+		}
+		const unknown = point.entries.filter((entry) => entry.key !== "Hrzn" && entry.key !== "Vrtc").map((entry) => entry.key);
+		if (unknown.length) {
+			throw new Error(`Perspective Warp ${label} contains unsupported key(s): ${unknown.join(", ")}.`);
+		}
+		const coordinate = (key: "Hrzn" | "Vrtc"): number => {
+			const entries = point.entries.filter((entry) => entry.key === key);
+			const candidate = entries[0]?.value;
+			if (
+				entries.length !== 1 ||
+				entries[0].type !== "UntF" ||
+				!candidate ||
+				typeof candidate !== "object" ||
+				Array.isArray(candidate) ||
+				!("units" in candidate) ||
+				(candidate as IPsdDescriptorUnitValue).units !== "#Pxl" ||
+				!Number.isFinite((candidate as IPsdDescriptorUnitValue).value) ||
+				Math.abs((candidate as IPsdDescriptorUnitValue).value) > 1_000_000
+			) {
+				throw new Error(`Perspective Warp ${label}.${key} must be one finite #Pxl UntF coordinate within ±1,000,000 pixels.`);
+			}
+			return (candidate as IPsdDescriptorUnitValue).value;
+		};
+		return { x: coordinate("Hrzn"), y: coordinate("Vrtc") };
+	};
+	const vertexValues = exactList("vertices");
+	const warpedVertexValues = exactList("warpedVertices");
+	if (vertexValues.length < 4 || vertexValues.length > 512) {
+		throw new Error("Perspective Warp requires 4-512 source vertices.");
+	}
+	if (warpedVertexValues.length !== vertexValues.length) {
+		throw new Error("Perspective Warp warpedVertices must match the source vertex count exactly.");
+	}
+	const vertices = vertexValues.map((value, index) => parsePoint(value, `vertices[${index}]`));
+	const warpedVertices = warpedVertexValues.map((value, index) => parsePoint(value, `warpedVertices[${index}]`));
+	const quadValues = exactList("quads");
+	if (quadValues.length < 1 || quadValues.length > 128) {
+		throw new Error("Perspective Warp requires 1-128 authored plane quads.");
+	}
+	const quads = quadValues.map((value, quadIndex): [number, number, number, number] => {
+		if (!value || typeof value !== "object" || Array.isArray(value) || !("classId" in value)) {
+			throw new Error(`Perspective Warp quads[${quadIndex}] must be one null descriptor object.`);
+		}
+		const quad = value as IPsdDescriptorObjectValue;
+		if (quad.classId !== "null") {
+			throw new Error(`Perspective Warp quads[${quadIndex}] class must be null, received ${quad.classId || "empty"}.`);
+		}
+		const duplicates = duplicateDescriptorKeys(quad);
+		if (duplicates.length) {
+			throw new Error(`Perspective Warp quads[${quadIndex}] contains duplicate key(s): ${duplicates.join(", ")}.`);
+		}
+		const unknown = quad.entries.filter((entry) => entry.key !== "indices").map((entry) => entry.key);
+		const indexEntry = quad.entries.find((entry) => entry.key === "indices");
+		if (unknown.length) {
+			throw new Error(`Perspective Warp quads[${quadIndex}] contains unsupported key(s): ${unknown.join(", ")}.`);
+		}
+		if (!indexEntry || indexEntry.type !== "VlLs" || !Array.isArray(indexEntry.value) || indexEntry.value.length !== 4) {
+			throw new Error(`Perspective Warp quads[${quadIndex}] requires exactly four indices in one VlLs list.`);
+		}
+		const indices = indexEntry.value;
+		if (indices.some((index) => typeof index !== "number" || !Number.isInteger(index) || index < 0 || index >= vertices.length)) {
+			throw new Error(`Perspective Warp quads[${quadIndex}] indices must be exact in-range integers.`);
+		}
+		if (new Set(indices as number[]).size !== 4) {
+			throw new Error(`Perspective Warp quads[${quadIndex}] indices must reference four distinct vertices.`);
+		}
+		return indices as [number, number, number, number];
+	});
+	const referenced = new Set(quads.flat());
+	if (referenced.size !== vertices.length) {
+		throw new Error("Perspective Warp every source and warped vertex must be referenced by at least one plane quad.");
+	}
+	const winding = (points: Array<{ x: number; y: number }>, quad: [number, number, number, number], label: string): number => {
+		const crosses = quad.map((index, corner) => {
+			const current = points[index];
+			const next = points[quad[(corner + 1) % 4]];
+			const following = points[quad[(corner + 2) % 4]];
+			return (next.x - current.x) * (following.y - next.y) - (next.y - current.y) * (following.x - next.x);
+		});
+		if (crosses.some((cross) => Math.abs(cross) <= 1e-8)) {
+			throw new Error(`Perspective Warp ${label} must be a nondegenerate four-corner plane.`);
+		}
+		const sign = Math.sign(crosses[0]);
+		if (crosses.some((cross) => Math.sign(cross) !== sign)) {
+			throw new Error(`Perspective Warp ${label} must be a simple convex plane in boundary order.`);
+		}
+		return sign;
+	};
+	const quadKeys = new Set<string>();
+	const edges = new Map<string, { count: number; from: number; to: number }>();
+	for (let quadIndex = 0; quadIndex < quads.length; ++quadIndex) {
+		const quad = quads[quadIndex];
+		const key = [...quad].sort((left, right) => left - right).join(":");
+		if (quadKeys.has(key)) {
+			throw new Error(`Perspective Warp quads[${quadIndex}] duplicates an authored plane.`);
+		}
+		quadKeys.add(key);
+		if (winding(vertices, quad, `quads[${quadIndex}] source geometry`) !== winding(warpedVertices, quad, `quads[${quadIndex}] warped geometry`)) {
+			throw new Error(`Perspective Warp quads[${quadIndex}] changes orientation and would fold the plane.`);
+		}
+		for (let edgeIndex = 0; edgeIndex < 4; ++edgeIndex) {
+			const from = quad[edgeIndex];
+			const to = quad[(edgeIndex + 1) % 4];
+			const edgeKey = `${Math.min(from, to)}:${Math.max(from, to)}`;
+			const edge = edges.get(edgeKey);
+			if (!edge) {
+				edges.set(edgeKey, { count: 1, from, to });
+			} else {
+				if (edge.count >= 2) {
+					throw new Error(`Perspective Warp edge ${edgeKey} belongs to more than two plane quads.`);
+				}
+				if (edge.from === from && edge.to === to) {
+					throw new Error(`Perspective Warp connected edge ${edgeKey} must have opposite winding in adjacent quads.`);
+				}
+				edge.count += 1;
+			}
+		}
+	}
+	return { vertices, warpedVertices, quads, connectedEdgeCount: [...edges.values()].filter((edge) => edge.count === 2).length };
+}
+
+function parsePsdSmartFilterCurvesDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): IPsdSmartFilterCurvesInfo {
+	if (object.classId !== "Crvs") {
+		throw new Error(`Curves requires the Crvs descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1131574899) {
+		throw new Error(`Curves requires filterID 1131574899, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Curves descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const unknownKeys = object.entries.filter((entry) => entry.key !== "presetKind" && entry.key !== "Adjs").map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Curves descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const presetEntry = object.entries.find((entry) => entry.key === "presetKind");
+	const presetValue = presetEntry?.value;
+	if (
+		!presetEntry ||
+		presetEntry.type !== "enum" ||
+		!presetValue ||
+		typeof presetValue !== "object" ||
+		Array.isArray(presetValue) ||
+		!("enumType" in presetValue) ||
+		(presetValue as IPsdDescriptorEnumValue).enumType !== "presetKindType"
+	) {
+		throw new Error("Curves requires exactly one presetKindType presetKind enum.");
+	}
+	const presetValues = { presetKindCustom: "custom", presetKindDefault: "default" } as const;
+	const presetToken = (presetValue as IPsdDescriptorEnumValue).value;
+	if (!(presetToken in presetValues)) {
+		throw new Error(`Curves preset kind ${presetToken || "empty"} is unsupported; Custom or Default is required.`);
+	}
+	const presetKind = presetValues[presetToken as keyof typeof presetValues];
+	const adjustmentEntry = object.entries.find((entry) => entry.key === "Adjs");
+	if (!adjustmentEntry) {
+		if (presetKind === "custom") {
+			throw new Error("Curves Custom preset requires one non-empty Adjs descriptor list.");
+		}
+		return { presetKind, adjustments: [] };
+	}
+	if (adjustmentEntry.type !== "VlLs" || !Array.isArray(adjustmentEntry.value)) {
+		throw new Error("Curves Adjs must be one VlLs descriptor list.");
+	}
+	if (adjustmentEntry.value.length === 0) {
+		if (presetKind === "custom") {
+			throw new Error("Curves Custom preset requires at least one authored channel adjustment.");
+		}
+		return { presetKind, adjustments: [] };
+	}
+	if (presetKind === "default") {
+		throw new Error("Curves Default preset cannot contain authored channel adjustments.");
+	}
+	if (adjustmentEntry.value.length > 4) {
+		throw new Error("Curves supports at most four authored channel adjustments.");
+	}
+	const channelValues = { Cmps: "composite", "Rd  ": "red", "Grn ": "green", "Bl  ": "blue" } as const;
+	const assignedChannels = new Set<PsdSmartFilterCurvesChannel>();
+	const adjustments = adjustmentEntry.value.map((value, adjustmentIndex): IPsdSmartFilterCurvesAdjustment => {
+		if (!value || typeof value !== "object" || Array.isArray(value) || !("classId" in value)) {
+			throw new Error(`Curves Adjs[${adjustmentIndex}] must be one CrvA descriptor object.`);
+		}
+		const adjustment = value as IPsdDescriptorObjectValue;
+		if (adjustment.classId !== "CrvA") {
+			throw new Error(`Curves Adjs[${adjustmentIndex}] class must be CrvA, received ${adjustment.classId || "empty"}.`);
+		}
+		const duplicates = duplicateDescriptorKeys(adjustment);
+		if (duplicates.length) {
+			throw new Error(`Curves Adjs[${adjustmentIndex}] contains duplicate key(s): ${duplicates.join(", ")}.`);
+		}
+		const unknown = adjustment.entries.filter((entry) => entry.key !== "Chnl" && entry.key !== "Crv " && entry.key !== "Mpng").map((entry) => entry.key);
+		if (unknown.length) {
+			throw new Error(`Curves Adjs[${adjustmentIndex}] contains unsupported key(s): ${unknown.join(", ")}.`);
+		}
+		const channelEntry = adjustment.entries.find((entry) => entry.key === "Chnl");
+		if (!channelEntry || channelEntry.type !== "VlLs" || !Array.isArray(channelEntry.value) || channelEntry.value.length < 1 || channelEntry.value.length > 4) {
+			throw new Error(`Curves Adjs[${adjustmentIndex}] requires 1-4 channels in one Chnl VlLs list.`);
+		}
+		const channels = channelEntry.value.map((channelValue, channelIndex): PsdSmartFilterCurvesChannel => {
+			if (
+				!channelValue ||
+				typeof channelValue !== "object" ||
+				Array.isArray(channelValue) ||
+				!("enumType" in channelValue) ||
+				(channelValue as IPsdDescriptorEnumValue).enumType !== "Chnl"
+			) {
+				throw new Error(`Curves Adjs[${adjustmentIndex}].Chnl[${channelIndex}] must be one Chnl enum.`);
+			}
+			const token = (channelValue as IPsdDescriptorEnumValue).value;
+			if (!(token in channelValues)) {
+				throw new Error(`Curves Adjs[${adjustmentIndex}].Chnl[${channelIndex}] value ${token || "empty"} is unsupported.`);
+			}
+			const channel = channelValues[token as keyof typeof channelValues];
+			if (assignedChannels.has(channel)) {
+				throw new Error(`Curves channel ${channel} is assigned more than once.`);
+			}
+			assignedChannels.add(channel);
+			return channel;
+		});
+		const curveEntry = adjustment.entries.find((entry) => entry.key === "Crv ");
+		const mappingEntry = adjustment.entries.find((entry) => entry.key === "Mpng");
+		if ((curveEntry ? 1 : 0) + (mappingEntry ? 1 : 0) !== 1) {
+			throw new Error(`Curves Adjs[${adjustmentIndex}] requires exactly one Crv control-point list or Mpng mapping table.`);
+		}
+		if (curveEntry) {
+			if (curveEntry.type !== "VlLs" || !Array.isArray(curveEntry.value) || curveEntry.value.length < 2 || curveEntry.value.length > 16) {
+				throw new Error(`Curves Adjs[${adjustmentIndex}].Crv requires 2-16 control points in one VlLs list.`);
+			}
+			const points = curveEntry.value.map((pointValue, pointIndex) => {
+				if (!pointValue || typeof pointValue !== "object" || Array.isArray(pointValue) || !("classId" in pointValue)) {
+					throw new Error(`Curves Adjs[${adjustmentIndex}].Crv[${pointIndex}] must be one Pnt descriptor object.`);
+				}
+				const point = pointValue as IPsdDescriptorObjectValue;
+				if (point.classId !== "Pnt ") {
+					throw new Error(`Curves Adjs[${adjustmentIndex}].Crv[${pointIndex}] class must be Pnt , received ${point.classId || "empty"}.`);
+				}
+				const pointDuplicates = duplicateDescriptorKeys(point);
+				if (pointDuplicates.length) {
+					throw new Error(`Curves Adjs[${adjustmentIndex}].Crv[${pointIndex}] contains duplicate key(s): ${pointDuplicates.join(", ")}.`);
+				}
+				const pointUnknown = point.entries.filter((entry) => entry.key !== "Hrzn" && entry.key !== "Vrtc" && entry.key !== "Cnty").map((entry) => entry.key);
+				if (pointUnknown.length) {
+					throw new Error(`Curves Adjs[${adjustmentIndex}].Crv[${pointIndex}] contains unsupported key(s): ${pointUnknown.join(", ")}.`);
+				}
+				const coordinate = (key: "Hrzn" | "Vrtc"): number => {
+					const entries = point.entries.filter((entry) => entry.key === key);
+					if (
+						entries.length !== 1 ||
+						entries[0].type !== "doub" ||
+						typeof entries[0].value !== "number" ||
+						!Number.isFinite(entries[0].value) ||
+						entries[0].value < 0 ||
+						entries[0].value > 255
+					) {
+						throw new Error(`Curves Adjs[${adjustmentIndex}].Crv[${pointIndex}].${key} must be one finite 0-255 double.`);
+					}
+					return entries[0].value;
+				};
+				const continuityEntries = point.entries.filter((entry) => entry.key === "Cnty");
+				if (continuityEntries.length > 1 || (continuityEntries.length === 1 && (continuityEntries[0].type !== "bool" || typeof continuityEntries[0].value !== "boolean"))) {
+					throw new Error(`Curves Adjs[${adjustmentIndex}].Crv[${pointIndex}].Cnty must be one optional boolean.`);
+				}
+				return { input: coordinate("Hrzn"), output: coordinate("Vrtc"), curved: continuityEntries[0]?.value === true };
+			});
+			if (points.some((point, pointIndex) => pointIndex > 0 && point.input <= points[pointIndex - 1].input)) {
+				throw new Error(`Curves Adjs[${adjustmentIndex}] control-point inputs must be strictly increasing.`);
+			}
+			return { channels, mode: "curve", points };
+		}
+		if (mappingEntry!.type !== "VlLs" || !Array.isArray(mappingEntry!.value) || mappingEntry!.value.length !== 256) {
+			throw new Error(`Curves Adjs[${adjustmentIndex}].Mpng requires exactly 256 mapped values in one VlLs list.`);
+		}
+		const values = mappingEntry!.value;
+		if (values.some((mapped) => typeof mapped !== "number" || !Number.isInteger(mapped) || mapped < 0 || mapped > 255)) {
+			throw new Error(`Curves Adjs[${adjustmentIndex}].Mpng values must be exact 0-255 integers.`);
+		}
+		return { channels, mode: "mapping", values: values as number[] };
+	});
+	return { presetKind, adjustments };
+}
+
+function parsePsdSmartFilterBrightnessContrastDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): IPsdSmartFilterBrightnessContrastInfo {
+	if (object.classId !== "BrgC") {
+		throw new Error(`Brightness/Contrast requires the BrgC descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== 1114793795) {
+		throw new Error(`Brightness/Contrast requires filterID 1114793795, received ${filterId}.`);
+	}
+	const duplicateKeys = duplicateDescriptorKeys(object);
+	if (duplicateKeys.length) {
+		throw new Error(`Brightness/Contrast descriptor contains duplicate key(s): ${duplicateKeys.join(", ")}.`);
+	}
+	const expectedTypes = { Brgh: "long", Cntr: "long", useLegacy: "bool" } as const;
+	const unknownKeys = object.entries.filter((entry) => !(entry.key in expectedTypes)).map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Brightness/Contrast descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	for (const [key, type] of Object.entries(expectedTypes)) {
+		const entries = object.entries.filter((entry) => entry.key === key);
+		if (entries.length !== 1 || entries[0].type !== type) {
+			throw new Error(`Brightness/Contrast ${key} must be exactly one ${type} value.`);
+		}
+	}
+	const brightness = descriptorEntry(object, "Brgh");
+	const contrast = descriptorEntry(object, "Cntr");
+	const useLegacy = descriptorEntry(object, "useLegacy");
+	if (typeof brightness !== "number" || !Number.isInteger(brightness) || brightness < -150 || brightness > 150) {
+		throw new Error("Brightness/Contrast Brgh must be an exact integer from -150 through 150.");
+	}
+	if (typeof contrast !== "number" || !Number.isInteger(contrast) || contrast < -50 || contrast > 100) {
+		throw new Error("Brightness/Contrast Cntr must be an exact integer from -50 through 100.");
+	}
+	if (typeof useLegacy !== "boolean") {
+		throw new Error("Brightness/Contrast useLegacy must be an exact boolean.");
+	}
+	return { brightness, contrast, useLegacy };
+}
+
+function parsePsdLiquifyDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): IPsdLiquifyInfo {
+	if (object.classId !== "LqFy") {
+		throw new Error(`Liquify requires the LqFy descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== null && filterId !== 1282492025) {
+		throw new Error(`Liquify requires filterID 1282492025, received ${filterId}.`);
+	}
+	const meshEntries = object.entries.filter((entry) => entry.key === "LqMe");
+	if (meshEntries.length !== 1 || meshEntries[0].type !== "tdta" || !(meshEntries[0].value instanceof Uint8Array)) {
+		throw new Error("Liquify requires exactly one LqMe tdta byte-string mesh.");
+	}
+	const unknownKeys = object.entries.filter((entry) => entry.key !== "LqMe").map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Liquify descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const bytes = meshEntries[0].value;
+	if (bytes.byteLength < 24) {
+		throw new Error("Liquify mesh is shorter than the bounded 24-byte header.");
+	}
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	const uint32LittleEndian = (offset: number, label: string): number => {
+		if (offset < 0 || offset + 4 > bytes.byteLength) {
+			throw new Error(`Liquify mesh ${label} exceeds the stored byte string.`);
+		}
+		return view.getUint32(offset, true);
+	};
+	const float32LittleEndian = (offset: number, label: string): number => {
+		if (offset < 0 || offset + 4 > bytes.byteLength) {
+			throw new Error(`Liquify mesh ${label} exceeds the stored byte string.`);
+		}
+		const value = view.getFloat32(offset, true);
+		if (!Number.isFinite(value) || Math.abs(value) > 1_000_000) {
+			throw new Error(`Liquify mesh ${label} must be one finite displacement from -1,000,000 to 1,000,000 pixels.`);
+		}
+		return value;
+	};
+	const meshVersion = view.getUint32(0, false);
+	if (meshVersion !== 2 && meshVersion !== 3) {
+		throw new Error(`Liquify mesh version ${meshVersion} is unsupported; exact raw version 2 or zero-run RLE version 3 is required.`);
+	}
+	if (readAscii(bytes, 4, 8, "Liquify mesh signature") !== "yfqLhseM") {
+		throw new Error('Liquify mesh requires the exact "yfqLhseM" signature.');
+	}
+	const formatMarker = uint32LittleEndian(12, "format marker");
+	if (formatMarker !== 2) {
+		throw new Error(`Liquify mesh format marker ${formatMarker} is unsupported; marker 2 is required.`);
+	}
+	const meshWidth = uint32LittleEndian(16, "width");
+	const meshHeight = uint32LittleEndian(20, "height");
+	const displacementCount = meshWidth * meshHeight;
+	if (
+		meshWidth < 1 ||
+		meshHeight < 1 ||
+		meshWidth > MAXIMUM_PSD_DIMENSION ||
+		meshHeight > MAXIMUM_PSD_DIMENSION ||
+		!Number.isSafeInteger(displacementCount) ||
+		displacementCount > 1_048_576
+	) {
+		throw new Error("Liquify mesh dimensions must contain 1-1,048,576 bounded displacement cells.");
+	}
+	let headerBytes: 24 | 64;
+	let imageWidth: number;
+	let imageHeight: number;
+	let repeatedImageWidth: number | null = null;
+	let repeatedImageHeight: number | null = null;
+	let reservedHeaderWords: number[] = [];
+	let trailingPaddingBytes: 0 | 8 = 0;
+	let rlePacketCount: number | null = null;
+	const displacements = new Float32Array(displacementCount * 2);
+	if (meshVersion === 2) {
+		headerBytes = 24;
+		imageWidth = meshWidth;
+		imageHeight = meshHeight;
+		const payloadBytes = displacementCount * 8;
+		const trailingBytes = bytes.byteLength - headerBytes - payloadBytes;
+		if (trailingBytes !== 0 && trailingBytes !== 8) {
+			throw new Error(`Liquify raw version-2 mesh requires exactly ${payloadBytes} displacement bytes and optional eight-byte zero padding.`);
+		}
+		if (trailingBytes === 8) {
+			if (bytes.subarray(bytes.byteLength - 8).some((value) => value !== 0)) {
+				throw new Error("Liquify raw version-2 mesh trailing padding must contain exactly eight zero bytes.");
+			}
+			trailingPaddingBytes = 8;
+		}
+		for (let index = 0; index < displacements.length; ++index) {
+			displacements[index] = float32LittleEndian(headerBytes + index * 4, `raw displacement ${Math.floor(index / 2)} ${index % 2 === 0 ? "x" : "y"}`);
+		}
+	} else {
+		headerBytes = 64;
+		if (bytes.byteLength < headerBytes) {
+			throw new Error("Liquify zero-run RLE version-3 mesh is shorter than its 64-byte header.");
+		}
+		reservedHeaderWords = [24, 28, 32, 36, 48, 52].map((offset) => uint32LittleEndian(offset, `reserved header word ${offset / 4}`));
+		imageHeight = uint32LittleEndian(40, "image height");
+		imageWidth = uint32LittleEndian(44, "image width");
+		repeatedImageHeight = uint32LittleEndian(56, "repeated image height");
+		repeatedImageWidth = uint32LittleEndian(60, "repeated image width");
+		if (
+			imageWidth < 1 ||
+			imageHeight < 1 ||
+			imageWidth > MAXIMUM_PSD_DIMENSION ||
+			imageHeight > MAXIMUM_PSD_DIMENSION ||
+			imageWidth * imageHeight > MAXIMUM_PSD_PIXELS ||
+			repeatedImageWidth !== imageWidth ||
+			repeatedImageHeight !== imageHeight
+		) {
+			throw new Error("Liquify version-3 image dimensions must be bounded, positive, and exactly repeated in the header.");
+		}
+		let offset = headerBytes;
+		let packets = 0;
+		for (let row = 0; row < meshHeight; ++row) {
+			let column = 0;
+			while (column < meshWidth) {
+				const zeroRun = uint32LittleEndian(offset, `row ${row} zero run`);
+				offset += 4;
+				++packets;
+				if (zeroRun > meshWidth - column) {
+					throw new Error(`Liquify version-3 row ${row} zero run exceeds its remaining mesh width.`);
+				}
+				column += zeroRun;
+				if (column === meshWidth) {
+					break;
+				}
+				const valueRun = uint32LittleEndian(offset, `row ${row} value run`);
+				offset += 4;
+				++packets;
+				if (valueRun < 1 || valueRun > meshWidth - column) {
+					throw new Error(`Liquify version-3 row ${row} value run must make bounded forward progress.`);
+				}
+				for (let index = 0; index < valueRun; ++index) {
+					const displacementIndex = (row * meshWidth + column + index) * 2;
+					displacements[displacementIndex] = float32LittleEndian(offset, `row ${row} displacement ${column + index} x`);
+					displacements[displacementIndex + 1] = float32LittleEndian(offset + 4, `row ${row} displacement ${column + index} y`);
+					offset += 8;
+				}
+				column += valueRun;
+			}
+		}
+		if (offset !== bytes.byteLength) {
+			throw new Error(`Liquify version-3 mesh has ${bytes.byteLength - offset} unexpected trailing byte(s).`);
+		}
+		rlePacketCount = packets;
+	}
+	let nonzeroDisplacementCount = 0;
+	let minimumX = 0;
+	let minimumY = 0;
+	let maximumX = 0;
+	let maximumY = 0;
+	for (let index = 0; index < displacementCount; ++index) {
+		const x = displacements[index * 2];
+		const y = displacements[index * 2 + 1];
+		if (x !== 0 || y !== 0) {
+			++nonzeroDisplacementCount;
+		}
+		minimumX = Math.min(minimumX, x);
+		minimumY = Math.min(minimumY, y);
+		maximumX = Math.max(maximumX, x);
+		maximumY = Math.max(maximumY, y);
+	}
+	const result: IPsdLiquifyInfo = {
+		meshVersion,
+		signature: "yfqLhseM",
+		formatMarker: 2,
+		headerBytes,
+		meshWidth,
+		meshHeight,
+		imageWidth,
+		imageHeight,
+		repeatedImageWidth,
+		repeatedImageHeight,
+		reservedHeaderWords,
+		meshByteLength: bytes.byteLength,
+		trailingPaddingBytes,
+		displacementEncoding: meshVersion === 2 ? "little-endian-float32-pairs" : "little-endian-zero-run-rle-float32-pairs",
+		displacementCount,
+		nonzeroDisplacementCount,
+		rlePacketCount,
+		minimumDisplacement: { x: minimumX, y: minimumY },
+		maximumDisplacement: { x: maximumX, y: maximumY },
+		displacements,
+	};
+	Object.defineProperty(result, "displacements", { value: displacements, enumerable: false, writable: false, configurable: false });
+	return result;
+}
+
+function parsePsdOilPaintDescriptor(object: IPsdDescriptorObjectValue, filterId: number | null): IPsdOilPaintInfo {
+	const uniqueEntry = (key: string, label: string): { key: string; type: string; value: PsdDescriptorValue } => {
+		const matches = object.entries.filter((entry) => entry.key === key);
+		if (matches.length !== 1) {
+			throw new Error(`Oil Paint ${label} requires exactly one ${key} descriptor entry.`);
+		}
+		return matches[0];
+	};
+	const exactBoolean = (key: string, label: string): boolean => {
+		const entry = uniqueEntry(key, label);
+		if (entry.type !== "bool" || typeof entry.value !== "boolean") {
+			throw new Error(`Oil Paint ${label} ${key} must be an exact Boolean.`);
+		}
+		return entry.value;
+	};
+	const exactNumber = (key: string, label: string): number => {
+		const entry = uniqueEntry(key, label);
+		if ((entry.type !== "doub" && entry.type !== "long") || typeof entry.value !== "number" || !Number.isFinite(entry.value)) {
+			throw new Error(`Oil Paint ${label} ${key} must be one finite numeric descriptor value.`);
+		}
+		return entry.value;
+	};
+	const exactString = (key: string, label: string, maximumCharacters: number): string => {
+		const entry = uniqueEntry(key, label);
+		if (entry.type !== "TEXT" || typeof entry.value !== "string" || entry.value.length < 1 || entry.value.length > maximumCharacters) {
+			throw new Error(`Oil Paint ${label} ${key} must be one non-empty bounded TEXT value.`);
+		}
+		return entry.value;
+	};
+	const validateControls = (result: IPsdOilPaintInfo): IPsdOilPaintInfo => {
+		for (const [label, value] of [
+			["Stylization", result.stylization],
+			["Cleanliness", result.cleanliness],
+			["Scale", result.brushScale],
+			["Bristle Detail", result.bristleDetail],
+			["Shine", result.shine],
+		] as const) {
+			if (value < 0 || value > 10) {
+				throw new Error(`Oil Paint ${label} must be between 0 and 10.`);
+			}
+		}
+		if (result.lightDirectionDegrees < -360 || result.lightDirectionDegrees > 360) {
+			throw new Error("Oil Paint light direction must be between -360 and 360 degrees.");
+		}
+		return result;
+	};
+
+	if (object.classId === "oilPaint") {
+		if (filterId !== null && filterId !== 1122) {
+			throw new Error(`Oil Paint modern descriptor requires filterID 1122, received ${filterId}.`);
+		}
+		const expectedKeys = new Set(["lightingOn", "stylization", "cleanliness", "brushScale", "microBrush", "LghD", "specularity"]);
+		const unknownKeys = object.entries.filter((entry) => !expectedKeys.has(entry.key)).map((entry) => entry.key);
+		if (unknownKeys.length) {
+			throw new Error(`Oil Paint modern descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+		}
+		return validateControls({
+			descriptorVariant: "modern",
+			lightingOn: exactBoolean("lightingOn", "modern descriptor"),
+			stylization: exactNumber("stylization", "modern descriptor"),
+			cleanliness: exactNumber("cleanliness", "modern descriptor"),
+			brushScale: exactNumber("brushScale", "modern descriptor"),
+			bristleDetail: exactNumber("microBrush", "modern descriptor"),
+			lightDirectionDegrees: exactNumber("LghD", "modern descriptor"),
+			shine: exactNumber("specularity", "modern descriptor"),
+			legacyPlugin: null,
+		});
+	}
+
+	if (object.classId !== "PbPl") {
+		throw new Error(`Oil Paint requires the oilPaint or PbPl descriptor class, received ${object.classId || "empty"}.`);
+	}
+	if (filterId !== null && filterId !== 1348620396) {
+		throw new Error(`Oil Paint legacy plug-in descriptor requires filterID 1348620396, received ${filterId}.`);
+	}
+	const kernelName = exactString("KnNm", "legacy plug-in descriptor", 256);
+	const gpuEnabled = exactBoolean("GpuY", "legacy plug-in descriptor");
+	const lightingEnabled = exactBoolean("LIWy", "legacy plug-in descriptor");
+	const filterPath = exactString("FPth", "legacy plug-in descriptor", 4096);
+	const parameterNameEntries = object.entries.filter((entry) => /^PN[a-z]{2}$/.test(entry.key));
+	if (parameterNameEntries.length < 6 || parameterNameEntries.length > 64) {
+		throw new Error("Oil Paint legacy plug-in descriptor requires 6-64 bounded named parameters.");
+	}
+	const parameters = parameterNameEntries
+		.map((nameEntry) => {
+			const suffix = nameEntry.key.slice(2);
+			if (nameEntry.type !== "TEXT" || typeof nameEntry.value !== "string" || nameEntry.value.length < 1 || nameEntry.value.length > 256) {
+				throw new Error(`Oil Paint legacy parameter ${suffix} requires one bounded TEXT name.`);
+			}
+			const typeEntry = uniqueEntry(`PT${suffix}`, `legacy parameter ${suffix}`);
+			const valueEntry = uniqueEntry(`PF${suffix}`, `legacy parameter ${suffix}`);
+			if (typeEntry.type !== "long" || typeof typeEntry.value !== "number" || !Number.isInteger(typeEntry.value) || typeEntry.value < 0 || typeEntry.value > 255) {
+				throw new Error(`Oil Paint legacy parameter ${suffix} requires one integer PT type from 0 to 255.`);
+			}
+			if ((valueEntry.type !== "doub" && valueEntry.type !== "long") || typeof valueEntry.value !== "number" || !Number.isFinite(valueEntry.value)) {
+				throw new Error(`Oil Paint legacy parameter ${suffix} requires one finite PF value.`);
+			}
+			return { suffix, name: nameEntry.value, parameterType: typeEntry.value, value: valueEntry.value };
+		})
+		.sort((left, right) => left.suffix.localeCompare(right.suffix));
+	for (let index = 0; index < parameters.length; ++index) {
+		const expectedSuffix = `${String.fromCharCode(97 + Math.floor(index / 26))}${String.fromCharCode(97 + (index % 26))}`;
+		if (parameters[index].suffix !== expectedSuffix) {
+			throw new Error(`Oil Paint legacy parameter table must be contiguous from aa; expected ${expectedSuffix}, received ${parameters[index].suffix}.`);
+		}
+	}
+	const dynamicKeys = new Set(parameters.flatMap((parameter) => [`PN${parameter.suffix}`, `PT${parameter.suffix}`, `PF${parameter.suffix}`]));
+	const expectedKeys = new Set(["KnNm", "GpuY", "LIWy", "FPth", ...dynamicKeys]);
+	const unknownKeys = object.entries.filter((entry) => !expectedKeys.has(entry.key)).map((entry) => entry.key);
+	if (unknownKeys.length) {
+		throw new Error(`Oil Paint legacy plug-in descriptor contains unsupported key(s): ${unknownKeys.join(", ")}.`);
+	}
+	const normalizedParameters = new Map<string, number[]>();
+	for (const parameter of parameters) {
+		const normalizedName = parameter.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+		normalizedParameters.set(normalizedName, [...(normalizedParameters.get(normalizedName) ?? []), parameter.value]);
+	}
+	const semanticValue = (label: string, aliases: string[]): number => {
+		const values = aliases.flatMap((alias) => normalizedParameters.get(alias) ?? []);
+		if (values.length !== 1) {
+			throw new Error(`Oil Paint legacy plug-in descriptor requires exactly one ${label} parameter.`);
+		}
+		return values[0];
+	};
+	return validateControls({
+		descriptorVariant: "legacyPlugin",
+		lightingOn: lightingEnabled,
+		stylization: semanticValue("Stylization", ["stylization"]),
+		cleanliness: semanticValue("Cleanliness", ["cleanliness"]),
+		brushScale: semanticValue("Scale", ["scale", "brushscale"]),
+		bristleDetail: semanticValue("Bristle Detail", ["bristledetail", "microbrush"]),
+		lightDirectionDegrees: semanticValue("Angle", ["angle", "lightdirection", "angulardirection"]),
+		shine: semanticValue("Shine", ["shine", "specularity"]),
+		legacyPlugin: { kernelName, gpuEnabled, lightingEnabled, filterPath, parameters },
+	});
+}
+
+function parsePsdPuppetWarpDescriptor(object: IPsdDescriptorObjectValue): IPsdPuppetWarpInfo {
+	const isDescriptorObject = (value: PsdDescriptorValue): value is IPsdDescriptorObjectValue =>
+		Boolean(
+			value &&
+			typeof value === "object" &&
+			!Array.isArray(value) &&
+			!(value instanceof Uint8Array) &&
+			"classId" in value &&
+			"entries" in value &&
+			Array.isArray(value.entries)
+		);
+	const requireSingleEntry = (target: IPsdDescriptorObjectValue, key: string, types: readonly string[], label: string): (typeof target.entries)[number] => {
+		const matches = target.entries.filter((entry) => entry.key === key);
+		if (matches.length !== 1 || !types.includes(matches[0].type)) {
+			throw new Error(`${label} requires exactly one ${key} ${types.join("/")} value.`);
+		}
+		return matches[0];
+	};
+	const requireBoolean = (target: IPsdDescriptorObjectValue, key: string, label: string): boolean => {
+		const entry = requireSingleEntry(target, key, ["bool"], label);
+		if (typeof entry.value !== "boolean") {
+			throw new Error(`${label} ${key} must be Boolean.`);
+		}
+		return entry.value;
+	};
+	const requireNumber = (target: IPsdDescriptorObjectValue, key: string, label: string): number => {
+		const entry = requireSingleEntry(target, key, ["long", "doub"], label);
+		if (typeof entry.value !== "number" || !Number.isFinite(entry.value) || Math.abs(entry.value) > 1_000_000) {
+			throw new Error(`${label} ${key} must be a finite bounded number.`);
+		}
+		return entry.value;
+	};
+	const requireNumberList = (target: IPsdDescriptorObjectValue, key: string, label: string): number[] => {
+		const entry = requireSingleEntry(target, key, ["VlLs"], label);
+		if (!Array.isArray(entry.value) || !entry.value.every((value) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1_000_000)) {
+			throw new Error(`${label} ${key} must be a bounded numeric list.`);
+		}
+		return entry.value as number[];
+	};
+	const requireBooleanList = (target: IPsdDescriptorObjectValue, key: string, label: string): boolean[] => {
+		const entry = requireSingleEntry(target, key, ["VlLs"], label);
+		if (!Array.isArray(entry.value) || !entry.value.every((value) => typeof value === "boolean")) {
+			throw new Error(`${label} ${key} must be a Boolean list.`);
+		}
+		return entry.value as boolean[];
+	};
+	const requireObject = (target: IPsdDescriptorObjectValue, key: string, expectedClass: string, label: string): IPsdDescriptorObjectValue => {
+		const entry = requireSingleEntry(target, key, ["Objc", "GlbO"], label);
+		if (!isDescriptorObject(entry.value) || entry.value.classId !== expectedClass) {
+			throw new Error(`${label} ${key} must be a ${expectedClass} descriptor object.`);
+		}
+		return entry.value as IPsdDescriptorObjectValue;
+	};
+	const requireObjectList = (target: IPsdDescriptorObjectValue, key: string, expectedClass: string, label: string): IPsdDescriptorObjectValue[] => {
+		const entry = requireSingleEntry(target, key, ["VlLs"], label);
+		if (!Array.isArray(entry.value) || !entry.value.every((value) => isDescriptorObject(value) && value.classId === expectedClass)) {
+			throw new Error(`${label} ${key} must be a list of ${expectedClass} descriptor objects.`);
+		}
+		return entry.value as IPsdDescriptorObjectValue[];
+	};
+	const requireBytes = (target: IPsdDescriptorObjectValue, key: string, label: string): Uint8Array => {
+		const entry = requireSingleEntry(target, key, ["tdta"], label);
+		if (!(entry.value instanceof Uint8Array)) {
+			throw new Error(`${label} ${key} must be an opaque byte array.`);
+		}
+		return entry.value;
+	};
+	const pairNumbers = (values: number[], key: string, label: string): Array<{ x: number; y: number }> => {
+		if (values.length % 2 !== 0 || values.length > 8_192) {
+			throw new Error(`${label} ${key} must contain at most 4,096 complete coordinate pairs.`);
+		}
+		return Array.from({ length: values.length / 2 }, (_, index) => ({ x: values[index * 2], y: values[index * 2 + 1] }));
+	};
+	const float32Points = (bytes: Uint8Array, key: string, label: string): Array<{ x: number; y: number }> => {
+		if (bytes.byteLength < 24 || bytes.byteLength % 8 !== 0 || bytes.byteLength / 8 > 65_536) {
+			throw new Error(`${label} ${key} must contain 3-65,536 little-endian Float32 coordinate pairs.`);
+		}
+		const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+		const points = Array.from({ length: bytes.byteLength / 8 }, (_, index) => ({
+			x: view.getFloat32(index * 8, true),
+			y: view.getFloat32(index * 8 + 4, true),
+		}));
+		if (points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y) || Math.abs(point.x) > 1_000_000 || Math.abs(point.y) > 1_000_000)) {
+			throw new Error(`${label} ${key} contains a non-finite or excessive coordinate.`);
+		}
+		return points;
+	};
+	const uint32Indices = (bytes: Uint8Array, key: string, label: string): number[] => {
+		if (bytes.byteLength < 12 || bytes.byteLength % 12 !== 0 || bytes.byteLength / 12 > 65_536) {
+			throw new Error(`${label} ${key} must contain 1-65,536 little-endian Uint32 triangles.`);
+		}
+		const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+		return Array.from({ length: bytes.byteLength / 4 }, (_, index) => view.getUint32(index * 4, true));
+	};
+	const unitPoint = (target: IPsdDescriptorObjectValue, label: string): IPsdPuppetWarpUnitPoint => {
+		if (target.classId !== "Pnt ") {
+			throw new Error(`${label} must be a Pnt descriptor object.`);
+		}
+		const coordinate = (key: "Hrzn" | "Vrtc"): { value: number; units: string } => {
+			const entry = requireSingleEntry(target, key, ["UntF", "UnFl"], label);
+			if (!entry.value || typeof entry.value !== "object" || Array.isArray(entry.value) || !("units" in entry.value)) {
+				throw new Error(`${label} ${key} must be a unit value.`);
+			}
+			const value = entry.value as IPsdDescriptorUnitValue;
+			if (!Number.isFinite(value.value) || Math.abs(value.value) > 1_000_000) {
+				throw new Error(`${label} ${key} contains a non-finite or excessive coordinate.`);
+			}
+			return { value: value.value, units: value.units };
+		};
+		return { x: coordinate("Hrzn"), y: coordinate("Vrtc") };
+	};
+	const boundaryPath = (shape: IPsdDescriptorObjectValue, label: string): IPsdPuppetWarpBoundaryPath => {
+		const path = requireObject(shape, "meshBoundaryPath", "pathClass", label);
+		const components = requireObjectList(path, "pathComponents", "PaCm", `${label} boundary path`);
+		if (components.length < 1 || components.length > 64) {
+			throw new Error(`${label} boundary path requires 1-64 components.`);
+		}
+		let pathCount = 0;
+		let pointCount = 0;
+		return {
+			pathComponents: components.map((component, componentIndex) => {
+				const componentLabel = `${label} boundary component ${componentIndex}`;
+				const operationEntry = requireSingleEntry(component, "shapeOperation", ["enum", "TEXT"], componentLabel);
+				const operation =
+					typeof operationEntry.value === "string"
+						? operationEntry.value
+						: operationEntry.value && typeof operationEntry.value === "object" && !Array.isArray(operationEntry.value) && "value" in operationEntry.value
+							? String((operationEntry.value as IPsdDescriptorEnumValue).value)
+							: "";
+				if (!operation || operation.length > 128) {
+					throw new Error(`${componentLabel} shapeOperation must be a bounded value.`);
+				}
+				const paths = requireObjectList(component, "SbpL", "Sbpl", componentLabel);
+				pathCount += paths.length;
+				if (pathCount > 256) {
+					throw new Error(`${label} boundary path exceeds 256 subpaths.`);
+				}
+				return {
+					shapeOperation: operation.startsWith("shapeOperation.") ? operation.slice("shapeOperation.".length) : operation,
+					paths: paths.map((subpath, pathIndex) => {
+						const pathLabel = `${componentLabel} subpath ${pathIndex}`;
+						const closed = requireBoolean(subpath, "Clsp", pathLabel);
+						const points = requireObjectList(subpath, "Pts ", "Pthp", pathLabel);
+						pointCount += points.length;
+						if (points.length < 1 || pointCount > 4_096) {
+							throw new Error(`${label} boundary path requires 1-4,096 total points.`);
+						}
+						return {
+							closed,
+							points: points.map((point, pointIndex) => ({
+								anchor: unitPoint(requireObject(point, "Anch", "Pnt ", `${pathLabel} point ${pointIndex}`), `${pathLabel} point ${pointIndex} anchor`),
+								forward: unitPoint(requireObject(point, "Fwd ", "Pnt ", `${pathLabel} point ${pointIndex}`), `${pathLabel} point ${pointIndex} forward`),
+								backward: unitPoint(requireObject(point, "Bwd ", "Pnt ", `${pathLabel} point ${pointIndex}`), `${pathLabel} point ${pointIndex} backward`),
+								smooth: requireBoolean(point, "Smoo", `${pathLabel} point ${pointIndex}`),
+							})),
+						};
+					}),
+				};
+			}),
+		};
+	};
+	if (object.classId !== "rigidTransform") {
+		throw new Error("Puppet Warp filter must use the rigidTransform descriptor class.");
+	}
+	const bounds = Array.from({ length: 4 }, (_, index) => ({
+		x: requireNumber(object, `PuX${index}`, "Puppet Warp bounds"),
+		y: requireNumber(object, `PuY${index}`, "Puppet Warp bounds"),
+	})) as IPsdPuppetWarpInfo["bounds"];
+	const shapeObjects = requireObjectList(object, "puppetShapeList", "puppetShape", "Puppet Warp");
+	if (shapeObjects.length < 1 || shapeObjects.length > 32) {
+		throw new Error("Puppet Warp requires 1-32 authored puppet shapes.");
+	}
+	let totalVertices = 0;
+	let totalTriangles = 0;
+	const shapes = shapeObjects.map((shape, shapeIndex): IPsdPuppetWarpInfo["shapes"][number] => {
+		const label = `Puppet Warp shape ${shapeIndex}`;
+		const originalVertices = float32Points(requireBytes(shape, "originalVertexArray", label), "originalVertexArray", label);
+		const deformedVertices = float32Points(requireBytes(shape, "deformedVertexArray", label), "deformedVertexArray", label);
+		const triangleIndices = uint32Indices(requireBytes(shape, "indexArray", label), "indexArray", label);
+		if (deformedVertices.length !== originalVertices.length) {
+			throw new Error(`${label} original/deformed vertex counts must match exactly.`);
+		}
+		if (triangleIndices.some((index) => index >= originalVertices.length)) {
+			throw new Error(`${label} triangle indices must reference an authored vertex.`);
+		}
+		for (let index = 0; index < triangleIndices.length; index += 3) {
+			const [a, b, c] = triangleIndices.slice(index, index + 3);
+			const area = (vertices: Array<{ x: number; y: number }>): number =>
+				(vertices[b].x - vertices[a].x) * (vertices[c].y - vertices[a].y) - (vertices[b].y - vertices[a].y) * (vertices[c].x - vertices[a].x);
+			if (Math.abs(area(originalVertices)) < 1e-8 || Math.abs(area(deformedVertices)) < 1e-8) {
+				throw new Error(`${label} triangle ${index / 3} is degenerate in the original or deformed mesh.`);
+			}
+		}
+		totalVertices += originalVertices.length;
+		totalTriangles += triangleIndices.length / 3;
+		if (totalVertices > 65_536 || totalTriangles > 65_536) {
+			throw new Error("Puppet Warp exceeds the bounded 65,536-vertex/triangle aggregate limit.");
+		}
+		const pinOffsets = pairNumbers(requireNumberList(shape, "pinOffsets", label), "pinOffsets", label);
+		const finalPinPositions = pairNumbers(requireNumberList(shape, "posFinalPins", label), "posFinalPins", label);
+		const pinPositions = pairNumbers(requireNumberList(shape, "PinP", label), "PinP", label);
+		const pinVertexIndices = requireNumberList(shape, "pinVertexIndices", label);
+		const pinRotationsDegrees = requireNumberList(shape, "PnRt", label);
+		const pinOverlays = requireBooleanList(shape, "PnOv", label);
+		const pinDepths = requireNumberList(shape, "PnDp", label);
+		const selectedPins = requireNumberList(shape, "selectedPin", label);
+		const pinCount = pinOffsets.length;
+		if (
+			pinCount > 4_096 ||
+			[finalPinPositions.length, pinPositions.length, pinVertexIndices.length, pinRotationsDegrees.length, pinOverlays.length, pinDepths.length].some(
+				(length) => length !== pinCount
+			) ||
+			pinVertexIndices.some((value) => !Number.isInteger(value) || value < 0 || value >= originalVertices.length) ||
+			selectedPins.some((value) => !Number.isInteger(value) || value < 0 || value >= pinCount)
+		) {
+			throw new Error(`${label} pin arrays must share one bounded count and reference exact mesh vertices/pins.`);
+		}
+		const meshVersionMajor = requireNumber(shape, "VrsM", label);
+		const meshVersionMinor = requireNumber(shape, "VrsN", label);
+		if (!Number.isInteger(meshVersionMajor) || !Number.isInteger(meshVersionMinor) || meshVersionMajor < 0 || meshVersionMinor < 0) {
+			throw new Error(`${label} mesh version must contain nonnegative integers.`);
+		}
+		const imageResolution = requireNumber(shape, "imageResolution", label);
+		if (imageResolution <= 0) {
+			throw new Error(`${label} imageResolution must be positive.`);
+		}
+		return {
+			rigidType: requireBoolean(shape, "rigidType", label),
+			meshVersionMajor,
+			meshVersionMinor,
+			originalVertices,
+			deformedVertices,
+			triangleIndices,
+			pinOffsets,
+			finalPinPositions,
+			pinVertexIndices,
+			pinPositions,
+			pinRotationsDegrees,
+			pinOverlays,
+			pinDepths,
+			selectedPins,
+			meshQuality: requireNumber(shape, "meshQuality", label),
+			meshExpansion: requireNumber(shape, "meshExpansion", label),
+			meshRigidity: requireNumber(shape, "meshRigidity", label),
+			imageResolution,
+			boundaryPath: boundaryPath(shape, label),
+		};
+	});
+	return {
+		rigidType: requireBoolean(object, "rigidType", "Puppet Warp"),
+		bounds,
+		shapes,
+		vertexEncoding: "little-endian-float32-pairs",
+		indexEncoding: "little-endian-uint32-triangles",
+	};
+}
+
 type PsdTextEngineValue = null | boolean | number | string | PsdTextEngineValue[] | { [key: string]: PsdTextEngineValue };
 
 function isPsdTextEngineObject(value: PsdTextEngineValue | undefined): value is { [key: string]: PsdTextEngineValue } {
@@ -5107,11 +6836,14 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		1131180616: "colorHalftone",
 		1131177075: "clouds",
 		1131574132: "crystallize",
+		1131639917: "customConvolution",
 		1148089458: "deInterlace",
+		1148416108: "displace",
 		1147564611: "differenceClouds",
 		1147564832: "diffuse",
 		1180856947: "fibers",
 		1282306886: "lensFlare",
+		1282492025: "liquify",
 		1148416099: "despeckle",
 		1148417107: "dustAndScratches",
 		1164796531: "emboss",
@@ -5123,6 +6855,10 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		1181639749: "findEdges",
 		1181902701: "fragment",
 		1214736464: "highPass",
+		1215521360: "hsbHsl",
+		442: "perspectiveWarp",
+		1131574899: "curves",
+		1114793795: "brightnessContrast",
 		1298427424: "median",
 		1299082528: "minimum",
 		1299737888: "maximum",
@@ -5130,6 +6866,19 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		1299476034: "motionBlur",
 		1299407648: "mosaic",
 		1314149187: "ntscColors",
+		1332114292: "offset",
+		1348620396: "oilPaint",
+		1122: "oilPaint",
+		1349411688: "pinch",
+		1349284384: "polarCoordinates",
+		1383099493: "ripple",
+		1399353888: "shear",
+		1399875698: "spherize",
+		1417114220: "twirl",
+		1466005093: "wave",
+		1516722791: "zigzag",
+		991: "puppetWarp",
+		943: "puppetWarp",
 		1349416044: "pointillize",
 		1382313026: "radialBlur",
 		633: "reduceNoise",
@@ -5153,11 +6902,14 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		colorHalftone: "bounded-cmyk-screen-color-halftone-smart-filter-v1",
 		clouds: "bounded-seeded-fractal-clouds-smart-filter-v1",
 		crystallize: "bounded-seeded-voronoi-crystallize-smart-filter-v1",
+		customConvolution: "bounded-custom-5x5-convolution-smart-filter-v1",
 		differenceClouds: "bounded-seeded-difference-clouds-smart-filter-v1",
 		deInterlace: "bounded-field-reconstruction-de-interlace-smart-filter-v1",
+		displace: "bounded-explicit-map-displace-smart-filter-v1",
 		diffuse: "bounded-seeded-four-mode-diffuse-smart-filter-v1",
 		fibers: "bounded-seeded-anisotropic-fibers-smart-filter-v1",
 		lensFlare: "bounded-parameterized-lens-flare-smart-filter-v1",
+		liquify: "bounded-authored-displacement-liquify-smart-filter-v1",
 		smartSharpen: "bounded-adaptive-smart-sharpen-v1",
 		unsharpMask: "bounded-thresholded-gaussian-unsharp-mask-v1",
 		despeckle: "bounded-despeckle-smart-filter-v1",
@@ -5172,6 +6924,10 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		fragment: "bounded-fragment-smart-filter-v1",
 		gaussianBlur: "bounded-gaussian-blur-smart-filter-v1",
 		highPass: "bounded-high-pass-smart-filter-v1",
+		hsbHsl: "bounded-channel-model-hsb-hsl-smart-filter-v1",
+		perspectiveWarp: "bounded-piecewise-projective-perspective-warp-v1",
+		curves: "bounded-authored-channel-curves-smart-filter-v1",
+		brightnessContrast: "bounded-modern-legacy-brightness-contrast-smart-filter-v1",
 		invert: "bounded-invert-smart-filter-v1",
 		maximum: "bounded-maximum-smart-filter-v1",
 		mezzotint: "bounded-seeded-mezzotint-smart-filter-v1",
@@ -5180,6 +6936,17 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		motionBlur: "bounded-motion-blur-smart-filter-v1",
 		mosaic: "bounded-premultiplied-mosaic-smart-filter-v1",
 		ntscColors: "bounded-ntsc-colors-smart-filter-v1",
+		offset: "bounded-three-mode-offset-smart-filter-v1",
+		oilPaint: "bounded-anisotropic-kuwahara-oil-paint-smart-filter-v1",
+		pinch: "bounded-radial-power-pinch-smart-filter-v1",
+		polarCoordinates: "bounded-aspect-correct-polar-coordinates-smart-filter-v1",
+		puppetWarp: "bounded-authored-triangle-mesh-puppet-warp-v1",
+		ripple: "bounded-two-axis-sinusoidal-ripple-smart-filter-v1",
+		shear: "bounded-monotone-cubic-shear-smart-filter-v1",
+		spherize: "bounded-axis-selective-spherical-spherize-smart-filter-v1",
+		twirl: "bounded-radial-falloff-twirl-smart-filter-v1",
+		wave: "bounded-seeded-multi-generator-wave-smart-filter-v1",
+		zigzag: "bounded-aspect-correct-radial-zigzag-smart-filter-v1",
 		pointillize: "bounded-seeded-authored-canvas-pointillize-smart-filter-v2",
 		radialBlur: "bounded-radial-blur-smart-filter-v1",
 		reduceNoise: "bounded-channel-chroma-deblock-reduce-noise-smart-filter-v1",
@@ -5203,11 +6970,14 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		ClrH: "colorHalftone",
 		Clds: "clouds",
 		Crst: "crystallize",
+		Cstm: "customConvolution",
 		Dntr: "deInterlace",
+		Dspl: "displace",
 		DfrC: "differenceClouds",
 		"Dfs ": "diffuse",
 		Fbrs: "fibers",
 		LnsF: "lensFlare",
+		LqFy: "liquify",
 		smartSharpen: "smartSharpen",
 		UnsM: "unsharpMask",
 		Mztn: "mezzotint",
@@ -5216,8 +6986,24 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		"Mnm ": "minimum",
 		GsnB: "gaussianBlur",
 		HghP: "highPass",
+		HsbP: "hsbHsl",
+		perspectiveWarpTransform: "perspectiveWarp",
+		Crvs: "curves",
+		BrgC: "brightnessContrast",
 		MtnB: "motionBlur",
 		"Msc ": "mosaic",
+		Ofst: "offset",
+		oilPaint: "oilPaint",
+		PbPl: "oilPaint",
+		Pnch: "pinch",
+		"Plr ": "polarCoordinates",
+		Rple: "ripple",
+		"Shr ": "shear",
+		Sphr: "spherize",
+		Twrl: "twirl",
+		Wave: "wave",
+		ZgZg: "zigzag",
+		rigidTransform: "puppetWarp",
 		Pntl: "pointillize",
 		RdlB: "radialBlur",
 		denoise: "reduceNoise",
@@ -5276,6 +7062,123 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		const differenceCloudsRandomSeed = filter ? descriptorNumber(filter, "FlRs", Number.NaN) : Number.NaN;
 		const deInterlaceEliminateValue = filter ? descriptorEnum(filter, "IntE")?.value : null;
 		const deInterlaceNewFieldsValue = filter ? descriptorEnum(filter, "IntC")?.value : null;
+		let displace: IPsdDisplaceInfo | null = null;
+		let displaceParseWarning: string | null = null;
+		if (type === "displace" && filter) {
+			try {
+				displace = parsePsdDisplaceDescriptor(filter, filterId);
+			} catch (error) {
+				displaceParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let pinch: { amountPercent: number } | null = null;
+		let pinchParseWarning: string | null = null;
+		if (type === "pinch" && filter) {
+			try {
+				pinch = parsePsdPinchDescriptor(filter, filterId);
+			} catch (error) {
+				pinchParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let polarCoordinates: { conversion: "rectangularToPolar" | "polarToRectangular" } | null = null;
+		let polarCoordinatesParseWarning: string | null = null;
+		if (type === "polarCoordinates" && filter) {
+			try {
+				polarCoordinates = parsePsdPolarCoordinatesDescriptor(filter, filterId);
+			} catch (error) {
+				polarCoordinatesParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let ripple: { amountPercent: number; size: "small" | "medium" | "large" } | null = null;
+		let rippleParseWarning: string | null = null;
+		if (type === "ripple" && filter) {
+			try {
+				ripple = parsePsdRippleDescriptor(filter, filterId);
+			} catch (error) {
+				rippleParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let shear: IPsdShearInfo | null = null;
+		let shearParseWarning: string | null = null;
+		if (type === "shear" && filter) {
+			try {
+				shear = parsePsdShearDescriptor(filter, filterId);
+			} catch (error) {
+				shearParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let spherize: { amountPercent: number; mode: "normal" | "horizontalOnly" | "verticalOnly" } | null = null;
+		let spherizeParseWarning: string | null = null;
+		if (type === "spherize" && filter) {
+			try {
+				spherize = parsePsdSpherizeDescriptor(filter, filterId);
+			} catch (error) {
+				spherizeParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let twirl: { angleDegrees: number } | null = null;
+		let twirlParseWarning: string | null = null;
+		if (type === "twirl" && filter) {
+			try {
+				twirl = parsePsdTwirlDescriptor(filter, filterId);
+			} catch (error) {
+				twirlParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let wave: IPsdWaveInfo | null = null;
+		let waveParseWarning: string | null = null;
+		if (type === "wave" && filter) {
+			try {
+				wave = parsePsdWaveDescriptor(filter, filterId);
+			} catch (error) {
+				waveParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let zigzag: { amountPercent: number; ridges: number; style: "aroundCenter" | "outFromCenter" | "pondRipples" } | null = null;
+		let zigzagParseWarning: string | null = null;
+		if (type === "zigzag" && filter) {
+			try {
+				zigzag = parsePsdZigZagDescriptor(filter, filterId);
+			} catch (error) {
+				zigzagParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let hsbHsl: IPsdHsbHslInfo | null = null;
+		let hsbHslParseWarning: string | null = null;
+		if (type === "hsbHsl" && filter) {
+			try {
+				hsbHsl = parsePsdHsbHslDescriptor(filter, filterId);
+			} catch (error) {
+				hsbHslParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let perspectiveWarp: IPsdPerspectiveWarpInfo | null = null;
+		let perspectiveWarpParseWarning: string | null = null;
+		if (type === "perspectiveWarp" && filter) {
+			try {
+				perspectiveWarp = parsePsdPerspectiveWarpDescriptor(filter, filterId);
+			} catch (error) {
+				perspectiveWarpParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let curves: IPsdSmartFilterCurvesInfo | null = null;
+		let curvesParseWarning: string | null = null;
+		if (type === "curves" && filter) {
+			try {
+				curves = parsePsdSmartFilterCurvesDescriptor(filter, filterId);
+			} catch (error) {
+				curvesParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let brightnessContrast: IPsdSmartFilterBrightnessContrastInfo | null = null;
+		let brightnessContrastParseWarning: string | null = null;
+		if (type === "brightnessContrast" && filter) {
+			try {
+				brightnessContrast = parsePsdSmartFilterBrightnessContrastDescriptor(filter, filterId);
+			} catch (error) {
+				brightnessContrastParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
 		const diffuseModeValue = filter ? descriptorEnum(filter, "Md  ")?.value : null;
 		const diffuseRandomSeed = filter ? descriptorNumber(filter, "FlRs", Number.NaN) : Number.NaN;
 		const embossAngle = filter ? descriptorNumber(filter, "Angl", Number.NaN) : Number.NaN;
@@ -5304,6 +7207,15 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		const lensFlarePositionX = lensFlarePosition ? descriptorNumber(lensFlarePosition, "Hrzn", Number.NaN) : Number.NaN;
 		const lensFlarePositionY = lensFlarePosition ? descriptorNumber(lensFlarePosition, "Vrtc", Number.NaN) : Number.NaN;
 		const lensFlareTypeValue = filter ? descriptorEnum(filter, "Lns ")?.value : null;
+		let liquify: IPsdLiquifyInfo | null = null;
+		let liquifyParseWarning: string | null = null;
+		if (type === "liquify" && filter) {
+			try {
+				liquify = parsePsdLiquifyDescriptor(filter, filterId);
+			} catch (error) {
+				liquifyParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
 		const smartSharpenAmountUnit = filter ? descriptorUnit(filter, "Amnt") : null;
 		const smartSharpenThreshold = filter ? descriptorNumber(filter, "Thsh", Number.NaN) : Number.NaN;
 		const smartSharpenAngle = filter ? descriptorNumber(filter, "Angl", Number.NaN) : Number.NaN;
@@ -5323,6 +7235,30 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 		const colorHalftoneAngles = filter ? (["Ang1", "Ang2", "Ang3", "Ang4"].map((key) => descriptorNumber(filter, key, Number.NaN)) as [number, number, number, number]) : null;
 		const crystallizeCellSize = filter ? descriptorNumber(filter, "ClSz", Number.NaN) : Number.NaN;
 		const crystallizeRandomSeed = filter ? descriptorNumber(filter, "FlRs", Number.NaN) : Number.NaN;
+		const customConvolutionScale = filter ? descriptorNumber(filter, "Scl ", Number.NaN) : Number.NaN;
+		const customConvolutionOffset = filter ? descriptorNumber(filter, "Ofst", Number.NaN) : Number.NaN;
+		const customConvolutionMatrix = filter ? descriptorNumberList(filter, "Mtrx") : [];
+		const offsetHorizontalPixels = filter ? descriptorNumber(filter, "Hrzn", Number.NaN) : Number.NaN;
+		const offsetVerticalPixels = filter ? descriptorNumber(filter, "Vrtc", Number.NaN) : Number.NaN;
+		const offsetUndefinedAreaValue = filter ? descriptorEnum(filter, "Fl  ")?.value : null;
+		let oilPaint: IPsdOilPaintInfo | null = null;
+		let oilPaintParseWarning: string | null = null;
+		if (type === "oilPaint" && filter) {
+			try {
+				oilPaint = parsePsdOilPaintDescriptor(filter, filterId);
+			} catch (error) {
+				oilPaintParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
+		let puppetWarp: IPsdPuppetWarpInfo | null = null;
+		let puppetWarpParseWarning: string | null = null;
+		if (type === "puppetWarp" && filter) {
+			try {
+				puppetWarp = parsePsdPuppetWarpDescriptor(filter);
+			} catch (error) {
+				puppetWarpParseWarning = error instanceof Error ? error.message : String(error);
+			}
+		}
 		const mosaicCellSizeUnit = filter ? descriptorUnit(filter, "ClSz") : null;
 		const pointillizeCellSize = filter ? descriptorNumber(filter, "ClSz", Number.NaN) : Number.NaN;
 		const pointillizeRandomSeed = filter ? descriptorNumber(filter, "FlRs", Number.NaN) : Number.NaN;
@@ -5384,6 +7320,23 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 				? { radius: colorHalftoneRadius, anglesDegrees: colorHalftoneAngles }
 				: null;
 		const clouds = type === "clouds" && Number.isFinite(cloudsRandomSeed) ? { randomSeed: cloudsRandomSeed } : null;
+		const customConvolution =
+			type === "customConvolution" && Number.isFinite(customConvolutionScale) && Number.isFinite(customConvolutionOffset) && customConvolutionMatrix.every(Number.isFinite)
+				? { scale: customConvolutionScale, offset: customConvolutionOffset, matrix: customConvolutionMatrix }
+				: null;
+		const offsetUndefinedAreas = { Bckg: "setToTransparent", "Rpt ": "repeatEdgePixels", "Wrp ": "wrapAround" } as const;
+		const offset =
+			type === "offset" &&
+			Number.isFinite(offsetHorizontalPixels) &&
+			Number.isFinite(offsetVerticalPixels) &&
+			offsetUndefinedAreaValue &&
+			offsetUndefinedAreaValue in offsetUndefinedAreas
+				? {
+						horizontalPixels: offsetHorizontalPixels,
+						verticalPixels: offsetVerticalPixels,
+						undefinedAreas: offsetUndefinedAreas[offsetUndefinedAreaValue as keyof typeof offsetUndefinedAreas],
+					}
+				: null;
 		const differenceClouds = type === "differenceClouds" && Number.isFinite(differenceCloudsRandomSeed) ? { randomSeed: differenceCloudsRandomSeed } : null;
 		const deInterlaceEliminate = { ElmO: "oddLines", ElmE: "evenLines" } as const;
 		const deInterlaceNewFields = { CrtD: "duplication", CrtI: "interpolation" } as const;
@@ -5713,6 +7666,68 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 			warning = "Smart filter wind requires one exact Wind/Blast/Stagger method and one exact Left/Right direction.";
 		} else if (type === "deInterlace" && !deInterlace) {
 			warning = "Smart filter de-interlace requires one exact odd/even field elimination and one exact duplication/interpolation reconstruction method.";
+		} else if (type === "displace" && (!displace || displaceParseWarning)) {
+			warning = `Smart filter Displace requires exact integer -999..999% scales, Stretch To Fit/Tile, Wrap Around/Repeat Edge Pixels, and one exact stored Photoshop map path: ${displaceParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "displace") {
+			warning =
+				"Smart filter Displace requires one explicit project-contained PSD/PSB displacementMapBindings entry; its stored DspF path is evidence-only and is never followed.";
+		} else if (type === "pinch" && (!pinch || pinchParseWarning)) {
+			warning = `Smart filter Pinch requires one exact integer amount from -100% through 100%: ${pinchParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "polarCoordinates" && (!polarCoordinates || polarCoordinatesParseWarning)) {
+			warning = `Smart filter Polar Coordinates requires one exact Rectangular To Polar or Polar To Rectangular conversion: ${polarCoordinatesParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "ripple" && (!ripple || rippleParseWarning)) {
+			warning = `Smart filter Ripple requires one exact integer amount from -999% through 999% and one exact Small, Medium, or Large size: ${rippleParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "shear" && (!shear || shearParseWarning)) {
+			warning = `Smart filter Shear requires 2-255 exact ordered curve points, exact ShrS/ShrE indices, and one exact Wrap Around or Repeat Edge Pixels mode: ${shearParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "spherize" && (!spherize || spherizeParseWarning)) {
+			warning = `Smart filter Spherize requires one exact integer amount from -100% through 100% and one exact Normal, Horizontal Only, or Vertical Only mode: ${spherizeParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "twirl" && (!twirl || twirlParseWarning)) {
+			warning = `Smart filter Twirl requires one exact integer angle from -999 through 999 degrees: ${twirlParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "wave" && (!wave || waveParseWarning)) {
+			warning = `Smart filter Wave requires exact bounded generator, type, wavelength, amplitude, scale, seed, and undefined-area controls: ${waveParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "zigzag" && (!zigzag || zigzagParseWarning)) {
+			warning = `Smart filter ZigZag requires exact signed amount, ridge count, and Around Center, Out From Center, or Pond Ripples style: ${zigzagParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "hsbHsl" && (!hsbHsl || hsbHslParseWarning)) {
+			warning = `Smart filter HSB/HSL requires exact RGB, HSB, or HSL input mode and row order: ${hsbHslParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "perspectiveWarp" && (!perspectiveWarp || perspectiveWarpParseWarning)) {
+			warning = `Smart filter Perspective Warp requires exact bounded source/warped pixel vertices and simple convex indexed plane quads: ${perspectiveWarpParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "curves" && (!curves || curvesParseWarning)) {
+			warning = `Smart filter Curves requires exact Custom/Default preset state and unique composite/RGB control-point curves or 256-value mapping tables: ${curvesParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "brightnessContrast" && (!brightnessContrast || brightnessContrastParseWarning)) {
+			warning = `Smart filter Brightness/Contrast requires exact integer brightness -150..150, integer contrast -50..100, and Boolean modern/legacy state: ${brightnessContrastParseWarning ?? "descriptor is missing"}`;
+		} else if (
+			type === "customConvolution" &&
+			(!customConvolution ||
+				customConvolution.matrix.length !== 25 ||
+				customConvolution.matrix.some((value) => !Number.isInteger(value) || value < -999 || value > 999) ||
+				!Number.isInteger(customConvolution.scale) ||
+				customConvolution.scale === 0 ||
+				customConvolution.scale < -2_147_483_648 ||
+				customConvolution.scale > 2_147_483_647 ||
+				!Number.isInteger(customConvolution.offset) ||
+				customConvolution.offset < -2_147_483_648 ||
+				customConvolution.offset > 2_147_483_647)
+		) {
+			warning =
+				"Smart filter custom requires exactly 25 integer matrix weights from -999 to 999, one nonzero signed 32-bit integer scale, and one signed 32-bit integer offset.";
+		} else if (
+			type === "offset" &&
+			(!offset ||
+				!Number.isInteger(offset.horizontalPixels) ||
+				offset.horizontalPixels < -2_147_483_648 ||
+				offset.horizontalPixels > 2_147_483_647 ||
+				!Number.isInteger(offset.verticalPixels) ||
+				offset.verticalPixels < -2_147_483_648 ||
+				offset.verticalPixels > 2_147_483_647)
+		) {
+			warning =
+				"Smart filter offset requires exact signed 32-bit integer horizontal/vertical pixel displacements and one exact Set To Transparent/Repeat Edge Pixels/Wrap Around undefined-area mode.";
+		} else if (type === "puppetWarp" && (!puppetWarp || puppetWarpParseWarning)) {
+			warning = `Smart filter Puppet Warp requires one exact bounded authored solved triangle mesh with complete pin, boundary, version, quality, expansion, rigidity, and resolution evidence: ${puppetWarpParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "oilPaint" && (!oilPaint || oilPaintParseWarning)) {
+			warning = `Smart filter Oil Paint requires exact 0-10 Stylization/Cleanliness/Scale/Bristle Detail/Shine controls, -360..360 degree lighting angle, exact lighting state, and a supported modern or legacy descriptor: ${oilPaintParseWarning ?? "descriptor is missing"}`;
+		} else if (type === "liquify" && (!liquify || liquifyParseWarning)) {
+			warning = `Smart filter Liquify requires one exact bounded LqMe raw-v2 or zero-run-RLE-v3 authored displacement mesh: ${liquifyParseWarning ?? "descriptor is missing"}`;
 		} else if (
 			type === "fibers" &&
 			(!fibers ||
@@ -5895,6 +7910,7 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 			clouds,
 			differenceClouds,
 			deInterlace,
+			displace,
 			diffuse,
 			emboss,
 			extrude,
@@ -5903,10 +7919,27 @@ function parseSmartFilters(filterFx: IPsdDescriptorObjectValue | null): {
 			wind,
 			fibers,
 			lensFlare,
+			liquify,
 			smartSharpen,
 			unsharpMask,
 			colorHalftone,
 			crystallize,
+			customConvolution,
+			offset,
+			oilPaint,
+			pinch,
+			polarCoordinates,
+			puppetWarp,
+			ripple,
+			shear,
+			spherize,
+			twirl,
+			wave,
+			zigzag,
+			hsbHsl,
+			perspectiveWarp,
+			curves,
+			brightnessContrast,
 			dustAndScratches,
 			mezzotint,
 			mosaic,
@@ -11582,7 +13615,8 @@ export function applyPsdSmartFilters(
 	source: Pick<IDecodedPsdImage, "pixels" | "width" | "height">,
 	filters: IPsdSmartFilterInfo[],
 	stackEnabled = true,
-	shapeBlurKernelBindings: readonly IPsdShapeBlurKernelBinding[] = []
+	shapeBlurKernelBindings: readonly IPsdShapeBlurKernelBinding[] = [],
+	displacementMapBindings: readonly IPsdDisplacementMapBinding[] = []
 ): IPsdSmartFilterRenderResult {
 	if (
 		!Number.isSafeInteger(source.width) ||
@@ -11617,6 +13651,40 @@ export function applyPsdSmartFilters(
 		)
 	) {
 		throw new Error("PSD Shape Blur kernel bindings must contain at most 128 unique bounded exact 1-1024px coverage rasters.");
+	}
+	if (
+		!Array.isArray(displacementMapBindings) ||
+		displacementMapBindings.length > 128 ||
+		new Set(displacementMapBindings.map((binding) => binding.filterIndex)).size !== displacementMapBindings.length ||
+		displacementMapBindings.some(
+			(binding) =>
+				!Number.isSafeInteger(binding.filterIndex) ||
+				binding.filterIndex < 0 ||
+				binding.filterIndex >= filters.length ||
+				!binding.sourcePath ||
+				binding.sourcePath.length > 4096 ||
+				binding.sourcePath.includes("\0") ||
+				!/^[a-f0-9]{64}$/.test(binding.sourceHash) ||
+				!Number.isSafeInteger(binding.sourceBytes) ||
+				binding.sourceBytes <= 0 ||
+				binding.sourceBytes > 32 * 1024 * 1024 ||
+				(binding.format !== "psd" && binding.format !== "psb") ||
+				(binding.documentVersion !== 1 && binding.documentVersion !== 2) ||
+				(binding.format === "psd" ? binding.documentVersion !== 1 : binding.documentVersion !== 2) ||
+				(binding.depth !== 8 && binding.depth !== 16 && binding.depth !== 32) ||
+				(binding.colorMode !== "rgb" && binding.colorMode !== "grayscale") ||
+				(binding.colorMode === "rgb" ? binding.channelMapping !== "red-horizontal-green-vertical" : binding.channelMapping !== "grayscale-both-axes") ||
+				!Number.isSafeInteger(binding.width) ||
+				!Number.isSafeInteger(binding.height) ||
+				binding.width <= 0 ||
+				binding.height <= 0 ||
+				binding.width * binding.height > MAXIMUM_PSD_LAYER_PIXELS ||
+				!(binding.pixels instanceof Uint8Array) ||
+				binding.pixels.byteLength !== binding.width * binding.height * 4 ||
+				binding.executionModel !== "bounded-explicit-psd-displacement-map-binding-v1"
+		)
+	) {
+		throw new Error("PSD Displace map bindings must contain at most 128 unique bounded exact PSD/PSB RGBA8 rasters keyed by a valid filter index.");
 	}
 	let pixels = new Uint8Array(source.pixels);
 	const appliedFilterIndices: number[] = [];
@@ -12945,6 +15013,1618 @@ export function applyPsdSmartFilters(
 		}
 		return output;
 	};
+	const applyCustomConvolution = (input: Uint8Array, settings: NonNullable<IPsdSmartFilterInfo["customConvolution"]>, filter: IPsdSmartFilterInfo): Uint8Array => {
+		assertSmartFilterWork(filter, source.width * source.height * 25 * 3);
+		const output = new Uint8Array(input.length);
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const destinationOffset = (y * source.width + x) * 4;
+				output[destinationOffset + 3] = input[destinationOffset + 3];
+				if (input[destinationOffset + 3] === 0) {
+					continue;
+				}
+				for (let channel = 0; channel < 3; ++channel) {
+					let weightedSum = 0;
+					for (let matrixY = 0; matrixY < 5; ++matrixY) {
+						const sampleY = Math.max(0, Math.min(source.height - 1, y + matrixY - 2));
+						for (let matrixX = 0; matrixX < 5; ++matrixX) {
+							const sampleX = Math.max(0, Math.min(source.width - 1, x + matrixX - 2));
+							const sampleOffset = (sampleY * source.width + sampleX) * 4;
+							const sample = input[sampleOffset + 3] === 0 ? 0 : input[sampleOffset + channel];
+							weightedSum += sample * settings.matrix[matrixY * 5 + matrixX];
+						}
+					}
+					output[destinationOffset + channel] = Math.max(0, Math.min(255, Math.round(weightedSum / settings.scale + settings.offset)));
+				}
+			}
+		}
+		return output;
+	};
+	const applyOffset = (input: Uint8Array, settings: NonNullable<IPsdSmartFilterInfo["offset"]>, filter: IPsdSmartFilterInfo): Uint8Array => {
+		assertSmartFilterWork(filter, source.width * source.height * 4);
+		const output = new Uint8Array(input.length);
+		const wrap = (value: number, size: number): number => ((value % size) + size) % size;
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				let sampleX = x - settings.horizontalPixels;
+				let sampleY = y - settings.verticalPixels;
+				const outside = sampleX < 0 || sampleX >= source.width || sampleY < 0 || sampleY >= source.height;
+				if (outside && settings.undefinedAreas === "setToTransparent") {
+					continue;
+				}
+				if (settings.undefinedAreas === "wrapAround") {
+					sampleX = wrap(sampleX, source.width);
+					sampleY = wrap(sampleY, source.height);
+				} else {
+					sampleX = Math.max(0, Math.min(source.width - 1, sampleX));
+					sampleY = Math.max(0, Math.min(source.height - 1, sampleY));
+				}
+				const sourceOffset = (sampleY * source.width + sampleX) * 4;
+				const destinationOffset = (y * source.width + x) * 4;
+				output[destinationOffset + 3] = input[sourceOffset + 3];
+				if (input[sourceOffset + 3] !== 0) {
+					output[destinationOffset] = input[sourceOffset];
+					output[destinationOffset + 1] = input[sourceOffset + 1];
+					output[destinationOffset + 2] = input[sourceOffset + 2];
+				}
+			}
+		}
+		return output;
+	};
+	const applyDisplace = (input: Uint8Array, settings: IPsdDisplaceInfo, binding: IPsdDisplacementMapBinding, filter: IPsdSmartFilterInfo): Uint8Array => {
+		assertSmartFilterWork(filter, source.width * source.height * 12);
+		if (
+			!Number.isInteger(settings.horizontalScalePercent) ||
+			settings.horizontalScalePercent < -999 ||
+			settings.horizontalScalePercent > 999 ||
+			!Number.isInteger(settings.verticalScalePercent) ||
+			settings.verticalScalePercent < -999 ||
+			settings.verticalScalePercent > 999 ||
+			(settings.displacementMap !== "stretchToFit" && settings.displacementMap !== "tile") ||
+			(settings.undefinedAreas !== "wrapAround" && settings.undefinedAreas !== "repeatEdgePixels") ||
+			!settings.displacementFile.signature ||
+			settings.displacementFile.signature.length !== 4 ||
+			!settings.displacementFile.path ||
+			settings.displacementFile.path.length > 4096 ||
+			settings.mapBinding === null
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an invalid bounded Displace contract.`);
+		}
+		const { pixels: _pixels, ...bindingEvidence } = binding;
+		if (binding.filterIndex !== filter.index || JSON.stringify(settings.mapBinding) !== JSON.stringify(bindingEvidence)) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) Displace map binding does not match its exact leased evidence.`);
+		}
+		const wrap = (value: number, size: number): number => ((value % size) + size) % size;
+		const sampleMapChannel = (x: number, y: number, channel: number): number => {
+			if (settings.displacementMap === "tile") {
+				const mapX = wrap(x, binding.width);
+				const mapY = wrap(y, binding.height);
+				return binding.pixels[(mapY * binding.width + mapX) * 4 + channel];
+			}
+			const mapX = ((x + 0.5) * binding.width) / source.width - 0.5;
+			const mapY = ((y + 0.5) * binding.height) / source.height - 0.5;
+			const clampedX = Math.max(0, Math.min(binding.width - 1, mapX));
+			const clampedY = Math.max(0, Math.min(binding.height - 1, mapY));
+			const x0 = Math.floor(clampedX);
+			const y0 = Math.floor(clampedY);
+			const x1 = Math.min(binding.width - 1, x0 + 1);
+			const y1 = Math.min(binding.height - 1, y0 + 1);
+			const horizontal = clampedX - x0;
+			const vertical = clampedY - y0;
+			const values = [
+				binding.pixels[(y0 * binding.width + x0) * 4 + channel],
+				binding.pixels[(y0 * binding.width + x1) * 4 + channel],
+				binding.pixels[(y1 * binding.width + x1) * 4 + channel],
+				binding.pixels[(y1 * binding.width + x0) * 4 + channel],
+			];
+			return (
+				values[0] * (1 - horizontal) * (1 - vertical) +
+				values[1] * horizontal * (1 - vertical) +
+				values[2] * horizontal * vertical +
+				values[3] * (1 - horizontal) * vertical
+			);
+		};
+		const sampleSource = (sampleX: number, sampleY: number): [number, number, number, number] => {
+			if (settings.undefinedAreas === "repeatEdgePixels") {
+				return samplePremultipliedBilinear(input, sampleX, sampleY);
+			}
+			const wrappedX = wrap(sampleX, source.width);
+			const wrappedY = wrap(sampleY, source.height);
+			const x0 = Math.floor(wrappedX);
+			const y0 = Math.floor(wrappedY);
+			const x1 = (x0 + 1) % source.width;
+			const y1 = (y0 + 1) % source.height;
+			const horizontal = wrappedX - x0;
+			const vertical = wrappedY - y0;
+			const weights = [(1 - horizontal) * (1 - vertical), horizontal * (1 - vertical), horizontal * vertical, (1 - horizontal) * vertical];
+			const offsets = [(y0 * source.width + x0) * 4, (y0 * source.width + x1) * 4, (y1 * source.width + x1) * 4, (y1 * source.width + x0) * 4];
+			const result: [number, number, number, number] = [0, 0, 0, 0];
+			for (let corner = 0; corner < 4; ++corner) {
+				const alpha = input[offsets[corner] + 3] / 255;
+				result[3] += alpha * weights[corner];
+				for (let channel = 0; channel < 3; ++channel) {
+					result[channel] += input[offsets[corner] + channel] * alpha * weights[corner];
+				}
+			}
+			return result;
+		};
+		const output = new Uint8Array(input.length);
+		const verticalChannel = binding.channelMapping === "grayscale-both-axes" ? 0 : 1;
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const horizontalMap = sampleMapChannel(x, y, 0);
+				const verticalMap = sampleMapChannel(x, y, verticalChannel);
+				const displacementX = ((horizontalMap - 128) * settings.horizontalScalePercent) / 100;
+				const displacementY = ((verticalMap - 128) * settings.verticalScalePercent) / 100;
+				const sample = sampleSource(x - displacementX, y - displacementY);
+				const offset = (y * source.width + x) * 4;
+				output[offset + 3] = Math.round(Math.max(0, Math.min(1, sample[3])) * 255);
+				if (sample[3] > 1e-12) {
+					output[offset] = Math.round(Math.max(0, Math.min(255, sample[0] / sample[3])));
+					output[offset + 1] = Math.round(Math.max(0, Math.min(255, sample[1] / sample[3])));
+					output[offset + 2] = Math.round(Math.max(0, Math.min(255, sample[2] / sample[3])));
+				}
+			}
+		}
+		return output;
+	};
+	const applyPinch = (input: Uint8Array, settings: NonNullable<IPsdSmartFilterInfo["pinch"]>, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (!Number.isInteger(settings.amountPercent) || settings.amountPercent < -100 || settings.amountPercent > 100) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an invalid bounded Pinch amount.`);
+		}
+		assertSmartFilterWork(filter, source.width * source.height * 4);
+		if (settings.amountPercent === 0) {
+			return input.slice();
+		}
+		const output = new Uint8Array(input.length);
+		const centerX = (source.width - 1) * 0.5;
+		const centerY = (source.height - 1) * 0.5;
+		const halfWidth = source.width * 0.5;
+		const halfHeight = source.height * 0.5;
+		const radialExponent = 2 ** (-settings.amountPercent / 100);
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const offset = (y * source.width + x) * 4;
+				const normalizedX = (x - centerX) / halfWidth;
+				const normalizedY = (y - centerY) / halfHeight;
+				const radius = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+				if (radius <= 1e-12 || radius >= 1) {
+					output[offset] = input[offset];
+					output[offset + 1] = input[offset + 1];
+					output[offset + 2] = input[offset + 2];
+					output[offset + 3] = input[offset + 3];
+					continue;
+				}
+				const sourceRadius = radius ** radialExponent;
+				const sourceScale = sourceRadius / radius;
+				const sample = samplePremultipliedBilinear(input, centerX + normalizedX * sourceScale * halfWidth, centerY + normalizedY * sourceScale * halfHeight);
+				output[offset + 3] = Math.round(Math.max(0, Math.min(1, sample[3])) * 255);
+				if (sample[3] > 1e-12) {
+					output[offset] = Math.round(Math.max(0, Math.min(255, sample[0] / sample[3])));
+					output[offset + 1] = Math.round(Math.max(0, Math.min(255, sample[1] / sample[3])));
+					output[offset + 2] = Math.round(Math.max(0, Math.min(255, sample[2] / sample[3])));
+				}
+			}
+		}
+		return output;
+	};
+	const applyPolarCoordinates = (input: Uint8Array, settings: NonNullable<IPsdSmartFilterInfo["polarCoordinates"]>, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (settings.conversion !== "rectangularToPolar" && settings.conversion !== "polarToRectangular") {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an invalid bounded Polar Coordinates conversion.`);
+		}
+		assertSmartFilterWork(filter, source.width * source.height * 4);
+		const output = new Uint8Array(input.length);
+		const centerX = (source.width - 1) * 0.5;
+		const centerY = (source.height - 1) * 0.5;
+		const halfWidth = source.width * 0.5;
+		const halfHeight = source.height * 0.5;
+		const wrap = (value: number, size: number): number => ((value % size) + size) % size;
+		const samplePeriodicHorizontal = (sampleX: number, sampleY: number): [number, number, number, number] => {
+			const wrappedX = wrap(sampleX, source.width);
+			const clampedY = Math.max(0, Math.min(source.height - 1, sampleY));
+			const x0 = Math.floor(wrappedX);
+			const y0 = Math.floor(clampedY);
+			const x1 = (x0 + 1) % source.width;
+			const y1 = Math.min(source.height - 1, y0 + 1);
+			const horizontal = wrappedX - x0;
+			const vertical = clampedY - y0;
+			const weights = [(1 - horizontal) * (1 - vertical), horizontal * (1 - vertical), horizontal * vertical, (1 - horizontal) * vertical];
+			const offsets = [(y0 * source.width + x0) * 4, (y0 * source.width + x1) * 4, (y1 * source.width + x1) * 4, (y1 * source.width + x0) * 4];
+			const result: [number, number, number, number] = [0, 0, 0, 0];
+			for (let corner = 0; corner < 4; ++corner) {
+				const alpha = input[offsets[corner] + 3] / 255;
+				result[3] += alpha * weights[corner];
+				for (let channel = 0; channel < 3; ++channel) {
+					result[channel] += input[offsets[corner] + channel] * alpha * weights[corner];
+				}
+			}
+			return result;
+		};
+		const writeSample = (offset: number, sample: [number, number, number, number]): void => {
+			output[offset + 3] = Math.round(Math.max(0, Math.min(1, sample[3])) * 255);
+			if (sample[3] > 1e-12) {
+				output[offset] = Math.round(Math.max(0, Math.min(255, sample[0] / sample[3])));
+				output[offset + 1] = Math.round(Math.max(0, Math.min(255, sample[1] / sample[3])));
+				output[offset + 2] = Math.round(Math.max(0, Math.min(255, sample[2] / sample[3])));
+			}
+		};
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				let sample: [number, number, number, number];
+				if (settings.conversion === "rectangularToPolar") {
+					const normalizedX = (x - centerX) / halfWidth;
+					const normalizedY = (y - centerY) / halfHeight;
+					const radius = Math.min(1, Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY));
+					const clockwiseAngle = Math.atan2(normalizedX, -normalizedY);
+					const horizontal = wrap(clockwiseAngle / (Math.PI * 2), 1);
+					sample = samplePeriodicHorizontal(horizontal * source.width - 0.5, radius * source.height - 0.5);
+				} else {
+					const clockwiseAngle = ((x + 0.5) / source.width) * Math.PI * 2;
+					const radius = (y + 0.5) / source.height;
+					sample = samplePremultipliedBilinear(input, centerX + Math.sin(clockwiseAngle) * radius * halfWidth, centerY - Math.cos(clockwiseAngle) * radius * halfHeight);
+				}
+				writeSample((y * source.width + x) * 4, sample);
+			}
+		}
+		return output;
+	};
+	const applyRipple = (input: Uint8Array, settings: NonNullable<IPsdSmartFilterInfo["ripple"]>, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (!Number.isInteger(settings.amountPercent) || settings.amountPercent < -999 || settings.amountPercent > 999 || !["small", "medium", "large"].includes(settings.size)) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid bounded Ripple parameters.`);
+		}
+		assertSmartFilterWork(filter, source.width * source.height * 4);
+		if (settings.amountPercent === 0) {
+			return input.slice();
+		}
+		const minimumDimension = Math.max(1, Math.min(source.width, source.height));
+		const wavelengthFactor = { small: 0.22, medium: 0.38, large: 0.65 }[settings.size];
+		const wavelength = Math.max(2, minimumDimension * wavelengthFactor);
+		const amplitude = (settings.amountPercent / 100) * Math.max(0.5, wavelength * 0.18);
+		const primaryFrequency = (Math.PI * 2) / wavelength;
+		const secondaryFrequency = primaryFrequency / 1.618033988749895;
+		const output = new Uint8Array(input.length);
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const centerX = x + 0.5;
+				const centerY = y + 0.5;
+				const displacementX = amplitude * (0.72 * Math.sin(centerY * primaryFrequency) + 0.28 * Math.sin((centerX + centerY) * secondaryFrequency + Math.PI / 3));
+				const displacementY =
+					amplitude * (0.72 * Math.sin(centerX * primaryFrequency + Math.PI / 2) + 0.28 * Math.sin((centerX - centerY) * secondaryFrequency - Math.PI / 4));
+				const sample = samplePremultipliedBilinear(input, x - displacementX, y - displacementY);
+				const offset = (y * source.width + x) * 4;
+				output[offset + 3] = Math.round(Math.max(0, Math.min(1, sample[3])) * 255);
+				if (sample[3] > 1e-12) {
+					output[offset] = Math.round(Math.max(0, Math.min(255, sample[0] / sample[3])));
+					output[offset + 1] = Math.round(Math.max(0, Math.min(255, sample[1] / sample[3])));
+					output[offset + 2] = Math.round(Math.max(0, Math.min(255, sample[2] / sample[3])));
+				}
+			}
+		}
+		return output;
+	};
+	const applyShear = (input: Uint8Array, settings: IPsdShearInfo, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (
+			!Array.isArray(settings.curvePoints) ||
+			settings.curvePoints.length < 2 ||
+			settings.curvePoints.length > 255 ||
+			!Number.isInteger(settings.curveStartIndex) ||
+			!Number.isInteger(settings.curveEndIndex) ||
+			settings.curveStartIndex < 0 ||
+			settings.curveEndIndex >= settings.curvePoints.length ||
+			settings.curveStartIndex >= settings.curveEndIndex ||
+			(settings.undefinedAreas !== "wrapAround" && settings.undefinedAreas !== "repeatEdgePixels") ||
+			settings.curvePoints.some(
+				(point, index) =>
+					!point ||
+					!Number.isInteger(point.x) ||
+					Math.abs(point.x) > 1_000_000 ||
+					!Number.isInteger(point.y) ||
+					point.y < 0 ||
+					point.y > 128 ||
+					(index > 0 && point.y <= settings.curvePoints[index - 1].y)
+			)
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid bounded Shear parameters.`);
+		}
+		assertSmartFilterWork(filter, source.width * source.height * 4);
+		const points = settings.curvePoints.slice(settings.curveStartIndex, settings.curveEndIndex + 1);
+		const intervalWidths = points.slice(0, -1).map((point, index) => points[index + 1].y - point.y);
+		const slopes = intervalWidths.map((width, index) => (points[index + 1].x - points[index].x) / width);
+		const tangents = new Array<number>(points.length).fill(0);
+		if (points.length === 2) {
+			tangents[0] = slopes[0];
+			tangents[1] = slopes[0];
+		} else {
+			const endpointTangent = (width: number, adjacentWidth: number, slope: number, adjacentSlope: number): number => {
+				let tangent = ((2 * width + adjacentWidth) * slope - width * adjacentSlope) / (width + adjacentWidth);
+				if (Math.sign(tangent) !== Math.sign(slope)) {
+					tangent = 0;
+				} else if (Math.sign(slope) !== Math.sign(adjacentSlope) && Math.abs(tangent) > Math.abs(3 * slope)) {
+					tangent = 3 * slope;
+				}
+				return tangent;
+			};
+			tangents[0] = endpointTangent(intervalWidths[0], intervalWidths[1], slopes[0], slopes[1]);
+			for (let index = 1; index < points.length - 1; ++index) {
+				const previousSlope = slopes[index - 1];
+				const nextSlope = slopes[index];
+				if (previousSlope === 0 || nextSlope === 0 || Math.sign(previousSlope) !== Math.sign(nextSlope)) {
+					tangents[index] = 0;
+				} else {
+					const previousWidth = intervalWidths[index - 1];
+					const nextWidth = intervalWidths[index];
+					const firstWeight = 2 * nextWidth + previousWidth;
+					const secondWeight = nextWidth + 2 * previousWidth;
+					tangents[index] = (firstWeight + secondWeight) / (firstWeight / previousSlope + secondWeight / nextSlope);
+				}
+			}
+			const last = points.length - 1;
+			tangents[last] = endpointTangent(intervalWidths[last - 1], intervalWidths[last - 2], slopes[last - 1], slopes[last - 2]);
+		}
+		const displacementAt = (verticalCoordinate: number): number => {
+			if (verticalCoordinate <= points[0].y) {
+				return points[0].x;
+			}
+			const last = points.length - 1;
+			if (verticalCoordinate >= points[last].y) {
+				return points[last].x;
+			}
+			let low = 0;
+			let high = last;
+			while (low + 1 < high) {
+				const middle = (low + high) >> 1;
+				if (points[middle].y <= verticalCoordinate) {
+					low = middle;
+				} else {
+					high = middle;
+				}
+			}
+			const width = intervalWidths[low];
+			const t = (verticalCoordinate - points[low].y) / width;
+			const t2 = t * t;
+			const t3 = t2 * t;
+			return (
+				(2 * t3 - 3 * t2 + 1) * points[low].x + (t3 - 2 * t2 + t) * width * tangents[low] + (-2 * t3 + 3 * t2) * points[low + 1].x + (t3 - t2) * width * tangents[low + 1]
+			);
+		};
+		const wrap = (value: number, size: number): number => ((value % size) + size) % size;
+		const samplePeriodicHorizontal = (sampleX: number, sampleY: number): [number, number, number, number] => {
+			const wrappedX = wrap(sampleX, source.width);
+			const clampedY = Math.max(0, Math.min(source.height - 1, sampleY));
+			const x0 = Math.floor(wrappedX);
+			const y0 = Math.floor(clampedY);
+			const x1 = (x0 + 1) % source.width;
+			const y1 = Math.min(source.height - 1, y0 + 1);
+			const horizontal = wrappedX - x0;
+			const vertical = clampedY - y0;
+			const weights = [(1 - horizontal) * (1 - vertical), horizontal * (1 - vertical), horizontal * vertical, (1 - horizontal) * vertical];
+			const offsets = [(y0 * source.width + x0) * 4, (y0 * source.width + x1) * 4, (y1 * source.width + x1) * 4, (y1 * source.width + x0) * 4];
+			const result: [number, number, number, number] = [0, 0, 0, 0];
+			for (let corner = 0; corner < 4; ++corner) {
+				const alpha = input[offsets[corner] + 3] / 255;
+				result[3] += alpha * weights[corner];
+				for (let channel = 0; channel < 3; ++channel) {
+					result[channel] += input[offsets[corner] + channel] * alpha * weights[corner];
+				}
+			}
+			return result;
+		};
+		const output = new Uint8Array(input.length);
+		for (let y = 0; y < source.height; ++y) {
+			const displacement = displacementAt(((y + 0.5) / source.height) * 128);
+			for (let x = 0; x < source.width; ++x) {
+				const sampleX = x - displacement;
+				const sample = settings.undefinedAreas === "wrapAround" ? samplePeriodicHorizontal(sampleX, y) : samplePremultipliedBilinear(input, sampleX, y);
+				const offset = (y * source.width + x) * 4;
+				output[offset + 3] = Math.round(Math.max(0, Math.min(1, sample[3])) * 255);
+				if (sample[3] > 1e-12) {
+					output[offset] = Math.round(Math.max(0, Math.min(255, sample[0] / sample[3])));
+					output[offset + 1] = Math.round(Math.max(0, Math.min(255, sample[1] / sample[3])));
+					output[offset + 2] = Math.round(Math.max(0, Math.min(255, sample[2] / sample[3])));
+				}
+			}
+		}
+		return output;
+	};
+	const applySpherize = (input: Uint8Array, settings: NonNullable<IPsdSmartFilterInfo["spherize"]>, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (
+			!Number.isInteger(settings.amountPercent) ||
+			settings.amountPercent < -100 ||
+			settings.amountPercent > 100 ||
+			!["normal", "horizontalOnly", "verticalOnly"].includes(settings.mode)
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid bounded Spherize parameters.`);
+		}
+		assertSmartFilterWork(filter, source.width * source.height * 4);
+		if (settings.amountPercent === 0) {
+			return input.slice();
+		}
+		const output = new Uint8Array(input.length);
+		const centerX = (source.width - 1) * 0.5;
+		const centerY = (source.height - 1) * 0.5;
+		const halfWidth = source.width * 0.5;
+		const halfHeight = source.height * 0.5;
+		const amount = Math.abs(settings.amountPercent) / 100;
+		const mapNormalizedDistance = (distance: number): number => {
+			const magnitude = Math.min(1, Math.abs(distance));
+			const full = settings.amountPercent > 0 ? Math.asin(magnitude) / (Math.PI * 0.5) : Math.sin(magnitude * Math.PI * 0.5);
+			return Math.sign(distance) * (magnitude + (full - magnitude) * amount);
+		};
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const offset = (y * source.width + x) * 4;
+				const normalizedX = (x - centerX) / halfWidth;
+				const normalizedY = (y - centerY) / halfHeight;
+				let sourceX = x;
+				let sourceY = y;
+				if (settings.mode === "normal") {
+					const radius = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+					if (radius >= 1 || radius <= 1e-12) {
+						output[offset] = input[offset];
+						output[offset + 1] = input[offset + 1];
+						output[offset + 2] = input[offset + 2];
+						output[offset + 3] = input[offset + 3];
+						continue;
+					}
+					const sourceRadius = mapNormalizedDistance(radius);
+					const scale = sourceRadius / radius;
+					sourceX = centerX + normalizedX * scale * halfWidth;
+					sourceY = centerY + normalizedY * scale * halfHeight;
+				} else if (settings.mode === "horizontalOnly") {
+					sourceX = centerX + mapNormalizedDistance(normalizedX) * halfWidth;
+				} else {
+					sourceY = centerY + mapNormalizedDistance(normalizedY) * halfHeight;
+				}
+				const sample = samplePremultipliedBilinear(input, sourceX, sourceY);
+				output[offset + 3] = Math.round(Math.max(0, Math.min(1, sample[3])) * 255);
+				if (sample[3] > 1e-12) {
+					output[offset] = Math.round(Math.max(0, Math.min(255, sample[0] / sample[3])));
+					output[offset + 1] = Math.round(Math.max(0, Math.min(255, sample[1] / sample[3])));
+					output[offset + 2] = Math.round(Math.max(0, Math.min(255, sample[2] / sample[3])));
+				}
+			}
+		}
+		return output;
+	};
+	const applyTwirl = (input: Uint8Array, settings: NonNullable<IPsdSmartFilterInfo["twirl"]>, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (!Number.isInteger(settings.angleDegrees) || settings.angleDegrees < -999 || settings.angleDegrees > 999) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an invalid bounded Twirl angle.`);
+		}
+		assertSmartFilterWork(filter, source.width * source.height * 4);
+		if (settings.angleDegrees === 0) {
+			return input.slice();
+		}
+		const output = new Uint8Array(input.length);
+		const centerX = (source.width - 1) * 0.5;
+		const centerY = (source.height - 1) * 0.5;
+		const halfWidth = source.width * 0.5;
+		const halfHeight = source.height * 0.5;
+		const angleRadians = (settings.angleDegrees * Math.PI) / 180;
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const offset = (y * source.width + x) * 4;
+				const normalizedX = (x - centerX) / halfWidth;
+				const normalizedY = (y - centerY) / halfHeight;
+				const radius = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+				if (radius >= 1 || radius <= 1e-12) {
+					output[offset] = input[offset];
+					output[offset + 1] = input[offset + 1];
+					output[offset + 2] = input[offset + 2];
+					output[offset + 3] = input[offset + 3];
+					continue;
+				}
+				const falloff = (1 - radius) ** 2;
+				const inverseAngle = angleRadians * falloff;
+				const cosine = Math.cos(inverseAngle);
+				const sine = Math.sin(inverseAngle);
+				const sourceNormalizedX = normalizedX * cosine + normalizedY * sine;
+				const sourceNormalizedY = -normalizedX * sine + normalizedY * cosine;
+				const sample = samplePremultipliedBilinear(input, centerX + sourceNormalizedX * halfWidth, centerY + sourceNormalizedY * halfHeight);
+				output[offset + 3] = Math.round(Math.max(0, Math.min(1, sample[3])) * 255);
+				if (sample[3] > 1e-12) {
+					output[offset] = Math.round(Math.max(0, Math.min(255, sample[0] / sample[3])));
+					output[offset + 1] = Math.round(Math.max(0, Math.min(255, sample[1] / sample[3])));
+					output[offset + 2] = Math.round(Math.max(0, Math.min(255, sample[2] / sample[3])));
+				}
+			}
+		}
+		return output;
+	};
+	const applyWave = (input: Uint8Array, settings: IPsdWaveInfo, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (
+			!Number.isInteger(settings.numberOfGenerators) ||
+			settings.numberOfGenerators < 1 ||
+			settings.numberOfGenerators > 999 ||
+			!["sine", "triangle", "square"].includes(settings.type) ||
+			!Number.isInteger(settings.wavelength.minimum) ||
+			!Number.isInteger(settings.wavelength.maximum) ||
+			settings.wavelength.minimum < 1 ||
+			settings.wavelength.maximum > 999 ||
+			settings.wavelength.minimum >= settings.wavelength.maximum ||
+			!Number.isInteger(settings.amplitude.minimum) ||
+			!Number.isInteger(settings.amplitude.maximum) ||
+			settings.amplitude.minimum < 1 ||
+			settings.amplitude.maximum > 999 ||
+			settings.amplitude.minimum >= settings.amplitude.maximum ||
+			!Number.isInteger(settings.scale.horizontalPercent) ||
+			settings.scale.horizontalPercent < 1 ||
+			settings.scale.horizontalPercent > 100 ||
+			!Number.isInteger(settings.scale.verticalPercent) ||
+			settings.scale.verticalPercent < 1 ||
+			settings.scale.verticalPercent > 100 ||
+			!Number.isInteger(settings.randomSeed) ||
+			settings.randomSeed < -2_147_483_648 ||
+			settings.randomSeed > 2_147_483_647 ||
+			!["wrapAround", "repeatEdgePixels"].includes(settings.undefinedAreas)
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid bounded Wave parameters.`);
+		}
+		assertSmartFilterWork(filter, source.width * source.height * (settings.numberOfGenerators * 2 + 4));
+		let state = settings.randomSeed >>> 0;
+		const random = (): number => {
+			state = (state + 0x6d2b79f5) >>> 0;
+			let value = state;
+			value = Math.imul(value ^ (value >>> 15), value | 1);
+			value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+			return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
+		};
+		const integerBetween = (minimum: number, maximum: number): number => minimum + Math.floor(random() * (maximum - minimum + 1));
+		const generators = Array.from({ length: settings.numberOfGenerators }, () => ({
+			wavelength: integerBetween(settings.wavelength.minimum, settings.wavelength.maximum),
+			amplitude: integerBetween(settings.amplitude.minimum, settings.amplitude.maximum),
+			horizontalPhase: random() * Math.PI * 2,
+			verticalPhase: random() * Math.PI * 2,
+		}));
+		const waveform = (phase: number): number => {
+			const sine = Math.sin(phase);
+			if (settings.type === "triangle") {
+				return (2 / Math.PI) * Math.asin(sine);
+			}
+			if (settings.type === "square") {
+				return sine >= 0 ? 1 : -1;
+			}
+			return sine;
+		};
+		const wrap = (value: number, size: number): number => ((value % size) + size) % size;
+		const samplePeriodic = (sampleX: number, sampleY: number): [number, number, number, number] => {
+			const wrappedX = wrap(sampleX, source.width);
+			const wrappedY = wrap(sampleY, source.height);
+			const x0 = Math.floor(wrappedX);
+			const y0 = Math.floor(wrappedY);
+			const x1 = (x0 + 1) % source.width;
+			const y1 = (y0 + 1) % source.height;
+			const horizontal = wrappedX - x0;
+			const vertical = wrappedY - y0;
+			const weights = [(1 - horizontal) * (1 - vertical), horizontal * (1 - vertical), horizontal * vertical, (1 - horizontal) * vertical];
+			const offsets = [(y0 * source.width + x0) * 4, (y0 * source.width + x1) * 4, (y1 * source.width + x1) * 4, (y1 * source.width + x0) * 4];
+			const result: [number, number, number, number] = [0, 0, 0, 0];
+			for (let corner = 0; corner < 4; ++corner) {
+				const alpha = input[offsets[corner] + 3] / 255;
+				result[3] += alpha * weights[corner];
+				for (let channel = 0; channel < 3; ++channel) {
+					result[channel] += input[offsets[corner] + channel] * alpha * weights[corner];
+				}
+			}
+			return result;
+		};
+		const output = new Uint8Array(input.length);
+		const generatorScale = 1 / settings.numberOfGenerators;
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				let horizontalDisplacement = 0;
+				let verticalDisplacement = 0;
+				for (const generator of generators) {
+					horizontalDisplacement += generator.amplitude * waveform(((y + 0.5) * Math.PI * 2) / generator.wavelength + generator.horizontalPhase);
+					verticalDisplacement += generator.amplitude * waveform(((x + 0.5) * Math.PI * 2) / generator.wavelength + generator.verticalPhase);
+				}
+				const sampleX = x - horizontalDisplacement * generatorScale * (settings.scale.horizontalPercent / 100);
+				const sampleY = y - verticalDisplacement * generatorScale * (settings.scale.verticalPercent / 100);
+				const sample = settings.undefinedAreas === "wrapAround" ? samplePeriodic(sampleX, sampleY) : samplePremultipliedBilinear(input, sampleX, sampleY);
+				const offset = (y * source.width + x) * 4;
+				output[offset + 3] = Math.round(Math.max(0, Math.min(1, sample[3])) * 255);
+				if (sample[3] > 1e-12) {
+					output[offset] = Math.round(Math.max(0, Math.min(255, sample[0] / sample[3])));
+					output[offset + 1] = Math.round(Math.max(0, Math.min(255, sample[1] / sample[3])));
+					output[offset + 2] = Math.round(Math.max(0, Math.min(255, sample[2] / sample[3])));
+				}
+			}
+		}
+		return output;
+	};
+	const applyZigZag = (input: Uint8Array, settings: NonNullable<IPsdSmartFilterInfo["zigzag"]>, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (
+			!Number.isInteger(settings.amountPercent) ||
+			settings.amountPercent < -100 ||
+			settings.amountPercent > 100 ||
+			!Number.isInteger(settings.ridges) ||
+			settings.ridges < 0 ||
+			settings.ridges > 20 ||
+			!["aroundCenter", "outFromCenter", "pondRipples"].includes(settings.style)
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid bounded ZigZag parameters.`);
+		}
+		assertSmartFilterWork(filter, source.width * source.height * 4);
+		if (settings.amountPercent === 0) {
+			return input.slice();
+		}
+		const output = new Uint8Array(input.length);
+		const centerX = (source.width - 1) * 0.5;
+		const centerY = (source.height - 1) * 0.5;
+		const halfWidth = source.width * 0.5;
+		const halfHeight = source.height * 0.5;
+		const signedAmount = settings.amountPercent / 100;
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const offset = (y * source.width + x) * 4;
+				const normalizedX = (x - centerX) / halfWidth;
+				const normalizedY = (y - centerY) / halfHeight;
+				const radius = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+				if (radius >= 1 || radius <= 1e-12) {
+					output[offset] = input[offset];
+					output[offset + 1] = input[offset + 1];
+					output[offset + 2] = input[offset + 2];
+					output[offset + 3] = input[offset + 3];
+					continue;
+				}
+				const profile = Math.sin((settings.ridges + 0.5) * Math.PI * radius) * (1 - radius);
+				let sourceNormalizedX = normalizedX;
+				let sourceNormalizedY = normalizedY;
+				if (settings.style === "aroundCenter") {
+					const inverseAngle = signedAmount * profile * (Math.PI / 3);
+					const cosine = Math.cos(inverseAngle);
+					const sine = Math.sin(inverseAngle);
+					sourceNormalizedX = normalizedX * cosine + normalizedY * sine;
+					sourceNormalizedY = -normalizedX * sine + normalizedY * cosine;
+				} else if (settings.style === "outFromCenter") {
+					const sourceRadius = Math.max(0, radius - signedAmount * profile * 0.25);
+					const scale = sourceRadius / radius;
+					sourceNormalizedX *= scale;
+					sourceNormalizedY *= scale;
+				} else {
+					const displacement = signedAmount * profile * 0.25 * Math.SQRT1_2;
+					sourceNormalizedX -= displacement;
+					sourceNormalizedY -= displacement;
+				}
+				const sample = samplePremultipliedBilinear(input, centerX + sourceNormalizedX * halfWidth, centerY + sourceNormalizedY * halfHeight);
+				output[offset + 3] = Math.round(Math.max(0, Math.min(1, sample[3])) * 255);
+				if (sample[3] > 1e-12) {
+					output[offset] = Math.round(Math.max(0, Math.min(255, sample[0] / sample[3])));
+					output[offset + 1] = Math.round(Math.max(0, Math.min(255, sample[1] / sample[3])));
+					output[offset + 2] = Math.round(Math.max(0, Math.min(255, sample[2] / sample[3])));
+				}
+			}
+		}
+		return output;
+	};
+	const applyHsbHsl = (input: Uint8Array, settings: IPsdHsbHslInfo, filter: IPsdSmartFilterInfo): Uint8Array => {
+		const modes = ["rgb", "hsb", "hsl"] as const;
+		if (!modes.includes(settings.inputMode) || !modes.includes(settings.rowOrder)) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid bounded HSB/HSL parameters.`);
+		}
+		assertSmartFilterWork(filter, source.width * source.height);
+		const hueToRgb = (p: number, q: number, hue: number): number => {
+			const wrapped = ((hue % 1) + 1) % 1;
+			if (wrapped < 1 / 6) {
+				return p + (q - p) * 6 * wrapped;
+			}
+			if (wrapped < 1 / 2) {
+				return q;
+			}
+			if (wrapped < 2 / 3) {
+				return p + (q - p) * (2 / 3 - wrapped) * 6;
+			}
+			return p;
+		};
+		const hslToRgb = (hue: number, saturation: number, lightness: number): [number, number, number] => {
+			if (saturation <= 1e-12) {
+				return [lightness, lightness, lightness];
+			}
+			const q = lightness < 0.5 ? lightness * (1 + saturation) : lightness + saturation - lightness * saturation;
+			const p = 2 * lightness - q;
+			return [hueToRgb(p, q, hue + 1 / 3), hueToRgb(p, q, hue), hueToRgb(p, q, hue - 1 / 3)];
+		};
+		const hsbToRgb = (hue: number, saturation: number, brightness: number): [number, number, number] => {
+			const wrapped = ((hue % 1) + 1) % 1;
+			const sector = wrapped * 6;
+			const index = Math.floor(sector) % 6;
+			const fraction = sector - Math.floor(sector);
+			const p = brightness * (1 - saturation);
+			const q = brightness * (1 - saturation * fraction);
+			const t = brightness * (1 - saturation * (1 - fraction));
+			return (
+				[
+					[brightness, t, p],
+					[q, brightness, p],
+					[p, brightness, t],
+					[p, q, brightness],
+					[t, p, brightness],
+					[brightness, p, q],
+				] as Array<[number, number, number]>
+			)[index];
+		};
+		const rgbToHueChroma = (red: number, green: number, blue: number): { hue: number; maximum: number; minimum: number; chroma: number } => {
+			const maximum = Math.max(red, green, blue);
+			const minimum = Math.min(red, green, blue);
+			const chroma = maximum - minimum;
+			let hue = 0;
+			if (chroma > 1e-12) {
+				if (maximum === red) {
+					hue = ((green - blue) / chroma) % 6;
+				} else if (maximum === green) {
+					hue = (blue - red) / chroma + 2;
+				} else {
+					hue = (red - green) / chroma + 4;
+				}
+				hue = (((hue / 6) % 1) + 1) % 1;
+			}
+			return { hue, maximum, minimum, chroma };
+		};
+		const decode = (first: number, second: number, third: number): [number, number, number] => {
+			if (settings.inputMode === "hsb") {
+				return hsbToRgb(first, second, third);
+			}
+			if (settings.inputMode === "hsl") {
+				return hslToRgb(first, second, third);
+			}
+			return [first, second, third];
+		};
+		const encode = (red: number, green: number, blue: number): [number, number, number] => {
+			if (settings.rowOrder === "rgb") {
+				return [red, green, blue];
+			}
+			const { hue, maximum, minimum, chroma } = rgbToHueChroma(red, green, blue);
+			if (settings.rowOrder === "hsb") {
+				return [hue, maximum <= 1e-12 ? 0 : chroma / maximum, maximum];
+			}
+			const lightness = (maximum + minimum) * 0.5;
+			return [hue, chroma <= 1e-12 ? 0 : chroma / (1 - Math.abs(2 * lightness - 1)), lightness];
+		};
+		const output = new Uint8Array(input.length);
+		for (let offset = 0; offset < input.length; offset += 4) {
+			const alpha = input[offset + 3];
+			output[offset + 3] = alpha;
+			if (alpha === 0) {
+				continue;
+			}
+			if (settings.inputMode === settings.rowOrder) {
+				output[offset] = input[offset];
+				output[offset + 1] = input[offset + 1];
+				output[offset + 2] = input[offset + 2];
+				continue;
+			}
+			const rgb = decode(input[offset] / 255, input[offset + 1] / 255, input[offset + 2] / 255);
+			const encoded = encode(rgb[0], rgb[1], rgb[2]);
+			for (let channel = 0; channel < 3; ++channel) {
+				output[offset + channel] = Math.round(Math.max(0, Math.min(1, encoded[channel])) * 255);
+			}
+		}
+		return output;
+	};
+	const applyPerspectiveWarp = (input: Uint8Array, settings: IPsdPerspectiveWarpInfo, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (
+			!Array.isArray(settings.vertices) ||
+			settings.vertices.length < 4 ||
+			settings.vertices.length > 512 ||
+			!Array.isArray(settings.warpedVertices) ||
+			settings.warpedVertices.length !== settings.vertices.length ||
+			!Array.isArray(settings.quads) ||
+			settings.quads.length < 1 ||
+			settings.quads.length > 128 ||
+			!Number.isInteger(settings.connectedEdgeCount) ||
+			settings.connectedEdgeCount < 0 ||
+			settings.vertices.some((point) => !point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || Math.abs(point.x) > 1_000_000 || Math.abs(point.y) > 1_000_000) ||
+			settings.warpedVertices.some(
+				(point) => !point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || Math.abs(point.x) > 1_000_000 || Math.abs(point.y) > 1_000_000
+			) ||
+			settings.quads.some(
+				(quad) =>
+					!Array.isArray(quad) ||
+					quad.length !== 4 ||
+					new Set(quad).size !== 4 ||
+					quad.some((index) => !Number.isInteger(index) || index < 0 || index >= settings.vertices.length)
+			)
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid bounded Perspective Warp parameters.`);
+		}
+		const referencedVertices = new Set<number>();
+		const quadKeys = new Set<string>();
+		const edges = new Map<string, { count: number; from: number; to: number }>();
+		for (let quadIndex = 0; quadIndex < settings.quads.length; ++quadIndex) {
+			const quad = settings.quads[quadIndex];
+			quad.forEach((vertexIndex) => referencedVertices.add(vertexIndex));
+			const quadKey = [...quad].sort((left, right) => left - right).join(":");
+			if (quadKeys.has(quadKey)) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) repeats Perspective Warp plane ${quadIndex}.`);
+			}
+			quadKeys.add(quadKey);
+			for (let edgeIndex = 0; edgeIndex < 4; ++edgeIndex) {
+				const from = quad[edgeIndex];
+				const to = quad[(edgeIndex + 1) % 4];
+				const edgeKey = `${Math.min(from, to)}:${Math.max(from, to)}`;
+				const edge = edges.get(edgeKey);
+				if (!edge) {
+					edges.set(edgeKey, { count: 1, from, to });
+				} else {
+					if (edge.count >= 2 || (edge.from === from && edge.to === to)) {
+						throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid Perspective Warp connectivity at edge ${edgeKey}.`);
+					}
+					edge.count += 1;
+				}
+			}
+		}
+		if (referencedVertices.size !== settings.vertices.length) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) leaves an unreferenced Perspective Warp vertex.`);
+		}
+		const connectedEdgeCount = [...edges.values()].filter((edge) => edge.count === 2).length;
+		if (connectedEdgeCount !== settings.connectedEdgeCount) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) Perspective Warp connected-edge summary does not match its plane topology.`);
+		}
+		const quadPoints = (points: Array<{ x: number; y: number }>, quad: [number, number, number, number]): Array<{ x: number; y: number }> => quad.map((index) => points[index]);
+		const winding = (points: Array<{ x: number; y: number }>): number => {
+			const crosses = points.map((point, index) => {
+				const next = points[(index + 1) % 4];
+				const following = points[(index + 2) % 4];
+				return (next.x - point.x) * (following.y - next.y) - (next.y - point.y) * (following.x - next.x);
+			});
+			if (crosses.some((cross) => Math.abs(cross) <= 1e-8)) {
+				return 0;
+			}
+			const sign = Math.sign(crosses[0]);
+			return crosses.every((cross) => Math.sign(cross) === sign) ? sign : 0;
+		};
+		const sourceQuads = settings.quads.map((quad) => quadPoints(settings.vertices, quad));
+		const destinationQuads = settings.quads.map((quad) => quadPoints(settings.warpedVertices, quad));
+		for (let index = 0; index < sourceQuads.length; ++index) {
+			const sourceWinding = winding(sourceQuads[index]);
+			const destinationWinding = winding(destinationQuads[index]);
+			if (sourceWinding === 0 || destinationWinding === 0 || sourceWinding !== destinationWinding) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has a degenerate, non-convex, or folded Perspective Warp plane ${index}.`);
+			}
+		}
+		if (settings.vertices.every((point, index) => point.x === settings.warpedVertices[index].x && point.y === settings.warpedVertices[index].y)) {
+			return input.slice();
+		}
+		const rasterBounds = (points: Array<{ x: number; y: number }>): { left: number; top: number; right: number; bottom: number; area: number } => {
+			const left = Math.max(0, Math.floor(Math.min(...points.map((point) => point.x))));
+			const top = Math.max(0, Math.floor(Math.min(...points.map((point) => point.y))));
+			const right = Math.min(source.width - 1, Math.ceil(Math.max(...points.map((point) => point.x))));
+			const bottom = Math.min(source.height - 1, Math.ceil(Math.max(...points.map((point) => point.y))));
+			return { left, top, right, bottom, area: right < left || bottom < top ? 0 : (right - left + 1) * (bottom - top + 1) };
+		};
+		const sourceBounds = sourceQuads.map(rasterBounds);
+		const destinationBounds = destinationQuads.map(rasterBounds);
+		const work = sourceBounds.reduce((sum, bounds) => sum + bounds.area, 0) + destinationBounds.reduce((sum, bounds) => sum + bounds.area * 4, 0);
+		assertSmartFilterWork(filter, work);
+		const inside = (x: number, y: number, points: Array<{ x: number; y: number }>, sign: number): boolean =>
+			points.every((point, index) => {
+				const next = points[(index + 1) % 4];
+				return sign * ((next.x - point.x) * (y - point.y) - (next.y - point.y) * (x - point.x)) >= -1e-8;
+			});
+		const solveHomography = (from: Array<{ x: number; y: number }>, to: Array<{ x: number; y: number }>): number[] => {
+			const rows: number[][] = [];
+			for (let index = 0; index < 4; ++index) {
+				const { x, y } = from[index];
+				const { x: mappedX, y: mappedY } = to[index];
+				rows.push([x, y, 1, 0, 0, 0, -mappedX * x, -mappedX * y, mappedX]);
+				rows.push([0, 0, 0, x, y, 1, -mappedY * x, -mappedY * y, mappedY]);
+			}
+			for (let column = 0; column < 8; ++column) {
+				let pivot = column;
+				for (let row = column + 1; row < 8; ++row) {
+					if (Math.abs(rows[row][column]) > Math.abs(rows[pivot][column])) {
+						pivot = row;
+					}
+				}
+				if (Math.abs(rows[pivot][column]) <= 1e-12) {
+					throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an unsolvable Perspective Warp plane.`);
+				}
+				[rows[column], rows[pivot]] = [rows[pivot], rows[column]];
+				const divisor = rows[column][column];
+				for (let entry = column; entry <= 8; ++entry) {
+					rows[column][entry] /= divisor;
+				}
+				for (let row = 0; row < 8; ++row) {
+					if (row === column) {
+						continue;
+					}
+					const factor = rows[row][column];
+					for (let entry = column; entry <= 8; ++entry) {
+						rows[row][entry] -= factor * rows[column][entry];
+					}
+				}
+			}
+			const result = rows.map((row) => row[8]);
+			if (result.some((value) => !Number.isFinite(value))) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) produced a non-finite Perspective Warp homography.`);
+			}
+			return result;
+		};
+		const homographies = destinationQuads.map((quad, index) => solveHomography(quad, sourceQuads[index]));
+		const output = input.slice();
+		const sourceCoverage = new Uint8Array(source.width * source.height);
+		for (let quadIndex = 0; quadIndex < sourceQuads.length; ++quadIndex) {
+			const points = sourceQuads[quadIndex];
+			const bounds = sourceBounds[quadIndex];
+			const sign = winding(points);
+			for (let y = bounds.top; y <= bounds.bottom; ++y) {
+				for (let x = bounds.left; x <= bounds.right; ++x) {
+					if (inside(x + 0.5, y + 0.5, points, sign)) {
+						sourceCoverage[y * source.width + x] = 1;
+					}
+				}
+			}
+		}
+		for (let pixel = 0; pixel < sourceCoverage.length; ++pixel) {
+			if (sourceCoverage[pixel]) {
+				output.fill(0, pixel * 4, pixel * 4 + 4);
+			}
+		}
+		for (let quadIndex = 0; quadIndex < destinationQuads.length; ++quadIndex) {
+			const points = destinationQuads[quadIndex];
+			const bounds = destinationBounds[quadIndex];
+			const sign = winding(points);
+			const homography = homographies[quadIndex];
+			for (let y = bounds.top; y <= bounds.bottom; ++y) {
+				for (let x = bounds.left; x <= bounds.right; ++x) {
+					const destinationX = x + 0.5;
+					const destinationY = y + 0.5;
+					if (!inside(destinationX, destinationY, points, sign)) {
+						continue;
+					}
+					const denominator = homography[6] * destinationX + homography[7] * destinationY + 1;
+					if (!Number.isFinite(denominator) || Math.abs(denominator) <= 1e-12) {
+						throw new Error(`PSD smart filter ${filter.index} (${filter.name}) reaches an invalid Perspective Warp projection.`);
+					}
+					const sourceX = (homography[0] * destinationX + homography[1] * destinationY + homography[2]) / denominator - 0.5;
+					const sourceY = (homography[3] * destinationX + homography[4] * destinationY + homography[5]) / denominator - 0.5;
+					const sample = samplePremultipliedBilinear(input, sourceX, sourceY);
+					const offset = (y * source.width + x) * 4;
+					output[offset + 3] = Math.round(Math.max(0, Math.min(1, sample[3])) * 255);
+					if (sample[3] > 1e-12) {
+						output[offset] = Math.round(Math.max(0, Math.min(255, sample[0] / sample[3])));
+						output[offset + 1] = Math.round(Math.max(0, Math.min(255, sample[1] / sample[3])));
+						output[offset + 2] = Math.round(Math.max(0, Math.min(255, sample[2] / sample[3])));
+					} else {
+						output[offset] = output[offset + 1] = output[offset + 2] = 0;
+					}
+				}
+			}
+		}
+		return output;
+	};
+	const applyCurvesSmartFilter = (input: Uint8Array, settings: IPsdSmartFilterCurvesInfo, filter: IPsdSmartFilterInfo): Uint8Array => {
+		const validChannel = (channel: string): channel is PsdSmartFilterCurvesChannel => channel === "composite" || channel === "red" || channel === "green" || channel === "blue";
+		if (
+			(settings.presetKind !== "custom" && settings.presetKind !== "default") ||
+			!Array.isArray(settings.adjustments) ||
+			settings.adjustments.length > 4 ||
+			(settings.presetKind === "default" && settings.adjustments.length !== 0) ||
+			(settings.presetKind === "custom" && settings.adjustments.length < 1)
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid bounded Curves parameters.`);
+		}
+		const assignedChannels = new Set<PsdSmartFilterCurvesChannel>();
+		for (const adjustment of settings.adjustments) {
+			if (
+				!adjustment ||
+				!Array.isArray(adjustment.channels) ||
+				adjustment.channels.length < 1 ||
+				adjustment.channels.length > 4 ||
+				adjustment.channels.some((channel) => !validChannel(channel))
+			) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid bounded Curves channels.`);
+			}
+			for (const channel of adjustment.channels) {
+				if (assignedChannels.has(channel)) {
+					throw new Error(`PSD smart filter ${filter.index} (${filter.name}) assigns Curves channel ${channel} more than once.`);
+				}
+				assignedChannels.add(channel);
+			}
+			if (adjustment.mode === "curve") {
+				if (
+					!Array.isArray(adjustment.points) ||
+					adjustment.points.length < 2 ||
+					adjustment.points.length > 16 ||
+					adjustment.points.some(
+						(point, index) =>
+							!point ||
+							!Number.isFinite(point.input) ||
+							!Number.isFinite(point.output) ||
+							point.input < 0 ||
+							point.input > 255 ||
+							point.output < 0 ||
+							point.output > 255 ||
+							typeof point.curved !== "boolean" ||
+							(index > 0 && point.input <= adjustment.points[index - 1].input)
+					)
+				) {
+					throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an invalid bounded Curves control-point sequence.`);
+				}
+			} else if (adjustment.mode === "mapping") {
+				if (
+					!Array.isArray(adjustment.values) ||
+					adjustment.values.length !== 256 ||
+					adjustment.values.some((value) => !Number.isInteger(value) || value < 0 || value > 255)
+				) {
+					throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an invalid bounded Curves mapping table.`);
+				}
+			} else {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an unknown Curves adjustment mode.`);
+			}
+		}
+		if (settings.presetKind === "default") {
+			return input.slice();
+		}
+		const curveLookup = (points: Array<{ input: number; output: number; curved: boolean }>): Uint8Array => {
+			const segmentSlopes = points.slice(0, -1).map((point, index) => (points[index + 1].output - point.output) / (points[index + 1].input - point.input));
+			const smoothTangent = (index: number): number => {
+				if (index === 0) {
+					return segmentSlopes[0];
+				}
+				if (index === points.length - 1) {
+					return segmentSlopes[segmentSlopes.length - 1];
+				}
+				const before = segmentSlopes[index - 1];
+				const after = segmentSlopes[index];
+				if (before === 0 || after === 0 || Math.sign(before) !== Math.sign(after)) {
+					return 0;
+				}
+				const beforeWidth = points[index].input - points[index - 1].input;
+				const afterWidth = points[index + 1].input - points[index].input;
+				const beforeWeight = 2 * afterWidth + beforeWidth;
+				const afterWeight = afterWidth + 2 * beforeWidth;
+				return (beforeWeight + afterWeight) / (beforeWeight / before + afterWeight / after);
+			};
+			const output = new Uint8Array(256);
+			let segment = 0;
+			for (let inputValue = 0; inputValue < 256; ++inputValue) {
+				if (inputValue <= points[0].input) {
+					output[inputValue] = Math.round(points[0].output);
+					continue;
+				}
+				if (inputValue >= points[points.length - 1].input) {
+					output[inputValue] = Math.round(points[points.length - 1].output);
+					continue;
+				}
+				while (inputValue > points[segment + 1].input) {
+					++segment;
+				}
+				const left = points[segment];
+				const right = points[segment + 1];
+				const width = right.input - left.input;
+				const amount = (inputValue - left.input) / width;
+				const amount2 = amount * amount;
+				const amount3 = amount2 * amount;
+				const slope = segmentSlopes[segment];
+				const leftTangent = left.curved ? smoothTangent(segment) : slope;
+				const rightTangent = right.curved ? smoothTangent(segment + 1) : slope;
+				const value =
+					(2 * amount3 - 3 * amount2 + 1) * left.output +
+					(amount3 - 2 * amount2 + amount) * width * leftTangent +
+					(-2 * amount3 + 3 * amount2) * right.output +
+					(amount3 - amount2) * width * rightTangent;
+				output[inputValue] = Math.round(Math.max(0, Math.min(255, value)));
+			}
+			return output;
+		};
+		const lookups = new Map<PsdSmartFilterCurvesChannel, Uint8Array>();
+		for (const adjustment of settings.adjustments) {
+			const lookup = adjustment.mode === "mapping" ? Uint8Array.from(adjustment.values) : curveLookup(adjustment.points);
+			for (const channel of adjustment.channels) {
+				lookups.set(channel, lookup);
+			}
+		}
+		assertSmartFilterWork(filter, source.width * source.height * 6);
+		const output = input.slice();
+		const channelNames = ["red", "green", "blue"] as const;
+		const composite = lookups.get("composite");
+		for (let offset = 0; offset < input.length; offset += 4) {
+			if (input[offset + 3] === 0) {
+				output[offset] = output[offset + 1] = output[offset + 2] = 0;
+				continue;
+			}
+			for (let channel = 0; channel < 3; ++channel) {
+				let value = input[offset + channel];
+				if (composite) {
+					value = composite[value];
+				}
+				const channelLookup = lookups.get(channelNames[channel]);
+				output[offset + channel] = channelLookup ? channelLookup[value] : value;
+			}
+		}
+		return output;
+	};
+	const applyBrightnessContrastSmartFilter = (input: Uint8Array, settings: IPsdSmartFilterBrightnessContrastInfo, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (
+			!Number.isInteger(settings.brightness) ||
+			settings.brightness < -150 ||
+			settings.brightness > 150 ||
+			!Number.isInteger(settings.contrast) ||
+			settings.contrast < -50 ||
+			settings.contrast > 100 ||
+			typeof settings.useLegacy !== "boolean"
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has invalid bounded Brightness/Contrast parameters.`);
+		}
+		if (settings.brightness === 0 && settings.contrast === 0) {
+			return input.slice();
+		}
+		assertSmartFilterWork(filter, source.width * source.height * 3);
+		const output = input.slice();
+		const brightnessAmount = settings.brightness / 150;
+		const contrastGamma = settings.contrast >= 0 ? 1 + (settings.contrast / 100) * 4 : 1 / (1 + (-settings.contrast / 50) * 2);
+		const scaledLegacyContrast = settings.contrast >= 0 ? (settings.contrast / 100) * 255 : (settings.contrast / 50) * 255;
+		const legacyContrastFactor = (259 * (scaledLegacyContrast + 255)) / (255 * (259 - scaledLegacyContrast));
+		const legacyBrightnessOffset = brightnessAmount * 255;
+		for (let offset = 0; offset < input.length; offset += 4) {
+			if (input[offset + 3] === 0) {
+				output[offset] = output[offset + 1] = output[offset + 2] = 0;
+				continue;
+			}
+			for (let channel = 0; channel < 3; ++channel) {
+				let value: number;
+				if (settings.useLegacy) {
+					value = legacyContrastFactor * (input[offset + channel] - 128) + 128 + legacyBrightnessOffset;
+				} else {
+					const normalized = input[offset + channel] / 255;
+					const brightened = brightnessAmount >= 0 ? normalized + (1 - normalized) * brightnessAmount : normalized * (1 + brightnessAmount);
+					if (brightened <= 0 || brightened >= 1) {
+						value = brightened * 255;
+					} else {
+						const darkPower = Math.pow(brightened, contrastGamma);
+						const lightPower = Math.pow(1 - brightened, contrastGamma);
+						value = (darkPower / (darkPower + lightPower)) * 255;
+					}
+				}
+				output[offset + channel] = Math.round(Math.max(0, Math.min(255, value)));
+			}
+		}
+		return output;
+	};
+	const applyLiquify = (input: Uint8Array, settings: IPsdLiquifyInfo, filter: IPsdSmartFilterInfo): Uint8Array => {
+		const displacementCount = settings.meshWidth * settings.meshHeight;
+		const version2Contract =
+			settings.meshVersion === 2 &&
+			settings.headerBytes === 24 &&
+			settings.displacementEncoding === "little-endian-float32-pairs" &&
+			settings.imageWidth === settings.meshWidth &&
+			settings.imageHeight === settings.meshHeight &&
+			settings.repeatedImageWidth === null &&
+			settings.repeatedImageHeight === null &&
+			settings.reservedHeaderWords.length === 0 &&
+			(settings.trailingPaddingBytes === 0 || settings.trailingPaddingBytes === 8) &&
+			settings.rlePacketCount === null;
+		const version3Contract =
+			settings.meshVersion === 3 &&
+			settings.headerBytes === 64 &&
+			settings.displacementEncoding === "little-endian-zero-run-rle-float32-pairs" &&
+			settings.repeatedImageWidth === settings.imageWidth &&
+			settings.repeatedImageHeight === settings.imageHeight &&
+			settings.reservedHeaderWords.length === 6 &&
+			settings.reservedHeaderWords.every((value) => Number.isInteger(value) && value >= 0 && value <= 0xffffffff) &&
+			settings.trailingPaddingBytes === 0 &&
+			Number.isInteger(settings.rlePacketCount) &&
+			settings.rlePacketCount! >= settings.meshHeight;
+		if (
+			settings.signature !== "yfqLhseM" ||
+			settings.formatMarker !== 2 ||
+			(!version2Contract && !version3Contract) ||
+			!Number.isSafeInteger(settings.meshWidth) ||
+			!Number.isSafeInteger(settings.meshHeight) ||
+			settings.meshWidth < 1 ||
+			settings.meshHeight < 1 ||
+			!Number.isSafeInteger(displacementCount) ||
+			displacementCount < 1 ||
+			displacementCount > 1_048_576 ||
+			settings.imageWidth !== source.width ||
+			settings.imageHeight !== source.height ||
+			settings.displacementCount !== displacementCount ||
+			!Number.isSafeInteger(settings.meshByteLength) ||
+			settings.meshByteLength < settings.headerBytes ||
+			!(settings.displacements instanceof Float32Array) ||
+			settings.displacements.length !== displacementCount * 2
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an invalid bounded Liquify mesh contract.`);
+		}
+		let nonzeroDisplacementCount = 0;
+		let minimumX = 0;
+		let minimumY = 0;
+		let maximumX = 0;
+		let maximumY = 0;
+		for (let index = 0; index < displacementCount; ++index) {
+			const x = settings.displacements[index * 2];
+			const y = settings.displacements[index * 2 + 1];
+			if (!Number.isFinite(x) || !Number.isFinite(y) || Math.abs(x) > 1_000_000 || Math.abs(y) > 1_000_000) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) contains a malformed Liquify displacement.`);
+			}
+			if (x !== 0 || y !== 0) {
+				++nonzeroDisplacementCount;
+			}
+			minimumX = Math.min(minimumX, x);
+			minimumY = Math.min(minimumY, y);
+			maximumX = Math.max(maximumX, x);
+			maximumY = Math.max(maximumY, y);
+		}
+		const expectedMeshByteLength =
+			settings.meshVersion === 2
+				? settings.headerBytes + displacementCount * 8 + settings.trailingPaddingBytes
+				: settings.headerBytes + settings.rlePacketCount! * 4 + nonzeroDisplacementCount * 8;
+		if (
+			settings.meshByteLength !== expectedMeshByteLength ||
+			settings.nonzeroDisplacementCount !== nonzeroDisplacementCount ||
+			settings.minimumDisplacement.x !== minimumX ||
+			settings.minimumDisplacement.y !== minimumY ||
+			settings.maximumDisplacement.x !== maximumX ||
+			settings.maximumDisplacement.y !== maximumY
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) Liquify displacement summary does not match its exact runtime field.`);
+		}
+		assertSmartFilterWork(filter, source.width * source.height * 8);
+		const output = new Uint8Array(input.length);
+		const displacementAt = (meshX: number, meshY: number): [number, number] => {
+			const clampedX = Math.max(0, Math.min(settings.meshWidth - 1, meshX));
+			const clampedY = Math.max(0, Math.min(settings.meshHeight - 1, meshY));
+			const x0 = Math.floor(clampedX);
+			const y0 = Math.floor(clampedY);
+			const x1 = Math.min(settings.meshWidth - 1, x0 + 1);
+			const y1 = Math.min(settings.meshHeight - 1, y0 + 1);
+			const horizontal = clampedX - x0;
+			const vertical = clampedY - y0;
+			const weights = [(1 - horizontal) * (1 - vertical), horizontal * (1 - vertical), horizontal * vertical, (1 - horizontal) * vertical];
+			const indices = [y0 * settings.meshWidth + x0, y0 * settings.meshWidth + x1, y1 * settings.meshWidth + x1, y1 * settings.meshWidth + x0];
+			let displacementX = 0;
+			let displacementY = 0;
+			for (let corner = 0; corner < 4; ++corner) {
+				displacementX += settings.displacements[indices[corner] * 2] * weights[corner];
+				displacementY += settings.displacements[indices[corner] * 2 + 1] * weights[corner];
+			}
+			return [displacementX, displacementY];
+		};
+		for (let y = 0; y < source.height; ++y) {
+			const meshY = source.height === 1 ? 0 : (y * (settings.meshHeight - 1)) / (source.height - 1);
+			for (let x = 0; x < source.width; ++x) {
+				const meshX = source.width === 1 ? 0 : (x * (settings.meshWidth - 1)) / (source.width - 1);
+				const [displacementX, displacementY] = displacementAt(meshX, meshY);
+				const sample = samplePremultipliedBilinear(input, x + displacementX, y + displacementY);
+				const destinationOffset = (y * source.width + x) * 4;
+				const alpha = Math.max(0, Math.min(1, sample[3]));
+				output[destinationOffset + 3] = Math.round(alpha * 255);
+				for (let channel = 0; channel < 3; ++channel) {
+					output[destinationOffset + channel] = alpha <= 1e-12 ? 0 : Math.round(Math.max(0, Math.min(255, sample[channel] / alpha)));
+				}
+			}
+		}
+		return output;
+	};
+	const applyOilPaint = (input: Uint8Array, settings: IPsdOilPaintInfo, filter: IPsdSmartFilterInfo): Uint8Array => {
+		const controls = [settings.stylization, settings.cleanliness, settings.brushScale, settings.bristleDetail, settings.shine];
+		if (
+			(settings.descriptorVariant !== "modern" && settings.descriptorVariant !== "legacyPlugin") ||
+			typeof settings.lightingOn !== "boolean" ||
+			controls.some((value) => !Number.isFinite(value) || value < 0 || value > 10) ||
+			!Number.isFinite(settings.lightDirectionDegrees) ||
+			settings.lightDirectionDegrees < -360 ||
+			settings.lightDirectionDegrees > 360 ||
+			(settings.descriptorVariant === "modern" && settings.legacyPlugin !== null) ||
+			(settings.descriptorVariant === "legacyPlugin" &&
+				(!settings.legacyPlugin ||
+					!settings.legacyPlugin.kernelName ||
+					settings.legacyPlugin.kernelName.length > 256 ||
+					!settings.legacyPlugin.filterPath ||
+					settings.legacyPlugin.filterPath.length > 4096 ||
+					settings.legacyPlugin.lightingEnabled !== settings.lightingOn ||
+					!Array.isArray(settings.legacyPlugin.parameters) ||
+					settings.legacyPlugin.parameters.length < 6 ||
+					settings.legacyPlugin.parameters.length > 64 ||
+					settings.legacyPlugin.parameters.some(
+						(parameter) =>
+							!/^[a-z]{2}$/.test(parameter.suffix) ||
+							!parameter.name ||
+							parameter.name.length > 256 ||
+							!Number.isInteger(parameter.parameterType) ||
+							parameter.parameterType < 0 ||
+							parameter.parameterType > 255 ||
+							!Number.isFinite(parameter.value)
+					)))
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an invalid bounded Oil Paint contract.`);
+		}
+		// Four eight-tap anisotropic sectors, Sobel orientation, and optional relief lighting remain below the shared work ceiling.
+		assertSmartFilterWork(filter, source.width * source.height * 48);
+		const pixelCount = source.width * source.height;
+		const sourceLuminance = new Float64Array(pixelCount);
+		const tangentAngles = new Float64Array(pixelCount);
+		const clampX = (value: number): number => Math.max(0, Math.min(source.width - 1, value));
+		const clampY = (value: number): number => Math.max(0, Math.min(source.height - 1, value));
+		const luminanceAt = (x: number, y: number): number => sourceLuminance[clampY(y) * source.width + clampX(x)];
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const pixelIndex = y * source.width + x;
+				const offset = pixelIndex * 4;
+				sourceLuminance[pixelIndex] = input[offset + 3] === 0 ? 0 : (input[offset] * 0.2126 + input[offset + 1] * 0.7152 + input[offset + 2] * 0.0722) / 255;
+			}
+		}
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const gradientX =
+					-luminanceAt(x - 1, y - 1) -
+					2 * luminanceAt(x - 1, y) -
+					luminanceAt(x - 1, y + 1) +
+					luminanceAt(x + 1, y - 1) +
+					2 * luminanceAt(x + 1, y) +
+					luminanceAt(x + 1, y + 1);
+				const gradientY =
+					-luminanceAt(x - 1, y - 1) -
+					2 * luminanceAt(x, y - 1) -
+					luminanceAt(x + 1, y - 1) +
+					luminanceAt(x - 1, y + 1) +
+					2 * luminanceAt(x, y + 1) +
+					luminanceAt(x + 1, y + 1);
+				tangentAngles[y * source.width + x] = Math.atan2(gradientY, gradientX) + Math.PI / 2;
+			}
+		}
+		const output = new Uint8Array(input.length);
+		const majorRadius = 1.25 + settings.cleanliness * 0.9;
+		const minorRadius = 0.8 + settings.brushScale * 0.16 + (10 - settings.stylization) * 0.05;
+		const sourceMix = 0.65 - settings.stylization * 0.045;
+		const taps: ReadonlyArray<readonly [number, number]> = [
+			[0, 0],
+			[0.22, -0.45],
+			[0.22, 0.45],
+			[0.48, -0.3],
+			[0.48, 0.3],
+			[0.72, -0.18],
+			[0.72, 0.18],
+			[1, 0],
+		];
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const pixelIndex = y * source.width + x;
+				const offset = pixelIndex * 4;
+				const alpha = input[offset + 3];
+				output[offset + 3] = alpha;
+				if (alpha === 0) {
+					continue;
+				}
+				let bestVariance = Number.POSITIVE_INFINITY;
+				let bestColor: [number, number, number] = [input[offset], input[offset + 1], input[offset + 2]];
+				for (let sector = 0; sector < 4; ++sector) {
+					const angle = tangentAngles[pixelIndex] + (sector * Math.PI) / 2;
+					const tangentX = Math.cos(angle);
+					const tangentY = Math.sin(angle);
+					const normalX = -tangentY;
+					const normalY = tangentX;
+					let alphaWeight = 0;
+					let luminanceTotal = 0;
+					let luminanceSquaredTotal = 0;
+					const colorTotal = [0, 0, 0];
+					for (const [along, across] of taps) {
+						const sampleX = clampX(Math.round(x + tangentX * along * majorRadius + normalX * across * minorRadius));
+						const sampleY = clampY(Math.round(y + tangentY * along * majorRadius + normalY * across * minorRadius));
+						const sampleOffset = (sampleY * source.width + sampleX) * 4;
+						const sampleAlpha = input[sampleOffset + 3] / 255;
+						if (sampleAlpha <= 0) {
+							continue;
+						}
+						const sampleLuminance = sourceLuminance[sampleY * source.width + sampleX];
+						alphaWeight += sampleAlpha;
+						luminanceTotal += sampleLuminance * sampleAlpha;
+						luminanceSquaredTotal += sampleLuminance * sampleLuminance * sampleAlpha;
+						for (let channel = 0; channel < 3; ++channel) {
+							colorTotal[channel] += input[sampleOffset + channel] * sampleAlpha;
+						}
+					}
+					if (alphaWeight <= 1e-12) {
+						continue;
+					}
+					const meanLuminance = luminanceTotal / alphaWeight;
+					const variance = Math.max(0, luminanceSquaredTotal / alphaWeight - meanLuminance * meanLuminance);
+					if (variance < bestVariance) {
+						bestVariance = variance;
+						bestColor = [colorTotal[0] / alphaWeight, colorTotal[1] / alphaWeight, colorTotal[2] / alphaWeight];
+					}
+				}
+				const groove = Math.sin((x * Math.cos(tangentAngles[pixelIndex]) + y * Math.sin(tangentAngles[pixelIndex])) * (1.4 + settings.bristleDetail * 0.55));
+				const grooveScale = (settings.bristleDetail / 10) * 5;
+				for (let channel = 0; channel < 3; ++channel) {
+					output[offset + channel] = Math.max(
+						0,
+						Math.min(255, Math.round(input[offset + channel] * sourceMix + bestColor[channel] * (1 - sourceMix) + groove * grooveScale))
+					);
+				}
+			}
+		}
+		if (!settings.lightingOn) {
+			return output;
+		}
+		const heights = new Float64Array(pixelCount);
+		const reliefScale = 0.2 + settings.brushScale * 0.12;
+		for (let index = 0; index < pixelCount; ++index) {
+			const offset = index * 4;
+			const paintedLuminance = output[offset + 3] === 0 ? 0 : (output[offset] * 0.2126 + output[offset + 1] * 0.7152 + output[offset + 2] * 0.0722) / 255;
+			heights[index] = paintedLuminance * reliefScale + (sourceLuminance[index] - paintedLuminance) * (settings.bristleDetail / 10) * 0.45;
+		}
+		const heightAt = (x: number, y: number): number => heights[clampY(y) * source.width + clampX(x)];
+		const lightAngle = (settings.lightDirectionDegrees * Math.PI) / 180;
+		const lightLength = Math.hypot(Math.cos(lightAngle), -Math.sin(lightAngle), 0.65);
+		const lightX = Math.cos(lightAngle) / lightLength;
+		const lightY = -Math.sin(lightAngle) / lightLength;
+		const lightZ = 0.65 / lightLength;
+		const halfLength = Math.hypot(lightX, lightY, lightZ + 1);
+		const halfX = lightX / halfLength;
+		const halfY = lightY / halfLength;
+		const halfZ = (lightZ + 1) / halfLength;
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const offset = (y * source.width + x) * 4;
+				if (output[offset + 3] === 0) {
+					continue;
+				}
+				const normalXRaw = -(heightAt(x + 1, y) - heightAt(x - 1, y)) * 2.5;
+				const normalYRaw = -(heightAt(x, y + 1) - heightAt(x, y - 1)) * 2.5;
+				const normalLength = Math.hypot(normalXRaw, normalYRaw, 1);
+				const normalX = normalXRaw / normalLength;
+				const normalY = normalYRaw / normalLength;
+				const normalZ = 1 / normalLength;
+				const diffuse = Math.max(0, normalX * lightX + normalY * lightY + normalZ * lightZ);
+				const specular = Math.pow(Math.max(0, normalX * halfX + normalY * halfY + normalZ * halfZ), 24);
+				const illumination = 0.72 + diffuse * 0.28 + specular * (settings.shine / 10) * 0.35;
+				for (let channel = 0; channel < 3; ++channel) {
+					output[offset + channel] = Math.max(0, Math.min(255, Math.round(output[offset + channel] * illumination)));
+				}
+			}
+		}
+		return output;
+	};
+	const applyPuppetWarp = (input: Uint8Array, settings: IPsdPuppetWarpInfo, filter: IPsdSmartFilterInfo): Uint8Array => {
+		if (
+			!Array.isArray(settings.shapes) ||
+			settings.shapes.length < 1 ||
+			settings.shapes.length > 32 ||
+			settings.vertexEncoding !== "little-endian-float32-pairs" ||
+			settings.indexEncoding !== "little-endian-uint32-triangles"
+		) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) has an invalid bounded Puppet Warp mesh contract.`);
+		}
+		const output = new Uint8Array(input.length);
+		let sampleVisits = 0;
+		let totalVertices = 0;
+		let totalTriangles = 0;
+		const finitePoint = (point: { x: number; y: number }): boolean =>
+			Number.isFinite(point.x) && Number.isFinite(point.y) && Math.abs(point.x) <= 1_000_000 && Math.abs(point.y) <= 1_000_000;
+		if (!Array.isArray(settings.bounds) || settings.bounds.length !== 4 || settings.bounds.some((point) => !finitePoint(point))) {
+			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) Puppet Warp bounds must contain four finite bounded points.`);
+		}
+		for (const [shapeIndex, shape] of settings.shapes.entries()) {
+			if (
+				!Array.isArray(shape.pinOffsets) ||
+				!Array.isArray(shape.finalPinPositions) ||
+				!Array.isArray(shape.pinVertexIndices) ||
+				!Array.isArray(shape.pinPositions) ||
+				!Array.isArray(shape.pinRotationsDegrees) ||
+				!Array.isArray(shape.pinOverlays) ||
+				!Array.isArray(shape.pinDepths) ||
+				!Array.isArray(shape.selectedPins)
+			) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) Puppet Warp shape ${shapeIndex} has malformed authored pin evidence.`);
+			}
+			const pinCount = shape.pinPositions.length;
+			const boundaryValid =
+				Array.isArray(shape.boundaryPath?.pathComponents) &&
+				shape.boundaryPath.pathComponents.length >= 1 &&
+				shape.boundaryPath.pathComponents.length <= 64 &&
+				shape.boundaryPath.pathComponents.every(
+					(component) =>
+						Boolean(component.shapeOperation) &&
+						component.shapeOperation.length <= 128 &&
+						Array.isArray(component.paths) &&
+						component.paths.length >= 1 &&
+						component.paths.every(
+							(path) =>
+								Array.isArray(path.points) &&
+								path.points.length >= 1 &&
+								path.points.every((point) =>
+									[point.anchor, point.forward, point.backward].every(
+										(value) =>
+											Number.isFinite(value.x.value) &&
+											Number.isFinite(value.y.value) &&
+											Math.abs(value.x.value) <= 1_000_000 &&
+											Math.abs(value.y.value) <= 1_000_000 &&
+											Boolean(value.x.units) &&
+											Boolean(value.y.units)
+									)
+								)
+						)
+				);
+			if (
+				!Array.isArray(shape.originalVertices) ||
+				!Array.isArray(shape.deformedVertices) ||
+				!Array.isArray(shape.triangleIndices) ||
+				shape.originalVertices.length < 3 ||
+				shape.originalVertices.length !== shape.deformedVertices.length ||
+				shape.originalVertices.some((point) => !finitePoint(point)) ||
+				shape.deformedVertices.some((point) => !finitePoint(point)) ||
+				shape.triangleIndices.length < 3 ||
+				shape.triangleIndices.length % 3 !== 0 ||
+				shape.triangleIndices.some((index) => !Number.isInteger(index) || index < 0 || index >= shape.originalVertices.length) ||
+				!Number.isInteger(shape.meshVersionMajor) ||
+				shape.meshVersionMajor < 0 ||
+				!Number.isInteger(shape.meshVersionMinor) ||
+				shape.meshVersionMinor < 0 ||
+				![shape.meshQuality, shape.meshExpansion, shape.meshRigidity, shape.imageResolution, ...shape.pinRotationsDegrees, ...shape.pinDepths].every(
+					(value) => Number.isFinite(value) && Math.abs(value) <= 1_000_000
+				) ||
+				shape.imageResolution <= 0 ||
+				pinCount > 4_096 ||
+				![
+					shape.pinOffsets.length,
+					shape.finalPinPositions.length,
+					shape.pinVertexIndices.length,
+					shape.pinRotationsDegrees.length,
+					shape.pinOverlays.length,
+					shape.pinDepths.length,
+				].every((length) => length === pinCount) ||
+				shape.pinOffsets.some((point) => !finitePoint(point)) ||
+				shape.finalPinPositions.some((point) => !finitePoint(point)) ||
+				shape.pinPositions.some((point) => !finitePoint(point)) ||
+				shape.pinVertexIndices.some((index) => !Number.isInteger(index) || index < 0 || index >= shape.originalVertices.length) ||
+				shape.selectedPins.some((index) => !Number.isInteger(index) || index < 0 || index >= pinCount) ||
+				!boundaryValid
+			) {
+				throw new Error(
+					`PSD smart filter ${filter.index} (${filter.name}) Puppet Warp shape ${shapeIndex} has malformed authored mesh, pin, setting, or boundary evidence.`
+				);
+			}
+			totalVertices += shape.originalVertices.length;
+			totalTriangles += shape.triangleIndices.length / 3;
+			if (totalVertices > 65_536 || totalTriangles > 65_536) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) Puppet Warp exceeds the bounded 65,536-vertex/triangle aggregate limit.`);
+			}
+			for (let triangleOffset = 0; triangleOffset < shape.triangleIndices.length; triangleOffset += 3) {
+				const indices = shape.triangleIndices.slice(triangleOffset, triangleOffset + 3);
+				const original = indices.map((index) => shape.originalVertices[index]);
+				const deformed = indices.map((index) => shape.deformedVertices[index]);
+				const denominator = (deformed[1].y - deformed[2].y) * (deformed[0].x - deformed[2].x) + (deformed[2].x - deformed[1].x) * (deformed[0].y - deformed[2].y);
+				const originalArea = (original[1].x - original[0].x) * (original[2].y - original[0].y) - (original[1].y - original[0].y) * (original[2].x - original[0].x);
+				if (!Number.isFinite(denominator) || Math.abs(denominator) < 1e-8 || !Number.isFinite(originalArea) || Math.abs(originalArea) < 1e-8) {
+					throw new Error(`PSD smart filter ${filter.index} (${filter.name}) Puppet Warp shape ${shapeIndex} triangle ${triangleOffset / 3} is degenerate.`);
+				}
+				const minimumX = Math.max(0, Math.ceil(Math.min(...deformed.map((point) => point.x)) - 0.5));
+				const maximumX = Math.min(source.width - 1, Math.floor(Math.max(...deformed.map((point) => point.x)) - 0.5));
+				const minimumY = Math.max(0, Math.ceil(Math.min(...deformed.map((point) => point.y)) - 0.5));
+				const maximumY = Math.min(source.height - 1, Math.floor(Math.max(...deformed.map((point) => point.y)) - 0.5));
+				if (maximumX < minimumX || maximumY < minimumY) {
+					continue;
+				}
+				sampleVisits += (maximumX - minimumX + 1) * (maximumY - minimumY + 1) * 4;
+				assertSmartFilterWork(filter, sampleVisits);
+				for (let y = minimumY; y <= maximumY; ++y) {
+					for (let x = minimumX; x <= maximumX; ++x) {
+						const destinationX = x + 0.5;
+						const destinationY = y + 0.5;
+						const firstWeight =
+							((deformed[1].y - deformed[2].y) * (destinationX - deformed[2].x) + (deformed[2].x - deformed[1].x) * (destinationY - deformed[2].y)) / denominator;
+						const secondWeight =
+							((deformed[2].y - deformed[0].y) * (destinationX - deformed[2].x) + (deformed[0].x - deformed[2].x) * (destinationY - deformed[2].y)) / denominator;
+						const thirdWeight = 1 - firstWeight - secondWeight;
+						if (firstWeight < -1e-7 || secondWeight < -1e-7 || thirdWeight < -1e-7) {
+							continue;
+						}
+						const sourceX = firstWeight * original[0].x + secondWeight * original[1].x + thirdWeight * original[2].x - 0.5;
+						const sourceY = firstWeight * original[0].y + secondWeight * original[1].y + thirdWeight * original[2].y - 0.5;
+						const sample = samplePremultipliedBilinear(input, sourceX, sourceY);
+						const destinationOffset = (y * source.width + x) * 4;
+						const alpha = Math.max(0, Math.min(1, sample[3]));
+						output[destinationOffset + 3] = Math.round(alpha * 255);
+						for (let channel = 0; channel < 3; ++channel) {
+							output[destinationOffset + channel] = alpha <= 1e-12 ? 0 : Math.round(Math.max(0, Math.min(255, sample[channel] / alpha)));
+						}
+					}
+				}
+			}
+		}
+		return output;
+	};
 	const applyFibers = (input: Uint8Array, settings: NonNullable<IPsdSmartFilterInfo["fibers"]>, filter: IPsdSmartFilterInfo): Uint8Array => {
 		assertSmartFilterWork(filter, source.width * source.height * 8);
 		if (!filter.foregroundColor || !filter.backgroundColor) {
@@ -13130,7 +16810,8 @@ export function applyPsdSmartFilters(
 			filter.type === "shapeBlur" && filter.shapeBlur?.kernel !== "heartCard"
 				? shapeBlurKernelBindings.find((candidate) => candidate.shapeId === filter.shapeBlur!.customShape.id)
 				: undefined;
-		if (!filter.bakeSupported && !customShapeBlurBinding) {
+		const displacementMapBinding = filter.type === "displace" ? displacementMapBindings.find((candidate) => candidate.filterIndex === filter.index) : undefined;
+		if (!filter.bakeSupported && !customShapeBlurBinding && !displacementMapBinding) {
 			throw new Error(`PSD smart filter ${filter.index} (${filter.name}) cannot execute: ${filter.warning ?? "unsupported filter semantics"}`);
 		}
 		let filtered: Uint8Array;
@@ -13179,6 +16860,74 @@ export function applyPsdSmartFilters(
 				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Difference Clouds parameters.`);
 			}
 			filtered = applyCloudField(pixels, filter.differenceClouds, filter, "difference");
+		} else if (filter.type === "displace") {
+			if (!filter.displace) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Displace parameters.`);
+			}
+			if (!displacementMapBinding) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing its exact Displace map binding.`);
+			}
+			filtered = applyDisplace(pixels, filter.displace, displacementMapBinding, filter);
+		} else if (filter.type === "pinch") {
+			if (!filter.pinch) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Pinch parameters.`);
+			}
+			filtered = applyPinch(pixels, filter.pinch, filter);
+		} else if (filter.type === "polarCoordinates") {
+			if (!filter.polarCoordinates) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Polar Coordinates parameters.`);
+			}
+			filtered = applyPolarCoordinates(pixels, filter.polarCoordinates, filter);
+		} else if (filter.type === "ripple") {
+			if (!filter.ripple) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Ripple parameters.`);
+			}
+			filtered = applyRipple(pixels, filter.ripple, filter);
+		} else if (filter.type === "shear") {
+			if (!filter.shear) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Shear parameters.`);
+			}
+			filtered = applyShear(pixels, filter.shear, filter);
+		} else if (filter.type === "spherize") {
+			if (!filter.spherize) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Spherize parameters.`);
+			}
+			filtered = applySpherize(pixels, filter.spherize, filter);
+		} else if (filter.type === "twirl") {
+			if (!filter.twirl) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Twirl parameters.`);
+			}
+			filtered = applyTwirl(pixels, filter.twirl, filter);
+		} else if (filter.type === "wave") {
+			if (!filter.wave) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Wave parameters.`);
+			}
+			filtered = applyWave(pixels, filter.wave, filter);
+		} else if (filter.type === "zigzag") {
+			if (!filter.zigzag) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing ZigZag parameters.`);
+			}
+			filtered = applyZigZag(pixels, filter.zigzag, filter);
+		} else if (filter.type === "hsbHsl") {
+			if (!filter.hsbHsl) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing HSB/HSL parameters.`);
+			}
+			filtered = applyHsbHsl(pixels, filter.hsbHsl, filter);
+		} else if (filter.type === "perspectiveWarp") {
+			if (!filter.perspectiveWarp) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Perspective Warp parameters.`);
+			}
+			filtered = applyPerspectiveWarp(pixels, filter.perspectiveWarp, filter);
+		} else if (filter.type === "curves") {
+			if (!filter.curves) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Curves parameters.`);
+			}
+			filtered = applyCurvesSmartFilter(pixels, filter.curves, filter);
+		} else if (filter.type === "brightnessContrast") {
+			if (!filter.brightnessContrast) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Brightness/Contrast parameters.`);
+			}
+			filtered = applyBrightnessContrastSmartFilter(pixels, filter.brightnessContrast, filter);
 		} else if (filter.type === "diffuse") {
 			if (!filter.diffuse) {
 				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Diffuse parameters.`);
@@ -13214,6 +16963,31 @@ export function applyPsdSmartFilters(
 				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing De-Interlace parameters.`);
 			}
 			filtered = applyDeInterlace(pixels, filter.deInterlace, filter);
+		} else if (filter.type === "customConvolution") {
+			if (!filter.customConvolution) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Custom parameters.`);
+			}
+			filtered = applyCustomConvolution(pixels, filter.customConvolution, filter);
+		} else if (filter.type === "offset") {
+			if (!filter.offset) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Offset parameters.`);
+			}
+			filtered = applyOffset(pixels, filter.offset, filter);
+		} else if (filter.type === "oilPaint") {
+			if (!filter.oilPaint) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Oil Paint parameters.`);
+			}
+			filtered = applyOilPaint(pixels, filter.oilPaint, filter);
+		} else if (filter.type === "liquify") {
+			if (!filter.liquify) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Liquify parameters.`);
+			}
+			filtered = applyLiquify(pixels, filter.liquify, filter);
+		} else if (filter.type === "puppetWarp") {
+			if (!filter.puppetWarp) {
+				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Puppet Warp parameters.`);
+			}
+			filtered = applyPuppetWarp(pixels, filter.puppetWarp, filter);
 		} else if (filter.type === "fibers") {
 			if (!filter.fibers) {
 				throw new Error(`PSD smart filter ${filter.index} (${filter.name}) is missing Fibers parameters.`);

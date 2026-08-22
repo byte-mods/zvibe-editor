@@ -3,7 +3,7 @@ import { MdOutlineInfo } from "react-icons/md";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../../ui/shadcn/ui/tooltip";
 
-import { IEditorInspectorFieldProps } from "./field";
+import { IEditorInspectorFieldProps, matchesInspectorSearch } from "./field";
 import { EditorInspectorNumberField } from "./number";
 import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
@@ -22,6 +22,9 @@ export interface IEditorInspectorDimensionsFieldProps extends IEditorInspectorFi
 export function EditorInspectorDimensionsField(props: IEditorInspectorDimensionsFieldProps) {
 	const prefab = usePrefabFieldOverride(props);
 	const [pointerOver, setPointerOver] = useState(false);
+	if (!matchesInspectorSearch(props.label, props.property, props.tooltip)) {
+		return null;
+	}
 
 	return (
 		<div

@@ -4,7 +4,6 @@ import { Component, ReactNode } from "react";
 import { Actions, IJsonModel, Layout, Model, TabNode, TabSetNode } from "flexlayout-react";
 
 import { Observable, Tools } from "babylonjs";
-import { ipcRenderer } from "electron";
 
 import { waitNextAnimationFrame } from "../tools/tools";
 
@@ -20,6 +19,19 @@ import { EditorAnimation } from "./layout/animation";
 import { EditorAssetsBrowser } from "./layout/assets-browser";
 import { EditorTerminal } from "./layout/terminal";
 import { EditorMarketplaceBrowser } from "./layout/marketplace";
+import { EditorProfiler } from "./layout/profiler";
+import { EditorEntities } from "./layout/entities";
+import { EditorLightingSearch } from "./layout/lighting-search";
+import { EditorScriptDebugger } from "./layout/script-debugger";
+import { EditorNetworking } from "./layout/networking";
+import { EditorMobile } from "./layout/mobile";
+import { EditorConsoleServer } from "./layout/console-server";
+import { EditorProjectAuditor } from "./layout/project-auditor";
+import { EditorRuntimeAi } from "./layout/runtime-ai";
+import { EditorMlTraining } from "./layout/ml-training";
+import { EditorOcclusionCulling } from "./layout/occlusion-culling";
+import { EditorGenerativeAssets } from "./layout/generative-assets";
+import { EditorProjectServices } from "./layout/services";
 
 export interface IEditorLayoutProps {
 	/**
@@ -71,6 +83,30 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 	 * The marketplace browser of the editor.
 	 */
 	public marketplace: EditorMarketplaceBrowser | null;
+	/** Dedicated CPU/GPU/memory/loading profiler workspace. */
+	public profiler: EditorProfiler;
+	/** Data-oriented world authoring and runtime debugger. */
+	public entities: EditorEntities;
+	/** Unified lighting inventory, query tree, batch editor, and lightmap preview workspace. */
+	public lightingSearch: EditorLightingSearch;
+	/** Source debugger, code coverage, and project script-template workspace. */
+	public scriptDebugger: EditorScriptDebugger;
+	/** Network manager, session host, multiplayer Play Mode, and diagnostics workspace. */
+	public networking: EditorNetworking;
+	/** Touch layout, native deployment, connected-device, and store workflow workspace. */
+	public mobile: EditorMobile;
+	/** Production dedicated-server, container/Kubernetes, and licensed console-provider workspace. */
+	public consoleServer: EditorConsoleServer;
+	/** Asynchronous serialization, API, particle texture, and atlas Project Auditor workspace. */
+	public projectAuditor: EditorProjectAuditor;
+	/** ONNX model inspection, retained sessions, and bounded inference workspace. */
+	public runtimeAi: EditorRuntimeAi;
+	/** Agent behavior, demonstration, trainer orchestration, metrics, and checkpoint workspace. */
+	public mlTraining: EditorMlTraining;
+	/** Static PVS bake, object roles, camera toggles, and runtime visualization workspace. */
+	public occlusionCulling: EditorOcclusionCulling;
+	/** Provider configuration, generation jobs, previews, publication, and provenance workspace. */
+	public generativeAssets: EditorGenerativeAssets;
 
 	/**
 	 * Observable for when the layout has changed.
@@ -88,9 +124,22 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 		animations: <EditorAnimation editor={this.props.editor} ref={(r) => (this.animations = r!)} />,
 		terminal: <EditorTerminal editor={this.props.editor} ref={(r) => (this.terminal = r!)} />,
 		marketplace: <EditorMarketplaceBrowser editor={this.props.editor} ref={(r) => (this.marketplace = r)} />,
+		profiler: <EditorProfiler editor={this.props.editor} ref={(r) => (this.profiler = r!)} />,
+		entities: <EditorEntities editor={this.props.editor} ref={(r) => (this.entities = r!)} />,
+		"lighting-search": <EditorLightingSearch editor={this.props.editor} ref={(r) => (this.lightingSearch = r!)} />,
+		"script-debugger": <EditorScriptDebugger editor={this.props.editor} ref={(r) => (this.scriptDebugger = r!)} />,
+		networking: <EditorNetworking editor={this.props.editor} ref={(r) => (this.networking = r!)} />,
+		mobile: <EditorMobile editor={this.props.editor} ref={(r) => (this.mobile = r!)} />,
+		"console-server": <EditorConsoleServer editor={this.props.editor} ref={(r) => (this.consoleServer = r!)} />,
+		"project-auditor": <EditorProjectAuditor editor={this.props.editor} ref={(r) => (this.projectAuditor = r!)} />,
+		"runtime-ai": <EditorRuntimeAi editor={this.props.editor} ref={(r) => (this.runtimeAi = r!)} />,
+		"ml-training": <EditorMlTraining editor={this.props.editor} ref={(r) => (this.mlTraining = r!)} />,
+		"generative-assets": <EditorGenerativeAssets editor={this.props.editor} ref={(r) => (this.generativeAssets = r!)} />,
+		services: <EditorProjectServices editor={this.props.editor} />,
+		"occlusion-culling": <EditorOcclusionCulling editor={this.props.editor} ref={(r) => (this.occlusionCulling = r!)} />,
 	};
 
-	private _layoutVersion: string = "5.0.0-alpha.3";
+	private _layoutVersion: string = "5.0.0-alpha.16";
 
 	public constructor(props: IEditorLayoutProps) {
 		super(props);
@@ -163,10 +212,7 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 		if (changed) {
 			this.props.editor.setState({ openedTabs });
 
-			ipcRenderer.send("editor:setup-menu", {
-				enableExperimentalFeatures: this.props.editor.state.enableExperimentalFeatures,
-				openedTabs,
-			});
+			this.props.editor.setupApplicationMenu(openedTabs);
 		}
 
 		this.onLayoutChanged.notifyObservers();
@@ -255,5 +301,6 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 		if (existingNode) {
 			this._layoutRef?.props.model.doAction(Actions.deleteTab(tabId));
 		}
+		delete this._components[tabId];
 	}
 }

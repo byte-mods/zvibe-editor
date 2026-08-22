@@ -1,10 +1,21 @@
 import { Scene, Mesh, NodeParticleSystemSet, ParticleSystemSet, Tools, Matrix, Vector3, Quaternion, Tags, GetClass, Node } from "babylonjs";
+import {
+	disposeVfxBatchReleaseController,
+	getVfxBatchReleaseEvidence,
+	handleVfxBatchHostEnabledChanged,
+	IVfxBatchReleaseEvidence,
+	refreshVfxBatchReleaseEvidence,
+	registerVfxBatchReleaseController,
+	setVfxBatchReleasePolicy,
+} from "babylonjs-editor-tools";
 
 import { UniqueNumber } from "../../tools/tools";
 import { setParticleSystemVisibleInGraph } from "../../tools/particles/metadata";
 import { isParticleSystem, isGPUParticleSystem } from "../../tools/guards/particles";
 
 export class NodeParticleSystemSetMesh extends Mesh {
+	private _releaseVfxBatchOnDisable = false;
+
 	/**
 	 * Defines the reference to the associated Particle System Set created from the node particle system set.
 	 */
@@ -24,54 +35,88 @@ export class NodeParticleSystemSetMesh extends Mesh {
 
 		// Set scale to 100 as default unit size is centimeters and particles are in meters
 		this.scaling.setAll(100);
+
+		registerVfxBatchReleaseController(
+			this,
+			{
+				isHostEnabled: () => this.isEnabled(false),
+				isHostDisposed: () => this.isDisposed(),
+				hasRebuildSource: () => this.nodeParticleSystemSet !== null,
+				getBatch: () => this.particleSystemSet,
+				detachBatch: () => {
+					const batch = this.particleSystemSet;
+					this.particleSystemSet = null;
+					return batch;
+				},
+				buildBatch: () => this._buildParticleSystemSet(this.nodeParticleSystemSet!),
+				publishBatch: (batch) => this._publishParticleSystemSet(batch),
+				disposeBatch: (batch) => this._disposeParticleSystemSet(batch),
+			},
+			this._releaseVfxBatchOnDisable
+		);
+		this.onEnabledStateChangedObservable.add(() => void handleVfxBatchHostEnabledChanged(this));
+	}
+
+	/** Whether disabling this VFX node releases its live particle-system batch. */
+	public get releaseVfxBatchOnDisable(): boolean {
+		return this._releaseVfxBatchOnDisable;
+	}
+
+	/** Returns exact runtime evidence for the disable-time VFX batch lifecycle. */
+	public getVfxBatchReleaseEvidence(): IVfxBatchReleaseEvidence {
+		return getVfxBatchReleaseEvidence(this);
+	}
+
+	/** Changes the disable-time release policy and completes any required release or rebuild. */
+	public async setReleaseVfxBatchOnDisable(enabled: boolean): Promise<IVfxBatchReleaseEvidence> {
+		this._releaseVfxBatchOnDisable = enabled;
+		return setVfxBatchReleasePolicy(this, enabled);
 	}
 
 	public async buildNodeParticleSystemSet(data: any): Promise<void> {
-		if (this.particleSystemSet) {
-			this.particleSystemSet.emitterNode = null;
-			this.particleSystemSet.dispose();
-			this.particleSystemSet = null;
+		const nextNodeParticleSystemSet = NodeParticleSystemSet.Parse(data);
+		nextNodeParticleSystemSet.id = data.id;
+		nextNodeParticleSystemSet.uniqueId = data.uniqueId;
+
+		let particleSystemSet: ParticleSystemSet;
+		try {
+			particleSystemSet = await this._buildParticleSystemSet(nextNodeParticleSystemSet);
+		} catch (error) {
+			nextNodeParticleSystemSet.dispose();
+			throw error;
 		}
 
-		this.nodeParticleSystemSet?.dispose();
-		this.nodeParticleSystemSet = null;
+		const previousParticleSystemSet = this.particleSystemSet;
+		const previousNodeParticleSystemSet = this.nodeParticleSystemSet;
+		try {
+			this._publishParticleSystemSet(particleSystemSet);
+		} catch (error) {
+			this._disposeParticleSystemSet(particleSystemSet);
+			nextNodeParticleSystemSet.dispose();
+			throw error;
+		}
 
-		this.nodeParticleSystemSet = NodeParticleSystemSet.Parse(data);
-		this.nodeParticleSystemSet.id = data.id;
-		this.nodeParticleSystemSet.uniqueId = data.uniqueId;
-
-		const particleSystemSet = await this.nodeParticleSystemSet.buildAsync(this._scene, false);
 		this.particleSystemSet = particleSystemSet;
-
-		particleSystemSet.emitterNode = this;
-		particleSystemSet["_emitterNodeIsOwned"] = false;
-
-		particleSystemSet.systems.forEach((particleSystem) => {
-			particleSystem.id = Tools.RandomId();
-			particleSystem.uniqueId = UniqueNumber.Get();
-
-			if (isParticleSystem(particleSystem)) {
-				const sizeCreationProcess = particleSystem._sizeCreation.process;
-				if (sizeCreationProcess) {
-					particleSystem._sizeCreation.process = (particle, system) => {
-						sizeCreationProcess(particle, system);
-						particle.scale.x *= 100;
-						particle.scale.y *= 100;
-					};
-				}
-			}
-
-			if (isParticleSystem(particleSystem) || isGPUParticleSystem(particleSystem)) {
-				setParticleSystemVisibleInGraph(particleSystem, false);
-			}
-		});
-		particleSystemSet.start();
+		this.nodeParticleSystemSet = nextNodeParticleSystemSet;
+		if (previousParticleSystemSet && previousParticleSystemSet !== particleSystemSet) {
+			this._disposeParticleSystemSet(previousParticleSystemSet);
+		}
+		previousNodeParticleSystemSet?.dispose();
+		refreshVfxBatchReleaseEvidence(this);
+		await handleVfxBatchHostEnabledChanged(this);
 	}
 
 	/**
 	 * Releases resources associated with this scene link.
 	 */
 	public dispose(): void {
+		disposeVfxBatchReleaseController(this);
+		if (this.particleSystemSet) {
+			this._disposeParticleSystemSet(this.particleSystemSet);
+			this.particleSystemSet = null;
+		}
+		this.nodeParticleSystemSet?.dispose();
+		this.nodeParticleSystemSet = null;
 		super.dispose(false, true);
 	}
 
@@ -87,12 +132,15 @@ export class NodeParticleSystemSetMesh extends Mesh {
 		const clone = new NodeParticleSystemSetMesh(name ?? this.name, this.getScene(), newParent, this, doNotCloneChildren, clonePhysicsImpostor);
 
 		if (this.nodeParticleSystemSet) {
-			clone.buildNodeParticleSystemSet({
-				...this.nodeParticleSystemSet.serialize(),
-				id: this.nodeParticleSystemSet.id,
-				uniqueId: this.nodeParticleSystemSet.uniqueId,
-			});
+			void clone
+				.buildNodeParticleSystemSet({
+					...this.nodeParticleSystemSet.serialize(),
+					id: this.nodeParticleSystemSet.id,
+					uniqueId: this.nodeParticleSystemSet.uniqueId,
+				})
+				.catch((error: unknown) => Tools.Error(`Unable to clone Node Particle System "${this.name}": ${error instanceof Error ? error.message : String(error)}`));
 		}
+		void clone.setReleaseVfxBatchOnDisable(this.releaseVfxBatchOnDisable);
 
 		return clone;
 	}
@@ -101,6 +149,7 @@ export class NodeParticleSystemSetMesh extends Mesh {
 		super.serialize(serializationObject);
 
 		serializationObject.isNodeParticleSystemMesh = true;
+		serializationObject.releaseVfxBatchOnDisable = this.releaseVfxBatchOnDisable;
 		serializationObject.nodeParticleSystemSet = this.nodeParticleSystemSet
 			? {
 					...this.nodeParticleSystemSet.serialize(),
@@ -116,8 +165,11 @@ export class NodeParticleSystemSetMesh extends Mesh {
 		const mesh = new NodeParticleSystemSetMesh(parsedMesh.name, scene);
 
 		if (parsedMesh.nodeParticleSystemSet) {
-			mesh.buildNodeParticleSystemSet(parsedMesh.nodeParticleSystemSet);
+			void mesh
+				.buildNodeParticleSystemSet(parsedMesh.nodeParticleSystemSet)
+				.catch((error: unknown) => Tools.Error(`Unable to parse Node Particle System "${parsedMesh.name}": ${error instanceof Error ? error.message : String(error)}`));
 		}
+		void mesh.setReleaseVfxBatchOnDisable(parsedMesh.releaseVfxBatchOnDisable === true);
 
 		mesh.id = parsedMesh.id;
 		mesh._waitingParsedUniqueId = parsedMesh.uniqueId;
@@ -193,5 +245,41 @@ export class NodeParticleSystemSetMesh extends Mesh {
 		}
 
 		return mesh;
+	}
+
+	private async _buildParticleSystemSet(graph: NodeParticleSystemSet): Promise<ParticleSystemSet> {
+		const particleSystemSet = await graph.buildAsync(this._scene, false);
+		particleSystemSet.emitterNode = this;
+		particleSystemSet["_emitterNodeIsOwned"] = false;
+		particleSystemSet.systems.forEach((particleSystem) => {
+			particleSystem.id = Tools.RandomId();
+			particleSystem.uniqueId = UniqueNumber.Get();
+			if (isParticleSystem(particleSystem)) {
+				const sizeCreationProcess = particleSystem._sizeCreation.process;
+				if (sizeCreationProcess) {
+					particleSystem._sizeCreation.process = (particle, system) => {
+						sizeCreationProcess(particle, system);
+						particle.scale.x *= 100;
+						particle.scale.y *= 100;
+					};
+				}
+			}
+			if (isParticleSystem(particleSystem) || isGPUParticleSystem(particleSystem)) {
+				setParticleSystemVisibleInGraph(particleSystem, false);
+			}
+		});
+		return particleSystemSet;
+	}
+
+	private _publishParticleSystemSet(batch: ParticleSystemSet): void {
+		batch.emitterNode = this;
+		batch["_emitterNodeIsOwned"] = false;
+		batch.start();
+		this.particleSystemSet = batch;
+	}
+
+	private _disposeParticleSystemSet(batch: ParticleSystemSet): void {
+		batch.emitterNode = null;
+		batch.dispose();
 	}
 }

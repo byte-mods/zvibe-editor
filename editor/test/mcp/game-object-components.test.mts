@@ -189,13 +189,90 @@ describe("mcp/game-object-components", () => {
 		expect(world.archetypes[0]).toMatchObject({ archetype: "Unit", entityIds: ["unit-1"], fields: { hp: [42] }, count: 1 });
 	});
 
+	test("copies, pastes, and resets Entity data without entering the Physics adapter", () => {
+		const source = new TransformNode("Entity Source", scene);
+		const target = new TransformNode("Entity Target", scene);
+		const sourceInitial = inspectGameObjectComponents(scene, { nodeId: source.id });
+		const sourceAdded = addGameObjectComponent(
+			scene,
+			{
+				nodeId: source.id,
+				expectedFingerprint: sourceInitial.fingerprint,
+				type: "entity",
+				data: { archetype: "Unit", sectionId: "combat", values: { hp: 42 }, components: { velocity: { x: 3, active: true } } },
+			},
+			options
+		);
+		const sourceEntity = sourceAdded.components.find((entry: any) => entry.type === "entity");
+		const copied = copyGameObjectComponent(scene, { nodeId: source.id, expectedFingerprint: sourceAdded.fingerprint, componentId: sourceEntity.id });
+		const targetInitial = inspectGameObjectComponents(scene, { nodeId: target.id });
+		const pasted = pasteGameObjectComponent(
+			scene,
+			{ nodeId: target.id, expectedFingerprint: targetInitial.fingerprint, expectedClipboardFingerprint: copied.clipboardFingerprint, mode: "new" },
+			options
+		);
+		const targetEntity = pasted.components.find((entry: any) => entry.type === "entity");
+		expect(targetEntity.data).toMatchObject({ version: 3, archetype: "Unit", sectionId: "combat", values: { hp: 42 }, components: { velocity: { x: 3, active: true } } });
+		expect((target as any).physicsAggregate).toBeUndefined();
+
+		const reset = resetGameObjectComponent(scene, { nodeId: target.id, expectedFingerprint: pasted.fingerprint, componentId: targetEntity.id }, options);
+		expect(reset.components.find((entry: any) => entry.type === "entity").data).toEqual({
+			version: 3,
+			archetype: "Default",
+			sectionId: "main",
+			values: {},
+			components: {},
+			bakingEnabled: true,
+			hiddenInHierarchy: false,
+		});
+		expect((target as any).physicsAggregate).toBeUndefined();
+	});
+
+	test("copies, pastes, and resets Network data without entering the Physics adapter", () => {
+		const source = new TransformNode("Network Source", scene);
+		const target = new TransformNode("Network Target", scene);
+		const sourceInitial = inspectGameObjectComponents(scene, { nodeId: source.id });
+		const sourceAdded = addGameObjectComponent(
+			scene,
+			{ nodeId: source.id, expectedFingerprint: sourceInitial.fingerprint, type: "network", data: { networkId: "shared", authority: "owner", sendRateHz: 30 } },
+			options
+		);
+		const sourceNetwork = sourceAdded.components.find((entry: any) => entry.type === "network");
+		const copied = copyGameObjectComponent(scene, { nodeId: source.id, expectedFingerprint: sourceAdded.fingerprint, componentId: sourceNetwork.id });
+		const targetInitial = inspectGameObjectComponents(scene, { nodeId: target.id });
+		const pasted = pasteGameObjectComponent(
+			scene,
+			{ nodeId: target.id, expectedFingerprint: targetInitial.fingerprint, expectedClipboardFingerprint: copied.clipboardFingerprint, mode: "new" },
+			options
+		);
+		const targetNetwork = pasted.components.find((entry: any) => entry.type === "network");
+		expect(targetNetwork.data).toMatchObject({ networkId: "shared", authority: "owner", sendRateHz: 30 });
+		expect((target as any).physicsAggregate).toBeUndefined();
+
+		const reset = resetGameObjectComponent(scene, { nodeId: target.id, expectedFingerprint: pasted.fingerprint, componentId: targetNetwork.id }, options);
+		expect(reset.components.find((entry: any) => entry.type === "network").data).toMatchObject({
+			networkId: expect.stringMatching(/^node-[a-f0-9]{32}$/),
+			authority: "server",
+			sendRateHz: 20,
+		});
+		expect((target as any).physicsAggregate).toBeUndefined();
+	});
+
 	test("authors a single network replication contract that reaches the runtime", () => {
 		const node = new TransformNode("Networked Actor", scene);
 		const initial = inspectGameObjectComponents(scene, { nodeId: node.id });
+		expect(() => addGameObjectComponent(scene, { nodeId: node.id, expectedFingerprint: initial.fingerprint, type: "network", data: { networkId: "bad id" } }, options)).toThrow(
+			"data.networkId"
+		);
+		expect(() => addGameObjectComponent(scene, { nodeId: node.id, expectedFingerprint: initial.fingerprint, type: "network", data: { unrecognized: true } }, options)).toThrow(
+			"not a supported Network Replication field"
+		);
+		expect(inspectGameObjectComponents(scene, { nodeId: node.id }).fingerprint).toBe(initial.fingerprint);
 
 		const added = addGameObjectComponent(scene, { nodeId: node.id, expectedFingerprint: initial.fingerprint, type: "network" }, options);
 		const component = added.components.find((entry: any) => entry.type === "network");
 		expect(component).toMatchObject({ label: "Network Replication", removable: true, canToggle: true });
+		expect(component.data.networkId).toMatch(/^node-[a-f0-9]{32}$/);
 
 		// Only one replication contract may own a node.
 		expect(listGameObjectComponentTypes(scene, { nodeId: node.id }).types.find((type: any) => type.type === "network").canAdd).toBe(false);
@@ -211,6 +288,9 @@ describe("mcp/game-object-components", () => {
 			options
 		);
 		expect(configured.components.find((entry: any) => entry.type === "network").data).toMatchObject({ networkId: "actor-1", authority: "owner", sendRateHz: 30 });
+		expect(() =>
+			setGameObjectComponent(scene, { nodeId: node.id, expectedFingerprint: configured.fingerprint, componentId: component.id, data: { syncAnimation: "yes" } }, options)
+		).toThrow("data.syncAnimation must be a boolean");
 
 		// The authored contract is materialized for the runtime netcode layer.
 		const runtime = getRuntimeGameObjectComponents(node as any).find((entry: any) => entry.type === "network");

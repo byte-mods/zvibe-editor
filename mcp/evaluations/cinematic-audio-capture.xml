@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect Cinematic capabilities. What built-in audio capture mode is reported?</question>
+      <answer>offline-master-bus</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Cinematic audio capture capabilities. What sample rate and channel count are used, in that order?</question>
+      <answer>48000 Hz, 2 channels</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the Cinematic audio capture container matrix. Which two containers can receive muxed offline audio? Answer in reported order.</question>
+      <answer>webm, mp4</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the Cinematic audio codec matrix. Which codec is used for WebM and which for MP4, in that order?</question>
+      <answer>opus, aac</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which read-only MCP tool preflights exact Cinematic sources, mixer routes, effects, sends, codec, duration, and blocking issues before capture?</question>
+      <answer>inspect_cinematic_audio_capture_plan</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does inspect_cinematic_audio_capture_plan require the exact document revision and fingerprint lease? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does built-in offline audio capture support PNG, JPEG, or WebP image-sequence muxing? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which authored audio sources are included by the built-in offline capture backend?</question>
+      <answer>Timeline SoundNode clips</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>How are sidechain sends represented during deterministic offline master rendering?</question>
+      <answer>captured-runtime-duck-gain</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Are HTML Video Player audio tracks included in the built-in offline master render? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+</evaluation>

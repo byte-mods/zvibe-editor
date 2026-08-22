@@ -13,15 +13,25 @@ import {
 	ICompiledAnimatorMachine,
 	ICompiledAnimatorState,
 	ICompiledAnimatorTransition,
+	resolveAnimatorStatePlayback,
 } from "./animator-graph";
 import { AnimatorLayerAnimationGroups, AnimatorLayerBlendingMode, IAnimatorLayerReferencePose } from "./animator-layer-groups";
-import { evaluateAnimatorBlendTreeMotions, getAnimatorBlendTreeAnimationGroups, getAnimatorBlendTreeMotions, IAnimatorBlendTreeMotion } from "./animator-blend-tree";
+import { applyAnimatorFootIK, deleteAnimatorFootIKDiagnostics, getAnimatorFootIKDiagnostics } from "./animator-foot-ik";
+import { applyAnimatorWriteDefaults, deleteAnimatorWriteDefaults, getAnimatorWriteDefaultsDiagnostics } from "./animator-write-defaults";
+import { evaluateAnimatorBlendTreeMotions, getAnimatorBlendTreeMotions, IAnimatorBlendTreeMotion } from "./animator-blend-tree";
 import { getAnimatorIKPassDiagnostics, invokeAnimatorIKPass } from "./animator-ik-pass";
-import { getAnimatorStateBehaviourDiagnostics, invokeAnimatorStateBehaviours } from "./animator-state-behaviours";
+import { captureAnimatorHumanoidMuscleTrace, deleteAnimatorHumanoidMuscleTrace, getAnimatorHumanoidMuscleTrace } from "./animator-muscle-trace";
+import {
+	getAnimatorStateBehaviourDiagnostics,
+	getAnimatorStateMachineBehaviourTransitions,
+	invokeAnimatorStateBehaviours,
+	invokeAnimatorStateMachineBehaviours,
+} from "./animator-state-behaviours";
 
 type IController = IAnimatorGraphMachine & {
 	id: string;
 	name: string;
+	humanoidAvatarId?: string;
 	parameters: Record<string, string | number | boolean>;
 	parameterTypes?: Record<string, "float" | "int" | "bool" | "trigger" | "string">;
 	baseIKPass?: boolean;
@@ -68,11 +78,21 @@ type IRuntimeFade = {
 };
 
 type IPendingStateBehaviour = {
+	kind: "state";
 	phase: "enter" | "exit";
 	state: IState;
 	layer?: ILayer;
 	elapsedSeconds: number;
 	normalizedTime: number;
+	interrupted: boolean;
+};
+
+type IPendingStateMachineBehaviour = {
+	kind: "machine";
+	phase: "machineEnter" | "machineExit";
+	behaviours: NonNullable<IAnimatorGraphMachine["behaviours"]>;
+	machinePath: string[];
+	layer?: ILayer;
 	interrupted: boolean;
 };
 
@@ -202,7 +222,8 @@ export class AnimatorControllerRuntime {
 	private _layerAnimationGroups: AnimatorLayerAnimationGroups;
 	private _baseLifecycleState: string | null = null;
 	private _layerLifecycleStates = new Map<string, IState>();
-	private _pendingStateBehaviours: IPendingStateBehaviour[] = [];
+	private _pendingStateBehaviours: Array<IPendingStateBehaviour | IPendingStateMachineBehaviour> = [];
+	private _runtimeSeconds = 0;
 	private _disposed = false;
 
 	public constructor(
@@ -220,6 +241,9 @@ export class AnimatorControllerRuntime {
 		}
 		this._disposed = true;
 		this._layerAnimationGroups.dispose();
+		deleteAnimatorHumanoidMuscleTrace(this._scene, this._controller.id);
+		deleteAnimatorFootIKDiagnostics(this._scene, this._controller.id);
+		deleteAnimatorWriteDefaults(this._scene, this._controller.id);
 	}
 	public setParameter(name: string, value: string | number | boolean): boolean {
 		if (!Object.prototype.hasOwnProperty.call(this._controller.parameters, name)) {
@@ -227,6 +251,28 @@ export class AnimatorControllerRuntime {
 		}
 		const parameterType = this._controller.parameterTypes?.[name] ?? inferParameterType(this._controller.parameters[name]);
 		validateParameterValue(name, parameterType, value);
+		const baseBefore = this._compileBaseMachine().states.find((candidate) => candidate.name === this._controller.activeState);
+		const baseProgress = baseBefore ? this._stateProgress(baseBefore, this._elapsedSeconds) : 0;
+		const layersBefore = new Map(
+			(this._controller.layers ?? []).map((layer) => {
+				const state = layer.synchronizedLayer
+					? this._layerLifecycleStates.get(layer.name)
+					: this._compileLayerMachine(layer).states.find((candidate) => candidate.name === layer.activeState);
+				return [layer.name, { layer, state, progress: state ? this._stateProgress(state, this._layerElapsedSeconds.get(layer.name) ?? 0, layer) : 0 }] as const;
+			})
+		);
+		const affectsPlayback = (state: IState | undefined): boolean => {
+			const bindings = state ? resolveAnimatorStatePlayback(state, this._controller.parameters).bindings : null;
+			return !!bindings && Object.values(bindings).includes(name);
+		};
+		if (affectsPlayback(baseBefore)) {
+			this._stopStateGroups(baseBefore!);
+		}
+		for (const { layer, state } of layersBefore.values()) {
+			if (affectsPlayback(state)) {
+				this._stopStateGroups(state!, layer);
+			}
+		}
 		this._controller.parameters[name] = value;
 		const baseMachine = this._compileBaseMachine();
 		const transition = this._controller.activeState
@@ -239,6 +285,11 @@ export class AnimatorControllerRuntime {
 		} else {
 			const active = baseMachine.states.find((candidate) => candidate.name === this._controller.activeState);
 			if (active) {
+				if (affectsPlayback(active)) {
+					this._startStateGroups(active, [], undefined, baseProgress);
+					const duration = this._effectiveStateDuration(active);
+					this._elapsedSeconds = duration ? duration * baseProgress : 0;
+				}
 				this._applyBlendTree(active);
 			}
 		}
@@ -262,6 +313,12 @@ export class AnimatorControllerRuntime {
 			} else {
 				const layerState = layerMachine.states.find((candidate) => candidate.name === layer.activeState);
 				if (layerState) {
+					const previous = layersBefore.get(layer.name);
+					if (affectsPlayback(layerState)) {
+						this._startStateGroups(layerState, layer.maskTargetNames ?? [], layer.avatarMaskId, previous?.progress ?? 0, layer);
+						const duration = this._effectiveStateDuration(layerState, layer);
+						this._layerElapsedSeconds.set(layer.name, duration ? duration * (previous?.progress ?? 0) : 0);
+					}
 					this._applyBlendTree(layerState, layer.weight ?? 1, layer);
 				}
 			}
@@ -309,6 +366,7 @@ export class AnimatorControllerRuntime {
 		return {
 			controllerId: this._controller.id,
 			controllerName: this._controller.name,
+			humanoidAvatarId: this._controller.humanoidAvatarId ?? null,
 			baseIKPass: this._controller.baseIKPass === true,
 			parameters: Object.entries(this._controller.parameters)
 				.sort(([first], [second]) => first.localeCompare(second))
@@ -345,6 +403,9 @@ export class AnimatorControllerRuntime {
 						sourceFound: !!this._scene.getNodeById(this._controller.rootMotion.sourceNodeId),
 						targetFound: !!this._scene.getNodeById(this._controller.rootMotion.targetNodeId),
 						sampled: !!this._lastRootSample,
+						suppressedByTimeParameter: this._compileBaseMachine().states.some(
+							(state) => state.name === this._controller.activeState && resolveAnimatorStatePlayback(state, this._controller.parameters).timeDriven
+						),
 					}
 				: null,
 			stateBehaviours: getAnimatorStateBehaviourDiagnostics(this._scene, this._controller),
@@ -352,6 +413,9 @@ export class AnimatorControllerRuntime {
 				{ name: "$base", weight: 1, ikPass: this._controller.baseIKPass },
 				...(this._controller.layers ?? []),
 			]),
+			footIK: getAnimatorFootIKDiagnostics(this._scene, this._controller, [{ name: "$base", weight: 1 }, ...(this._controller.layers ?? [])]),
+			writeDefaults: getAnimatorWriteDefaultsDiagnostics(this._scene, this._controller.id),
+			humanoidMuscleTrace: getAnimatorHumanoidMuscleTrace(this._scene, this._controller, { limit: 16 }),
 			engineDeltaTimeMs: this._scene.getEngine().getDeltaTime(),
 		};
 	}
@@ -374,6 +438,7 @@ export class AnimatorControllerRuntime {
 		if (lifecyclePrevious) {
 			this._queueStateBehaviour("exit", lifecyclePrevious, undefined, match?.interrupted === true);
 		}
+		this._queueStateMachineBehaviours(machine, lifecyclePrevious, state, undefined, match?.interrupted === true);
 		this._baseLifecycleState = state.name;
 		this._controller.activeState = state.name;
 		const durationSeconds = this._effectiveStateDuration(state);
@@ -413,8 +478,8 @@ export class AnimatorControllerRuntime {
 		const consumedTriggers = new Set<string>();
 		if (state) {
 			this._elapsedSeconds += deltaSeconds;
-			const duration = this._effectiveStateDuration(state);
-			const progress = duration ? ((state.loop ?? true) ? (this._elapsedSeconds % duration) / duration : Math.min(1, this._elapsedSeconds / duration)) : 0;
+			const progress = this._stateProgress(state, this._elapsedSeconds);
+			this._applyWriteDefaults(state);
 			this._seekStateGroups(state, progress);
 			this._invokeStateBehaviourUpdate(state, deltaSeconds, this._elapsedSeconds, progress);
 			const transition = this._transition
@@ -436,12 +501,7 @@ export class AnimatorControllerRuntime {
 				const synchronizedState = this._layerLifecycleStates.get(layer.name);
 				if (synchronizedState) {
 					const synchronizedElapsed = this._layerElapsedSeconds.get(layer.name) ?? 0;
-					const synchronizedDuration = this._effectiveStateDuration(synchronizedState, layer);
-					const synchronizedProgress = synchronizedDuration
-						? (synchronizedState.loop ?? true)
-							? (synchronizedElapsed % synchronizedDuration) / synchronizedDuration
-							: Math.min(1, synchronizedElapsed / synchronizedDuration)
-						: 0;
+					const synchronizedProgress = this._stateProgress(synchronizedState, synchronizedElapsed, layer);
 					this._invokeStateBehaviourUpdate(synchronizedState, deltaSeconds, synchronizedElapsed, synchronizedProgress, layer);
 				}
 				continue;
@@ -453,8 +513,8 @@ export class AnimatorControllerRuntime {
 			}
 			const elapsed = (this._layerElapsedSeconds.get(layer.name) ?? 0) + deltaSeconds;
 			this._layerElapsedSeconds.set(layer.name, elapsed);
-			const layerDuration = this._effectiveStateDuration(layerState, layer);
-			const layerProgress = layerDuration ? ((layerState.loop ?? true) ? (elapsed % layerDuration) / layerDuration : Math.min(1, elapsed / layerDuration)) : 0;
+			const layerProgress = this._stateProgress(layerState, elapsed, layer);
+			this._applyWriteDefaults(layerState, layer);
 			this._seekStateGroups(layerState, layerProgress, layer);
 			this._invokeStateBehaviourUpdate(layerState, deltaSeconds, elapsed, layerProgress, layer);
 			const activeLayerFade = this._layerTransitions.get(layer.name);
@@ -477,6 +537,8 @@ export class AnimatorControllerRuntime {
 		}
 		this._flushPendingStateBehaviours();
 		this._invokeIKPasses(deltaSeconds);
+		this._runtimeSeconds += deltaSeconds;
+		captureAnimatorHumanoidMuscleTrace(this._scene, this._controller, { runtimeSeconds: this._runtimeSeconds, deltaSeconds });
 		return transitioned;
 	}
 	public playLayer(layerName: string, stateName: string, transitionDuration = 0, offset = 0, match?: ITransitionMatch): void {
@@ -509,6 +571,7 @@ export class AnimatorControllerRuntime {
 		if (lifecyclePrevious) {
 			this._queueStateBehaviour("exit", lifecyclePrevious, layer, match?.interrupted === true);
 		}
+		this._queueStateMachineBehaviours(machine, lifecyclePrevious, state, layer, match?.interrupted === true);
 		this._layerLifecycleStates.set(layer.name, state);
 		layer.activeState = state.name;
 		const durationSeconds = this._effectiveStateDuration(state, layer);
@@ -539,6 +602,11 @@ export class AnimatorControllerRuntime {
 	public applyRootMotion(): boolean {
 		const config = this._controller.rootMotion;
 		if (!config?.enabled) {
+			this._lastRootSample = null;
+			return false;
+		}
+		const state = this._compileBaseMachine().states.find((candidate) => candidate.name === this._controller.activeState);
+		if (state && resolveAnimatorStatePlayback(state, this._controller.parameters).timeDriven) {
 			this._lastRootSample = null;
 			return false;
 		}
@@ -611,6 +679,7 @@ export class AnimatorControllerRuntime {
 		if (lifecyclePrevious) {
 			this._queueStateBehaviour("exit", lifecyclePrevious, undefined, match?.interrupted === true);
 		}
+		this._queueStateMachineBehaviours(machine, lifecyclePrevious, null, undefined, match?.interrupted === true);
 		this._baseLifecycleState = null;
 		this._controller.activeState = undefined;
 		this._elapsedSeconds = 0;
@@ -641,6 +710,7 @@ export class AnimatorControllerRuntime {
 		if (lifecyclePrevious) {
 			this._queueStateBehaviour("exit", lifecyclePrevious, layer, match?.interrupted === true);
 		}
+		this._queueStateMachineBehaviours(machine, lifecyclePrevious, null, layer, match?.interrupted === true);
 		this._layerLifecycleStates.delete(layer.name);
 		layer.activeState = undefined;
 		this._layerElapsedSeconds.delete(layer.name);
@@ -657,7 +727,8 @@ export class AnimatorControllerRuntime {
 			? (this._layerLifecycleStates.get(layer.name) ?? machine.states.find((state) => state.name === activeStateName))
 			: machine.states.find((state) => state.name === activeStateName);
 		const durationSeconds = activeState ? this._effectiveStateDuration(activeState, layer) : null;
-		const normalizedTime = durationSeconds ? elapsedSeconds / durationSeconds : 0;
+		const normalizedTime = activeState ? this._stateProgress(activeState, elapsedSeconds, layer) : 0;
+		const playback = activeState ? resolveAnimatorStatePlayback(activeState, this._controller.parameters) : null;
 		const transitionProgress = transition ? Math.min(1, transition.elapsed / transition.duration) : null;
 		const transitionSourceNames = new Set(transition?.sources.map((source) => source.state.name) ?? []);
 		const debugStates = layer?.synchronizedLayer && activeState ? [...machine.states.filter((state) => state.name !== activeState.name), activeState] : machine.states;
@@ -673,7 +744,19 @@ export class AnimatorControllerRuntime {
 			elapsedSeconds,
 			durationSeconds,
 			normalizedTime,
-			loopProgress: activeState && durationSeconds ? ((activeState.loop ?? true) ? normalizedTime % 1 : Math.min(1, normalizedTime)) : 0,
+			loopProgress: activeState ? ((activeState.loop ?? true) ? ((normalizedTime % 1) + 1) % 1 : Math.min(1, Math.max(0, normalizedTime))) : 0,
+			speed: activeState?.speed ?? null,
+			effectiveSpeed: playback?.effectiveSpeed ?? null,
+			cycleOffset: playback?.cycleOffset ?? 0,
+			mirror: playback?.mirror ?? false,
+			timeDriven: playback?.timeDriven ?? false,
+			time: playback?.time ?? null,
+			playbackBindings: playback?.bindings ?? null,
+			loop: activeState?.loop ?? null,
+			tag: activeState?.tag ?? null,
+			footIK: activeState?.footIK ?? null,
+			writeDefaultValues: activeState?.writeDefaultValues ?? null,
+			unitySource: activeState?.unitySource ?? null,
 			transition: transition
 				? {
 						from: transition.sourceState ?? transition.sources[0]?.state.name ?? null,
@@ -721,21 +804,29 @@ export class AnimatorControllerRuntime {
 			),
 		};
 	}
-	private _stateGroups(state: IState): string[] {
-		return state.blendTree ? getAnimatorBlendTreeAnimationGroups(state.blendTree) : state.animationGroup ? [state.animationGroup] : [];
-	}
 	private _stateMotions(state: IState): IAnimatorBlendTreeMotion[] {
-		return state.blendTree
+		const motions = state.blendTree
 			? getAnimatorBlendTreeMotions(state.blendTree)
 			: state.animationGroup
 				? [{ key: "state", animationGroup: state.animationGroup, timeScale: 1, cycleOffset: 0, mirror: false }]
 				: [];
+		return motions.map((motion) => this._stateMotion(state, motion));
+	}
+	private _stateMotion<T extends IAnimatorBlendTreeMotion>(state: IState, motion: T): T {
+		const playback = resolveAnimatorStatePlayback(state, this._controller.parameters);
+		return {
+			...motion,
+			cycleOffset: (((motion.cycleOffset + playback.cycleOffset) % 1) + 1) % 1,
+			mirror: motion.mirror !== playback.mirror,
+		} as T;
 	}
 	private _stateMotionGroup(state: IState, motion: IAnimatorBlendTreeMotion, layer?: ILayer): AnimationGroup | null {
-		if (!state.blendTree) {
-			return this._animationGroup(motion.animationGroup, layer);
-		}
+		const playback = resolveAnimatorStatePlayback(state, this._controller.parameters);
 		const requiresIndependentMotion =
+			state.cycleOffset !== undefined ||
+			state.mirror !== undefined ||
+			!!playback.bindings.cycleOffset ||
+			!!playback.bindings.mirror ||
 			motion.timeScale !== 1 ||
 			motion.cycleOffset !== 0 ||
 			motion.mirror ||
@@ -758,6 +849,7 @@ export class AnimatorControllerRuntime {
 		const elapsedSeconds = layer ? (this._layerElapsedSeconds.get(layer.name) ?? 0) : this._elapsedSeconds;
 		const duration = this._effectiveStateDuration(state, layer);
 		this._pendingStateBehaviours.push({
+			kind: "state",
 			phase,
 			state,
 			layer,
@@ -766,14 +858,32 @@ export class AnimatorControllerRuntime {
 			interrupted,
 		});
 	}
+	private _queueStateMachineBehaviours(
+		machine: ICompiledAnimatorMachine,
+		previous: IState | null | undefined,
+		next: IState | null | undefined,
+		layer?: ILayer,
+		interrupted = false
+	): void {
+		for (const transition of getAnimatorStateMachineBehaviourTransitions(machine, previous, next)) {
+			this._pendingStateBehaviours.push({ kind: "machine", ...transition, layer, interrupted });
+		}
+	}
 	private _flushPendingStateBehaviours(): void {
 		for (const event of this._pendingStateBehaviours.splice(0)) {
-			invokeAnimatorStateBehaviours(this._scene, this._controller, event.state, event.phase, {
-				layerName: event.layer?.name,
-				elapsedSeconds: event.elapsedSeconds,
-				normalizedTime: event.normalizedTime,
-				interrupted: event.interrupted,
-			});
+			if (event.kind === "machine") {
+				invokeAnimatorStateMachineBehaviours(this._scene, this._controller, event.behaviours, event.machinePath, event.phase, {
+					layerName: event.layer?.name,
+					interrupted: event.interrupted,
+				});
+			} else {
+				invokeAnimatorStateBehaviours(this._scene, this._controller, event.state, event.phase, {
+					layerName: event.layer?.name,
+					elapsedSeconds: event.elapsedSeconds,
+					normalizedTime: event.normalizedTime,
+					interrupted: event.interrupted,
+				});
+			}
 		}
 	}
 	private _invokeStateBehaviourUpdate(state: IState, deltaSeconds: number, elapsedSeconds: number, normalizedTime: number, layer?: ILayer): void {
@@ -785,11 +895,14 @@ export class AnimatorControllerRuntime {
 		});
 	}
 	private _invokeIKPasses(deltaSeconds: number): void {
+		const baseState = this._compileBaseMachine().states.find((candidate) => candidate.name === this._controller.activeState);
+		if (baseState) {
+			applyAnimatorFootIK(this._scene, this._controller, { name: "$base", weight: 1 }, baseState);
+		}
 		if (this._controller.baseIKPass === true) {
-			const state = this._compileBaseMachine().states.find((candidate) => candidate.name === this._controller.activeState);
+			const state = baseState;
 			if (state) {
-				const duration = this._effectiveStateDuration(state);
-				const normalizedTime = duration ? ((state.loop ?? true) ? (this._elapsedSeconds % duration) / duration : Math.min(1, this._elapsedSeconds / duration)) : 0;
+				const normalizedTime = this._stateProgress(state, this._elapsedSeconds);
 				invokeAnimatorIKPass(this._scene, this._controller, { name: "$base", weight: 1, ikPass: true }, state, {
 					elapsedSeconds: this._elapsedSeconds,
 					normalizedTime,
@@ -798,18 +911,20 @@ export class AnimatorControllerRuntime {
 			}
 		}
 		for (const layer of this._controller.layers ?? []) {
-			if (layer.ikPass !== true) {
-				continue;
-			}
 			const state = layer.synchronizedLayer
 				? this._layerLifecycleStates.get(layer.name)
 				: this._compileLayerMachine(layer).states.find((candidate) => candidate.name === layer.activeState);
+			if (state) {
+				applyAnimatorFootIK(this._scene, this._controller, layer, state);
+			}
+			if (layer.ikPass !== true) {
+				continue;
+			}
 			if (!state) {
 				continue;
 			}
 			const elapsedSeconds = this._layerElapsedSeconds.get(layer.name) ?? 0;
-			const duration = this._effectiveStateDuration(state, layer);
-			const normalizedTime = duration ? ((state.loop ?? true) ? (elapsedSeconds % duration) / duration : Math.min(1, elapsedSeconds / duration)) : 0;
+			const normalizedTime = this._stateProgress(state, elapsedSeconds, layer);
 			invokeAnimatorIKPass(this._scene, this._controller, layer, state, { elapsedSeconds, normalizedTime, deltaSeconds });
 		}
 	}
@@ -833,7 +948,18 @@ export class AnimatorControllerRuntime {
 		const motion = this._stateMotions(state)[0];
 		const group = motion ? this._scene.getAnimationGroupByName(motion.animationGroup) : null;
 		const framesPerSecond = group?.targetedAnimations[0]?.animation.framePerSecond;
-		return group && framesPerSecond && group.to > group.from ? (group.to - group.from) / framesPerSecond / Math.abs((state.speed ?? 1) * (motion?.timeScale ?? 1)) : null;
+		const effectiveSpeed = resolveAnimatorStatePlayback(state, this._controller.parameters).effectiveSpeed;
+		return group && framesPerSecond && group.to > group.from && effectiveSpeed !== 0
+			? (group.to - group.from) / framesPerSecond / Math.abs(effectiveSpeed * (motion?.timeScale ?? 1))
+			: null;
+	}
+	private _stateProgress(state: IState, elapsedSeconds: number, layer?: ILayer): number {
+		const playback = resolveAnimatorStatePlayback(state, this._controller.parameters);
+		if (playback.time !== null) {
+			return (state.loop ?? true) ? ((playback.time % 1) + 1) % 1 : Math.min(1, Math.max(0, playback.time));
+		}
+		const duration = this._effectiveStateDuration(state, layer);
+		return duration ? ((state.loop ?? true) ? (elapsedSeconds % duration) / duration : Math.min(1, elapsedSeconds / duration)) : 0;
 	}
 	private _mappedSynchronizedState(layer: ILayer, sourceState: IState): IState {
 		const targetMachine = this._compileLayerMachine(layer);
@@ -886,11 +1012,16 @@ export class AnimatorControllerRuntime {
 		}
 		return duration;
 	}
+	private _stateMotionPhase(state: IState, motion: IAnimatorBlendTreeMotion, normalizedTime: number): number {
+		const playback = resolveAnimatorStatePlayback(state, this._controller.parameters);
+		const raw = normalizedTime * (playback.timeDriven ? 1 : Math.sign(playback.effectiveSpeed || 1)) * motion.timeScale + motion.cycleOffset;
+		return (state.loop ?? true) ? ((raw % 1) + 1) % 1 : Math.min(1, Math.max(0, raw));
+	}
 	private _seekStateGroups(state: IState, normalizedTime: number, layer?: ILayer): void {
 		for (const motion of this._stateMotions(state)) {
 			const group = this._stateMotionGroup(state, motion, layer);
 			if (group?.isStarted) {
-				const phase = (((normalizedTime * motion.timeScale + motion.cycleOffset) % 1) + 1) % 1;
+				const phase = this._stateMotionPhase(state, motion, normalizedTime);
 				group.goToFrame(group.from + (group.to - group.from) * phase);
 			}
 		}
@@ -916,14 +1047,14 @@ export class AnimatorControllerRuntime {
 		}
 		const targetState = this._mappedSynchronizedState(layer, sourceState);
 		const sourceElapsed = sourceLayer ? (this._layerElapsedSeconds.get(sourceLayer.name) ?? 0) : this._elapsedSeconds;
-		const sourceDuration = this._effectiveStateDuration(sourceState, sourceLayer);
-		const normalizedTime = sourceDuration ? ((sourceState.loop ?? true) ? (sourceElapsed % sourceDuration) / sourceDuration : Math.min(1, sourceElapsed / sourceDuration)) : 0;
+		const normalizedTime = this._stateProgress(sourceState, sourceElapsed, sourceLayer);
 		const lifecycleState = this._layerLifecycleStates.get(layer.name);
 		if (layer.activeState !== targetState.name || lifecycleState?.synchronizedSourceState !== sourceState.name) {
 			this._playLayerState(layer, targetState.name, 0, normalizedTime, undefined, targetState);
 		}
 		const targetDuration = this._stateDurationSeconds(targetState);
 		this._layerElapsedSeconds.set(layer.name, targetDuration ? targetDuration * normalizedTime : 0);
+		this._applyWriteDefaults(targetState, layer);
 		for (const motion of this._stateMotions(targetState)) {
 			const group = this._stateMotionGroup(targetState, motion, layer);
 			if (!group) {
@@ -933,7 +1064,7 @@ export class AnimatorControllerRuntime {
 				this._startStateGroups(targetState, layer.maskTargetNames ?? [], layer.avatarMaskId, normalizedTime, layer);
 				break;
 			}
-			const phase = (((normalizedTime * motion.timeScale + motion.cycleOffset) % 1) + 1) % 1;
+			const phase = this._stateMotionPhase(targetState, motion, normalizedTime);
 			group.goToFrame(group.from + (group.to - group.from) * phase);
 		}
 		this._applyStateWeight(targetState, layer.weight ?? 1, layer);
@@ -943,18 +1074,28 @@ export class AnimatorControllerRuntime {
 			? this._layerAnimationGroups.resolve(`${this._controller.id}:${layer.name}`, name, layer.blendingMode ?? "override", layer.referencePose ?? { normalizedTime: 0 })
 			: this._scene.getAnimationGroupByName(name);
 	}
+	private _applyWriteDefaults(state: IState, layer?: ILayer): void {
+		const groups = this._stateMotions(state)
+			.map((motion) => this._stateMotionGroup(state, motion, layer))
+			.filter((group): group is AnimationGroup => !!group);
+		applyAnimatorWriteDefaults(this._scene, this._controller, layer?.name ?? "$base", state, groups);
+	}
 	private _startStateGroups(state: IState, fallbackTargetNames: string[], fallbackAvatarMaskId: string | undefined, offset: number, layer?: ILayer): void {
-		this._stateMotions(state).forEach((motion) => {
-			const animationGroup = this._stateMotionGroup(state, motion, layer);
-			if (!animationGroup) {
-				return;
-			}
+		const playback = resolveAnimatorStatePlayback(state, this._controller.parameters);
+		const normalizedOffset = playback.time === null ? offset : (state.loop ?? true) ? ((playback.time % 1) + 1) % 1 : Math.min(1, Math.max(0, playback.time));
+		const motions = this._stateMotions(state)
+			.map((motion) => ({ motion, animationGroup: this._stateMotionGroup(state, motion, layer) }))
+			.filter((entry): entry is { motion: IAnimatorBlendTreeMotion; animationGroup: AnimationGroup } => !!entry.animationGroup);
+		for (const { animationGroup } of motions) {
 			applyMask(this._scene, animationGroup, state, fallbackTargetNames, fallbackAvatarMaskId);
-			const phase = (((offset * motion.timeScale + motion.cycleOffset) % 1) + 1) % 1;
+		}
+		this._applyWriteDefaults(state, layer);
+		for (const { motion, animationGroup } of motions) {
+			const phase = this._stateMotionPhase(state, motion, normalizedOffset);
 			const from = animationGroup.from + (animationGroup.to - animationGroup.from) * phase;
-			animationGroup.start(state.loop ?? true, (state.speed ?? 1) * motion.timeScale, from, animationGroup.to, layer?.blendingMode === "additive");
+			animationGroup.start(state.loop ?? true, playback.effectiveSpeed * motion.timeScale, from, animationGroup.to, layer?.blendingMode === "additive");
 			animationGroup.goToFrame(from);
-		});
+		}
 	}
 	private _transitionSources(
 		previous: IState,
@@ -973,8 +1114,8 @@ export class AnimatorControllerRuntime {
 		if (state.blendTree) {
 			this._applyBlendTree(state, weight, layer);
 		} else {
-			this._stateGroups(state).forEach((groupName) => {
-				const group = this._animationGroup(groupName, layer);
+			this._stateMotions(state).forEach((motion) => {
+				const group = this._stateMotionGroup(state, motion, layer);
 				if (group) {
 					group.weight = weight;
 				}
@@ -1036,7 +1177,8 @@ export class AnimatorControllerRuntime {
 		if (!tree) {
 			return;
 		}
-		for (const motion of evaluateAnimatorBlendTreeMotions(tree, this._controller.parameters)) {
+		for (const evaluatedMotion of evaluateAnimatorBlendTreeMotions(tree, this._controller.parameters)) {
+			const motion = this._stateMotion(state, evaluatedMotion);
 			const group = this._stateMotionGroup(state, motion, layer);
 			if (group) {
 				group.weight = motion.weight * weight;

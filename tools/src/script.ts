@@ -1,4 +1,5 @@
 export type AnimatorStateLifecyclePhase = "enter" | "update" | "exit";
+export type AnimatorStateMachineLifecyclePhase = "machineEnter" | "machineExit";
 
 /** Read-only Unity-style state lifecycle information supplied to behaviour scripts. */
 export interface IAnimatorStateInfo {
@@ -13,6 +14,16 @@ export interface IAnimatorStateInfo {
 	elapsedSeconds: number;
 	normalizedTime: number;
 	deltaSeconds: number;
+	interrupted: boolean;
+}
+
+/** Read-only Unity-style state-machine boundary information supplied to behaviour scripts. */
+export interface IAnimatorStateMachineInfo {
+	controllerId: string;
+	controllerName: string;
+	layerName: string | null;
+	machinePath: string[];
+	phase: AnimatorStateMachineLifecyclePhase;
 	interrupted: boolean;
 }
 
@@ -53,6 +64,12 @@ export interface IScript {
 
 	/** Called when an Animator state carrying this behaviour stops evaluating. */
 	onAnimatorStateExit?(object: any, state: IAnimatorStateInfo): void;
+
+	/** Called when evaluation enters a root or nested Animator state-machine boundary. */
+	onAnimatorStateMachineEnter?(object: any, machine: IAnimatorStateMachineInfo): void;
+
+	/** Called when evaluation exits a root or nested Animator state-machine boundary. */
+	onAnimatorStateMachineExit?(object: any, machine: IAnimatorStateMachineInfo): void;
 
 	/** Called once per Animator update for every active layer whose IK Pass setting is enabled. */
 	onAnimatorIK?(object: any, info: IAnimatorIKInfo): void;

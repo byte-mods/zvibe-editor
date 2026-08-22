@@ -58,9 +58,13 @@ export function blendRenderingConfiguration<T>(baseline: T, override: T, factor:
 	if (isRecord(baseline) && isRecord(override)) {
 		const result: Record<string, unknown> = {};
 		for (const key of new Set([...Object.keys(baseline), ...Object.keys(override)])) {
-			if (!(key in override)) result[key] = cloneValue(baseline[key]);
-			else if (!(key in baseline)) result[key] = amount >= 0.5 ? cloneValue(override[key]) : undefined;
-			else result[key] = blendRenderingConfiguration(baseline[key], override[key], amount);
+			if (!(key in override)) {
+				result[key] = cloneValue(baseline[key]);
+			} else if (!(key in baseline)) {
+				result[key] = amount >= 0.5 ? cloneValue(override[key]) : undefined;
+			} else {
+				result[key] = blendRenderingConfiguration(baseline[key], override[key], amount);
+			}
 		}
 		return result as T;
 	}

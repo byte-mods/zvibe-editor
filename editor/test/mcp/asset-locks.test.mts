@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "crypto";
-import { symlink } from "fs/promises";
+import { symlink, unlink } from "fs/promises";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { ensureDir, mkdtemp, remove, writeFile, writeJSON } from "fs-extra";
@@ -88,5 +88,20 @@ describe("mcp/project/asset-locks", () => {
 		await expect(acquireProjectAssetLock(scene, { path: ".babylon-editor/asset-locks/fake", owner: "Alice" }, options)).rejects.toThrow("cannot target");
 		await expect(acquireProjectAssetLock(scene, { path: "assets/hero.glb", owner: "", ttlSeconds: 1 }, options)).rejects.toThrow("owner");
 		await expect(acquireProjectAssetLock(scene, { path: "assets/hero.glb", owner: "Alice", ttlSeconds: 1 }, options)).rejects.toThrow("ttlSeconds");
+	});
+
+	test("refuses a symlinked metadata store before writing lock state", async () => {
+		await symlink(outsideDirectory, join(directory, ".babylon-editor"));
+		await expect(listProjectAssetLocks(scene, {}, options)).rejects.toThrow("cannot be a symbolic link");
+		await expect(acquireProjectAssetLock(scene, { path: "assets/hero.glb", owner: "Alice" }, options)).rejects.toThrow("cannot be a symbolic link");
+	});
+
+	test("releases a lease after its tracked asset is deleted", async () => {
+		const acquired = await acquireProjectAssetLock(scene, { path: "assets/hero.glb", owner: "Alice" }, options);
+		await unlink(join(directory, "assets", "hero.glb"));
+		await expect(releaseProjectAssetLock(scene, { path: "assets/hero.glb", lockId: acquired.lock.lockId }, options)).resolves.toMatchObject({
+			released: true,
+			forced: false,
+		});
 	});
 });

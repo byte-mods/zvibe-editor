@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect the editor extension SDK lifecycle and security contract. What package.json field declares a Zvibe Editor extension?</question>
+      <answer>zvibeEditor</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the editor extension SDK. What integer API version must current extension manifests declare?</question>
+      <answer>1</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare editor extension discovery and security metadata. Can a transitive dependency be discovered as an editor extension? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect editor extension trust semantics. Is trust shared in the project file? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect editor extension trust invalidation. Which digest algorithm is used for exact package fingerprints?</question>
+      <answer>SHA-256</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the editor extension capability list. Which capability permits access to the underlying editor mediator?</question>
+      <answer>editor</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare extension contribution kinds. Which five declarative contribution collections are supported? Answer as a comma-separated list in documented order.</question>
+      <answer>inspectors, windows, menus, tests, buildProfileFooterActions</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect extension plan/apply semantics. How long does an unapplied change plan remain valid?</question>
+      <answer>15 minutes</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect editor extension test limits. What is the maximum per-test timeout in seconds?</question>
+      <answer>30</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare the extension SDK security contract with Package Manager ownership. Can extension automation directly mutate dependency packages? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+</evaluation>

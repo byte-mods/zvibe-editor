@@ -5,6 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 
 import { s3 } from "./s3/s3.mjs";
 import { pack } from "./pack/pack.mjs";
+import { runHeadlessTesting } from "./test/testing.mjs";
 
 dotEnv.config();
 
@@ -52,4 +53,51 @@ program
 		});
 	});
 
-program.parse();
+program
+	.command("test")
+	.description("Runs bounded portable tests from exported .babylon scenes through Babylon NullEngine for CI/headless validation.")
+	.argument("[projectDir]", "The root directory of the project to test", process.cwd())
+	.option("--scene <name>", "Run one exported scene name/path inside public/scene.")
+	.option("--modes <modes>", "Comma-separated edit and/or play modes.", "edit,play")
+	.option("--categories <categories>", "Comma-separated category filter.")
+	.option("--filter <text>", "Case/suite name or category substring filter.")
+	.option("--fail-fast", "Stop after the first failing scene/case.", false)
+	.option("--report <path>", "Write a project-relative JSON or JUnit XML report.")
+	.option("--format <format>", "Report format: json or junit.", "json")
+	.action(
+		async (
+			projectDir: string,
+			options: { scene?: string; modes: string; categories?: string; filter?: string; failFast: boolean; report?: string; format: string }
+		): Promise<void> => {
+			const modes = [...new Set(options.modes.split(",").map((value) => value.trim()))];
+			if (!modes.length || modes.some((mode) => mode !== "edit" && mode !== "play")) {
+				program.error("--modes must contain edit and/or play.");
+			}
+			if (options.format !== "json" && options.format !== "junit") {
+				program.error("--format must be json or junit.");
+			}
+			const format = options.format as "json" | "junit";
+			const report = await runHeadlessTesting(projectDir, {
+				scene: options.scene,
+				modes: modes as ("edit" | "play")[],
+				categories: options.categories
+					? options.categories
+							.split(",")
+							.map((value) => value.trim())
+							.filter(Boolean)
+					: undefined,
+				filter: options.filter,
+				failFast: options.failFast,
+				report: options.report,
+				format,
+			});
+			console.log(
+				`Testing ${report.status}: ${report.summary.passed}/${report.summary.total} passed, ${report.summary.failed} failed, ${report.summary.timedOut} timed out.${options.report ? ` Report: ${options.report}` : ""}`
+			);
+			if (report.status !== "passed") {
+				process.exitCode = 1;
+			}
+		}
+	);
+
+await program.parseAsync();

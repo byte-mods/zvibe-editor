@@ -7,7 +7,13 @@ import { SpriteManager } from "@babylonjs/core/Sprites/spriteManager";
 import { AddParser } from "@babylonjs/core/Loading/Plugins/babylonFileParser.function";
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 
-import { configureRotatedPackedSpriteManager, installRotatedPackedSpriteShaders, SpriteManagerNode } from "../tools/sprite";
+import {
+	configureRotatedPackedSpriteManager,
+	configureSpriteManagerLocalSpace,
+	installRotatedPackedSpriteShaders,
+	restoreVariableSpriteAnimation,
+	SpriteManagerNode,
+} from "../tools/sprite";
 import { addExcludedCompressedTexture } from "../tools/texture";
 
 function parseSerializedSpriteManager(spriteManager: SpriteManager, parsedSpriteManager: any) {
@@ -35,6 +41,7 @@ function parseSerializedSpriteManager(spriteManager: SpriteManager, parsedSprite
 		const sprite = Sprite.Parse(parsedSprite, spriteManager);
 		sprite.uniqueId = parsedSprite.uniqueId;
 		sprite.metadata = parsedSprite.metadata;
+		restoreVariableSpriteAnimation(sprite);
 	}
 }
 
@@ -88,6 +95,7 @@ export function registerSpriteManagerParser() {
 					if (transformNode.spriteManager) {
 						parseSerializedSpriteManager(spriteManager, transformNode.spriteManager);
 					}
+					configureSpriteManagerLocalSpace(instance);
 				});
 			} else if (transformNode.spriteManager?.textureUrl) {
 				// Temporarily excluded sprites from compressed textures support
@@ -113,6 +121,7 @@ export function registerSpriteManagerParser() {
 				if (transformNode.spriteManager) {
 					parseSerializedSpriteManager(spriteManager, transformNode.spriteManager);
 				}
+				configureSpriteManagerLocalSpace(instance);
 			}
 		});
 	});

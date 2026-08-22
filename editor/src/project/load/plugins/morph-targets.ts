@@ -1,5 +1,6 @@
 import { basename, join } from "path/posix";
-import { readJSON, readFile } from "fs-extra";
+import { readFile } from "fs-extra";
+import { readSerializedJSON as readJSON } from "../../serialization-session";
 
 import { Scene, MorphTargetManager } from "babylonjs";
 

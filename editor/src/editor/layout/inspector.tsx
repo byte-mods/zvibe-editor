@@ -7,6 +7,8 @@ import { FaCube, FaSprayCanSparkles } from "react-icons/fa6";
 import { Tools } from "babylonjs";
 
 import { Editor } from "../main";
+import type { EditorExtensionDispose, IEditorExtensionInspectorRegistration } from "../../extensions/types";
+import { EditorExtensionErrorBoundary } from "../../extensions/error-boundary";
 
 import { Badge } from "../../ui/shadcn/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/shadcn/ui/tabs";
@@ -30,6 +32,7 @@ import { EditorPointLightInspector } from "./inspector/light/point";
 import { EditorDirectionalLightInspector } from "./inspector/light/directional";
 import { EditorHemisphericLightInspector } from "./inspector/light/hemispheric";
 import { EditorClusteredLightContainerInspector } from "./inspector/light/clustered-container";
+import { EditorAreaLightInspector } from "./inspector/light/area";
 
 import { EditorCameraInspector } from "./inspector/camera/editor";
 import { EditorFreeCameraInspector } from "./inspector/camera/free";
@@ -52,6 +55,7 @@ import { EditorSpriteManagerNodeInspector } from "./inspector/sprites/sprite-man
 import { EditorSkeletonInspector } from "./inspector/mesh/skeleton";
 
 import { EditorMarketplaceAssetInspector } from "./inspector/marketplace/asset";
+import { EditorNodeMaterialRootInspector } from "./inspector/material/node";
 import { PrefabPropertyOverrideProvider } from "./inspector/prefab-property-overrides";
 import { GameObjectComponentsInspector } from "./inspector/components/game-object-components";
 
@@ -68,6 +72,8 @@ export interface IEditorInspectorState {
 }
 
 export class EditorInspector extends Component<IEditorInspectorProps, IEditorInspectorState> {
+	private static _instances = new Set<EditorInspector>();
+	private static _extensionInspectors = new Map<string, IEditorExtensionInspectorRegistration & { priority: number }>();
 	private static _inspectors: ((new (props: IEditorInspectorImplementationProps<any>) => Component<IEditorInspectorImplementationProps<any>>) & {
 		IsSupported(object: any): boolean;
 	})[] = [
@@ -75,11 +81,13 @@ export class EditorInspector extends Component<IEditorInspectorProps, IEditorIns
 		EditorMeshInspector,
 
 		EditorFileInspector,
+		EditorNodeMaterialRootInspector,
 
 		EditorPointLightInspector,
 		EditorDirectionalLightInspector,
 		EditorSpotLightInspector,
 		EditorHemisphericLightInspector,
+		EditorAreaLightInspector,
 		EditorClusteredLightContainerInspector,
 
 		EditorCameraInspector,
@@ -111,6 +119,27 @@ export class EditorInspector extends Component<IEditorInspectorProps, IEditorIns
 		this.state = {
 			search: "",
 			editedObject: null,
+		};
+	}
+
+	/** Registers an owner-disposable custom inspector without mutating the built-in inspector list. */
+	public static registerExtensionInspector(registration: IEditorExtensionInspectorRegistration): EditorExtensionDispose {
+		if (EditorInspector._extensionInspectors.has(registration.id)) {
+			throw new Error(`Editor extension inspector "${registration.id}" is already registered.`);
+		}
+		const stored = { ...registration, priority: registration.priority ?? 0 };
+		EditorInspector._extensionInspectors.set(registration.id, stored);
+		EditorInspector._instances.forEach((instance) => instance.forceUpdate());
+		let active = true;
+		return () => {
+			if (!active) {
+				return;
+			}
+			active = false;
+			if (EditorInspector._extensionInspectors.get(registration.id) === stored) {
+				EditorInspector._extensionInspectors.delete(registration.id);
+				EditorInspector._instances.forEach((instance) => instance.forceUpdate());
+			}
 		};
 	}
 
@@ -164,12 +193,20 @@ export class EditorInspector extends Component<IEditorInspectorProps, IEditorIns
 		);
 	}
 
+	public componentDidMount(): void {
+		EditorInspector._instances.add(this);
+	}
+
+	public componentWillUnmount(): void {
+		EditorInspector._instances.delete(this);
+	}
+
 	/**
 	 * Sets the edited object.
 	 * @param editedObject defines the edited object.
 	 */
-	public setEditedObject(editedObject: unknown): void {
-		this.setState({ editedObject });
+	public setEditedObject(editedObject: unknown, onChanged?: () => void): void {
+		this.setState({ editedObject }, onChanged);
 	}
 
 	private _getContent(): ReactNode {
@@ -178,9 +215,27 @@ export class EditorInspector extends Component<IEditorInspectorProps, IEditorIns
 		}
 
 		const inspectors = EditorInspector._inspectors.filter((i) => i.IsSupported(this.state.editedObject)).map((i) => ({ inspector: i }));
+		const extensionInspectors = [...EditorInspector._extensionInspectors.values()]
+			.filter((registration) => {
+				try {
+					return registration.isSupported(this.state.editedObject);
+				} catch (error) {
+					console.error(`Editor extension inspector "${registration.id}" failed its support check.`, error);
+					return false;
+				}
+			})
+			.sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id));
 
 		return (
 			<>
+				{extensionInspectors.map((registration) => {
+					const InspectorComponent = registration.component;
+					return (
+						<EditorExtensionErrorBoundary key={registration.id} extensionId={registration.id}>
+							<InspectorComponent editor={this.props.editor} object={this.state.editedObject} />
+						</EditorExtensionErrorBoundary>
+					);
+				})}
 				{inspectors.map((i) => (
 					<i.inspector key={Tools.RandomId()} editor={this.props.editor} object={this.state.editedObject} />
 				))}
@@ -190,6 +245,11 @@ export class EditorInspector extends Component<IEditorInspectorProps, IEditorIns
 	}
 
 	private _handleSearchChanged(search: string): void {
+		this.setSearch(search);
+	}
+
+	/** Applies the same Inspector field filter used by the visible search input. */
+	public setSearch(search: string): void {
 		setInspectorSearch(search);
 		this.setState({ search });
 	}

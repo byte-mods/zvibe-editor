@@ -125,14 +125,58 @@ describe("executed texture importer", () => {
 			effectiveColorSpace: "linear",
 			output: { width: 128, height: 64, channels: 3, hasAlpha: false },
 			mipmaps: [
-				{ width: 85, height: 42 },
-				{ width: 42, height: 21 },
+				{ width: 64, height: 32 },
+				{ width: 32, height: 16 },
+				{ width: 16, height: 8 },
+				{ width: 8, height: 4 },
+				{ width: 4, height: 2 },
+				{ width: 2, height: 1 },
+				{ width: 1, height: 1 },
 			],
+			processing: { outputFormat: "png", maxSizeApplied: true, nonPowerOfTwoApplied: false, fullMipChain: true },
 		});
 		expect(result.warnings[0]).toContain("sampled as linear");
 		expect((await stat(result.readableBitmapPath!)).size).toBe(128 * 64 * 4);
 		expect(await readJSON(result.readableDescriptorPath!)).toMatchObject({ width: 128, height: 64, channels: 4, pixelFormat: "rgba8" });
 		expect((await Promise.all(result.mipmaps.map((mipmap) => pathExists(mipmap.path)))).every(Boolean)).toBe(true);
+	});
+
+	test("executes NPOT, grayscale alpha, full mip coverage, portable format, and sprite metadata together", async () => {
+		const source = join(directory, "assets", "sprite.png");
+		await createImage(source);
+		const result = await processTextureImporterOutput(
+			source,
+			join(directory, "build", "sprite.png"),
+			normalizeTextureImporterSettings({
+				textureType: "sprite",
+				outputFormat: "webp",
+				alphaSource: "grayscale",
+				alphaIsTransparency: true,
+				nonPowerOfTwo: "toNearest",
+				generateMipmaps: true,
+				mipmapFilter: "box",
+				mipmapPreserveCoverage: true,
+				mipmapAlphaTestReference: 0.5,
+				compression: "none",
+				spritePixelsPerUnit: 64,
+				spriteMeshType: "tight",
+				spriteExtrude: 2,
+			})
+		);
+		expect(result).toMatchObject({
+			outputPath: expect.stringMatching(/sprite\.webp$/),
+			output: { width: 256, height: 128, format: "webp", hasAlpha: true },
+			processing: {
+				outputFormat: "webp",
+				nonPowerOfTwoApplied: true,
+				fullMipChain: true,
+				alphaDerivedFromGrayscale: true,
+				mipmapCoveragePreserved: true,
+			},
+			sprite: { pixelsPerUnit: 64, meshType: "tight", extrude: 2, bounds: { x: 0, y: 0, width: 256, height: 128 } },
+		});
+		expect(result.mipmaps).toHaveLength(8);
+		expect(result.mipmaps.every((mipmap) => mipmap.alphaCoverageBefore !== undefined && mipmap.alphaCoverageAfter !== undefined)).toBe(true);
 	});
 
 	test("leases and atomically publishes a complete preview artifact", async () => {
@@ -178,7 +222,7 @@ describe("executed texture importer", () => {
 		const planned = await getTexturePlatformOverrides(scene, { path: "assets/platform.png" });
 		expect(planned).toMatchObject({ overrides: {}, effective: { web: { overrideApplied: false }, desktop: { overrideApplied: false } } });
 		const overrides = {
-			web: { enabled: true, maxSize: 64, compression: "low", generateMipmaps: false, readable: false },
+			web: { enabled: true, outputFormat: "webp", maxSize: 64, compression: "low", generateMipmaps: false, readable: false },
 			desktop: { enabled: true, maxSize: 128, compression: "high", generateMipmaps: true, readable: true },
 		};
 		await expect(setTexturePlatformOverrides(scene, { path: "assets/platform.png", expectedFingerprint: "0".repeat(64), overrides }, {} as any)).rejects.toThrow(
@@ -192,8 +236,10 @@ describe("executed texture importer", () => {
 		const baseOptions = { optimize: false, scenePath, projectDir: directory, exportedAssets: [], cache: {} };
 		await processAssetFile({} as any, path, { ...baseOptions, assetPlatform: "web" });
 		expect(await readJSON(join(scenePath, "assets", "platform.png.bjstexture.json"))).toMatchObject({
-			result: { platform: "web", platformOverrideApplied: true, output: { width: 64, height: 32 }, mipmaps: [] },
+			outputPath: "assets/platform.webp",
+			result: { platform: "web", platformOverrideApplied: true, processing: { outputFormat: "webp" }, output: { width: 64, height: 32 }, mipmaps: [] },
 		});
+		expect(await pathExists(join(scenePath, "assets", "platform.webp"))).toBe(true);
 		await processAssetFile({} as any, path, { ...baseOptions, exportedAssets: [], assetPlatform: "desktop" });
 		expect(await readJSON(join(scenePath, "assets", "platform.png.bjstexture.json"))).toMatchObject({
 			result: { platform: "desktop", platformOverrideApplied: true, output: { width: 128, height: 64 }, readablePixelFormat: "rgba8" },
@@ -223,11 +269,15 @@ describe("executed texture importer", () => {
 		const sidecarPath = join(scenePath, "assets", "build.bmp.bjstexture.json");
 		const sidecar = await readJSON(sidecarPath);
 		expect(sidecar).toMatchObject({
-			version: 1,
+			version: 2,
 			outputPath: "assets/build.png",
 			textureType: "lightmap",
 			colorSpace: "linear",
 			alphaSource: "none",
+			filterMode: "trilinear",
+			wrapModeU: "repeat",
+			wrapModeV: "repeat",
+			anisoLevel: 1,
 			readableBitmapPath: "assets/build.png.rgba",
 			result: { output: { width: 128, height: 64, channels: 3 } },
 		});

@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which Android runtime settings control Unity 6.5-style system-bar presentation?</question>
+      <answer>requestedVisibleWindowInsets, systemBarsBehavior, decorFitsSystemWindows</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What are the default iOS frame-rate limits for Serious and Critical thermal states?</question>
+      <answer>30 FPS for Serious, 15 FPS for Critical</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does CSS safe-area fallback prove native Android inset-type visibility or control system bars? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Is editor-injected thermal or window-inset state hardware evidence? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which generated Android bridge publishes windowInsetsChanged?</question>
+      <answer>ZvibeWindowInsetsPlugin.kt</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which generated Apple setting applies the authored minimum visionOS version?</question>
+      <answer>XROS_DEPLOYMENT_TARGET in ZvibeVisionOS.xcconfig</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which portable RPC protocols are implemented?</question>
+      <answer>gRPC-Web binary, gRPC-Web text, Connect</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which gRPC call shapes are supported by the fetch transport?</question>
+      <answer>unary and server-streaming</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Are client-streaming and bidirectional-streaming supported by the portable fetch transport? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>May Authorization or Cookie metadata be persisted in scene configuration? Respond True or False.</question>
+      <answer>False; secret-bearing metadata is transient per call</answer>
+   </qa_pair>
+</evaluation>

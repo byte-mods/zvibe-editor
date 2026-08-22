@@ -7,6 +7,12 @@
 		"build": "tsc -p . && node esbuild.mjs",
 		"watch": "concurrently \"tsc -p . --watch\" \"node esbuild.mjs --watch\" -c bgYellow.bold,bgBlue.bold --names tools-ts,editor-dependencies",
 		"test": "vitest run",
+		"test:render-conformance": "node scripts/run-render-graph-conformance.mjs",
+		"test:dynamic-resolution": "node scripts/run-dynamic-resolution.mjs",
+		"test:render-reconstruction": "node scripts/run-render-reconstruction.mjs",
+		"test:deferred-lighting": "node scripts/run-deferred-lighting.mjs",
+		"test:subsurface-scattering": "node scripts/run-subsurface-scattering.mjs",
+		"test:lighting-2d": "node scripts/run-lighting-2d.mjs",
 		"watch-test": "vitest --watch",
 		"coverage": "vitest run --coverage"
 	},
@@ -17,24 +23,36 @@
 			"import": "./build/src/index.js",
 			"require": "./build/index.node.js"
 		},
+		"./server/production-session-host": {
+			"types": "./declaration/src/server/production-session-host.d.ts",
+			"import": "./build/server/production-session-host.mjs"
+		},
+		"./build/development-coverage": {
+			"types": "./declaration/src/build/development-coverage.d.ts",
+			"import": "./build/build/development-coverage.mjs"
+		},
 		"./*": {
 			"types": "./declaration/src/*.d.ts",
 			"import": "./build/src/*.js"
 		}
 	},
 	"typings": "declaration/src/index.d.ts",
-	"license": "(Apache-2.0)",
+	"license": "Apache-2.0",
 	"devDependencies": {
 		"@babylonjs/addons": "9.12.1",
 		"@babylonjs/core": "9.12.1",
 		"@babylonjs/gui": "9.12.1",
 		"@vitest/coverage-v8": "4.0.17",
 		"esbuild": "0.28.1",
-		"typescript": "5.9.3",
 		"vitest": "4.1.0"
 	},
 	"dependencies": {
+		"@litertjs/core": "2.5.3",
 		"fflate": "0.8.3",
+		"onnx-proto": "8.0.1",
+		"onnxruntime-web": "1.27.0",
+		"typescript": "5.9.3",
+		"ws": "^8.19.0",
 		"yaml": "2.9.0"
 	}
 }

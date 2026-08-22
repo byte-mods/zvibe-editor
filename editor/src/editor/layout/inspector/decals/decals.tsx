@@ -337,6 +337,8 @@ export class EditorDecalsInspector extends Component<IEditorDecalsInspectorProps
 
 			decalMesh.metadata = {
 				decal: {
+					version: 1,
+					revision: 1,
 					angle: decalsConfiguration.angle,
 					sizeX: decalsConfiguration.size.x,
 					sizeY: decalsConfiguration.size.y,

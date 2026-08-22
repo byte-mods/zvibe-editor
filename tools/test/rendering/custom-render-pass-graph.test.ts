@@ -5,12 +5,15 @@ import { Constants } from "@babylonjs/core/Engines/constants";
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
-import "@babylonjs/core/Materials/standardMaterial";
+import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { Scene } from "@babylonjs/core/scene";
 
 import {
 	applyCustomRenderPassGraph,
+	captureCustomRenderPassFrame,
+	configureCustomRenderPassFrameIsolation,
 	configureCustomRenderPassGpuProfiling,
 	configureCustomRenderPassGraph,
 	defaultCustomRenderPassComputeShader,
@@ -18,6 +21,8 @@ import {
 	disposeCustomRenderPassGraph,
 	getCustomRenderPassDiagnostics,
 	getCustomRenderPassGpuProfile,
+	getCustomRenderPassFrameIsolation,
+	getCustomRenderPassFrameSnapshot,
 	getCustomRenderPassOutputTexture,
 	getCustomRenderPassPostProcesses,
 	getCustomRenderPassRuntimeError,
@@ -30,17 +35,28 @@ import {
 	updateCustomRenderPassComputeStorageBuffer,
 	updateCustomRenderPassComputeUniformBuffer,
 } from "../../src/rendering/custom-render-pass-graph";
+import { rendererListsMetadataKey } from "../../src/rendering/renderer-lists";
 
 function pass(id: string, order: number, dependencies: string[] = []): ICustomRenderPassDefinition {
 	return {
 		id,
 		name: id,
 		passType: "shader",
+		injectionPoint: "afterRenderingPostProcessing",
+		rendererFeature: null,
 		copySource: { source: "screen" },
 		rasterSettings: {
 			cameraId: null,
 			meshIds: [],
+			includeDescendants: false,
+			layerMask: null,
+			materialId: null,
 			clearColor: [0, 0, 0, 0],
+			clearMode: "colorDepth",
+			depthTest: true,
+			depthWrite: true,
+			cullMode: "back",
+			blendMode: "opaque",
 			renderParticles: false,
 			renderSprites: false,
 			useCameraPostProcesses: false,
@@ -105,6 +121,62 @@ describe("rendering/custom-render-pass-graph", () => {
 		expect(() => sortCustomRenderPassGraph([pass("a", 0, ["missing"])] as ICustomRenderPassDefinition[])).toThrow("missing dependency");
 	});
 
+	test("normalizes and validates honest runtime injection points", () => {
+		const legacy = pass("legacy", 0) as any;
+		delete legacy.injectionPoint;
+		delete legacy.rendererFeature;
+		expect(sortCustomRenderPassGraph([legacy])[0]).toMatchObject({ injectionPoint: "afterRenderingPostProcessing", rendererFeature: null });
+
+		expect(() =>
+			sortCustomRenderPassGraph([{ ...pass("invalid-raster", 0), passType: "raster", injectionPoint: "afterRenderingPostProcessing", output: "rasterColor" }])
+		).toThrow("must use beforeRendering");
+		expect(() => sortCustomRenderPassGraph([{ ...pass("invalid-compute", 0), passType: "compute", injectionPoint: "beforeRendering", output: "computeColor" }])).toThrow(
+			"must use afterRenderingPrePasses"
+		);
+		const later = { ...pass("later", 0), injectionPoint: "afterRenderingPostProcessing" as const };
+		const earlier = { ...pass("earlier", 0, [later.id]), injectionPoint: "beforeRenderingPostProcessing" as const };
+		expect(() => sortCustomRenderPassGraph([earlier, later])).toThrow("cannot depend on later injection point");
+	});
+
+	test("places before/after feature subpasses around the existing camera post-process chain", () => {
+		const baseline = new PostProcess("Baseline Camera Effect", "pass", [], [], 1, camera);
+		const before = { ...pass("before-camera-effects", 10), injectionPoint: "beforeRenderingPostProcessing" as const };
+		const after = { ...pass("after-camera-effects", -10), injectionPoint: "afterRenderingPostProcessing" as const };
+		applyCustomRenderPassGraph(scene, camera, [after, before]);
+		const chain = ((camera as any)._postProcesses as PostProcess[]).filter(Boolean).map((value) => value.name);
+		expect(chain).toEqual([before.name, baseline.name, after.name]);
+		baseline.dispose(camera);
+	});
+
+	test("culls filtered renderer-feature passes and their external dependency closure", () => {
+		const producer = {
+			...pass("filtered-feature", 0),
+			output: "filteredColor",
+			rendererFeature: {
+				instanceId: "feature-instance",
+				assetId: "feature-asset",
+				assetPath: "assets/rendering/feature.renderfeature.json",
+				assetRevision: "a".repeat(64),
+				sourcePassId: "source-pass",
+				sourceEnabled: true,
+				sourceOrder: 0,
+				cameraFilter: { cameraIds: ["different-camera"], excludeCameraIds: [], projection: "any" as const, layerMask: null },
+			},
+		};
+		const consumer = {
+			...pass("external-consumer", 1, [producer.id]),
+			fragmentShader:
+				"precision highp float; varying vec2 vUV; uniform sampler2D textureSampler; uniform sampler2D featureSampler; void main(void) { gl_FragColor = texture2D(textureSampler, vUV) + texture2D(featureSampler, vUV); }",
+			inputs: { featureSampler: { source: "pass" as const, output: producer.output } },
+		};
+		const unrelated = pass("unrelated", 2);
+		expect(applyCustomRenderPassGraph(scene, camera, [producer, consumer, unrelated]).map((value) => value.id)).toEqual([unrelated.id]);
+		scene.render();
+		const snapshot = captureCustomRenderPassFrame(camera);
+		expect(snapshot.passes.find((value) => value.id === producer.id)).toMatchObject({ active: false, culledReason: "cameraFilter" });
+		expect(snapshot.passes.find((value) => value.id === consumer.id)).toMatchObject({ active: false, culledReason: "cameraFilterDependency" });
+	});
+
 	test("builds enabled shader passes with uniforms and disposes the prior chain", () => {
 		const lookup = RawTexture.CreateRGBATexture(new Uint8Array([255, 128, 0, 255]), 1, 1, scene);
 		lookup.name = "assets/lookup.png";
@@ -135,7 +207,19 @@ describe("rendering/custom-render-pass-graph", () => {
 
 	test("resolves camera depth and geometry-buffer normal resources", () => {
 		const normalTexture = RawTexture.CreateRGBATexture(new Uint8Array([128, 128, 255, 255]), 1, 1, scene);
-		(scene as any).enableGeometryBufferRenderer = () => ({ getTextureIndex: () => 0, getGBuffer: () => ({ textures: [normalTexture] }) });
+		(scene as any).enableGeometryBufferRenderer = () => ({
+			isSupported: true,
+			enableDepth: true,
+			enableNormal: true,
+			enablePosition: false,
+			enableVelocity: false,
+			enableVelocityLinear: false,
+			enableReflectivity: false,
+			enableScreenspaceDepth: false,
+			enableIrradiance: false,
+			getTextureIndex: () => 0,
+			getGBuffer: () => ({ textures: [normalTexture], getSize: () => ({ width: 1, height: 1 }), isReady: () => true, count: 1 }),
+		});
 		const shader = `precision highp float; varying vec2 vUV; uniform sampler2D textureSampler; uniform sampler2D depthSampler; uniform sampler2D normalSampler; void main(void) { vec4 c = texture2D(textureSampler, vUV); float d = texture2D(depthSampler, vUV).r; vec3 n = texture2D(normalSampler, vUV).xyz; gl_FragColor = vec4(c.rgb * n * d, c.a); }`;
 		const definition = {
 			...pass("resources", 0),
@@ -268,9 +352,11 @@ describe("rendering/custom-render-pass-graph", () => {
 		const raster = {
 			...pass("raster", 0),
 			passType: "raster" as const,
+			injectionPoint: "beforeRendering" as const,
 			output: "rasterColor",
 			ratio: 0.5,
 			rasterSettings: {
+				...pass("raster-defaults", 0).rasterSettings,
 				cameraId: camera.id,
 				meshIds: [included.id],
 				clearColor: [0.1, 0.2, 0.3, 1] as [number, number, number, number],
@@ -304,8 +390,137 @@ describe("rendering/custom-render-pass-graph", () => {
 		).toThrow("only on other raster passes");
 	});
 
+	test("executes reusable renderer-list camera/layer/group/queue selection in a raster pass", () => {
+		const opaque = CreateBox("Renderer List Opaque", {}, scene);
+		opaque.layerMask = 0x02;
+		opaque.renderingGroupId = 0;
+		const transparent = CreateBox("Renderer List Transparent", {}, scene);
+		transparent.layerMask = 0x04;
+		transparent.renderingGroupId = 1;
+		transparent.alphaIndex = 11;
+		const material = new StandardMaterial("Renderer List Transparent Material", scene);
+		material.alpha = 0.5;
+		transparent.material = material;
+		camera.layerMask = 0x06;
+		scene.metadata = {
+			[rendererListsMetadataKey]: [
+				{
+					version: 1,
+					id: "transparent-renderers",
+					name: "Transparent Renderers",
+					revision: 4,
+					enabled: true,
+					cameraId: null,
+					meshIds: [],
+					includeDescendants: false,
+					includeLayerMask: 0x04,
+					excludeLayerMask: 0,
+					respectCameraLayerMask: true,
+					renderingGroupIds: [1],
+					queue: "transparent",
+					sortMode: "backToFront",
+					includeDisabled: false,
+					includeInvisible: false,
+				},
+			],
+		};
+		const unrelatedActiveCamera = new FreeCamera("Unrelated Active Camera", new Vector3(0, 0, -5), scene);
+		unrelatedActiveCamera.layerMask = 0x02;
+		scene.activeCamera = unrelatedActiveCamera;
+		const raster = {
+			...pass("renderer-list-raster", 0),
+			passType: "raster" as const,
+			injectionPoint: "beforeRendering" as const,
+			output: "transparentColor",
+			rasterSettings: { ...pass("defaults", 0).rasterSettings, rendererListId: "transparent-renderers" },
+		};
+		applyCustomRenderPassGraph(scene, camera, [raster]);
+		expect(scene.customRenderTargets[0].renderList?.map((mesh) => mesh.id)).toEqual([transparent.id]);
+		expect(scene.customRenderTargets[0].customRenderFunction).toBeTypeOf("function");
+		expect(getCustomRenderPassSceneRasterTargets(camera)[0]).toMatchObject({
+			rendererListId: "transparent-renderers",
+			rendererListRevision: 4,
+			queue: "transparent",
+			sortMode: "backToFront",
+			meshIds: [transparent.id],
+			resolutionError: null,
+		});
+		transparent.layerMask = 0x02;
+		scene.onBeforeRenderObservable.notifyObservers(scene);
+		expect(getCustomRenderPassSceneRasterTargets(camera)[0]).toMatchObject({ meshIds: [], resolutionError: null });
+		transparent.layerMask = 0x04;
+		scene.onBeforeRenderObservable.notifyObservers(scene);
+		expect(getCustomRenderPassSceneRasterTargets(camera)[0].meshIds).toEqual([transparent.id]);
+		expect(opaque).not.toBe(transparent);
+		expect(() => sortCustomRenderPassGraph([{ ...raster, rasterSettings: { ...raster.rasterSettings, meshIds: [opaque.id] } }])).toThrow(
+			"must leave cameraId, meshIds, includeDescendants, and layerMask at their defaults"
+		);
+		(scene.metadata[rendererListsMetadataKey] as any[])[0] = {
+			...(scene.metadata[rendererListsMetadataKey] as any[])[0],
+			enabled: false,
+			cameraId: "missing-disabled-camera",
+			meshIds: ["missing-disabled-mesh"],
+		};
+		expect(() => applyCustomRenderPassGraph(scene, camera, [raster])).not.toThrow();
+		expect(scene.customRenderTargets.at(-1)?.renderList).toHaveLength(0);
+		expect(getCustomRenderPassSceneRasterTargets(camera)[0].meshIds).toEqual([]);
+	});
+
+	test("applies isolated general graphics-pass filtering, material, depth, culling, blending, and clear state", () => {
+		const parent = CreateBox("Graphics Parent", {}, scene);
+		const child = CreateBox("Graphics Child", {}, scene);
+		child.parent = parent;
+		parent.layerMask = 0x02;
+		child.layerMask = 0x02;
+		const filtered = CreateBox("Filtered", {}, scene);
+		filtered.layerMask = 0x04;
+		const source = new StandardMaterial("Graphics Override", scene);
+		source.backFaceCulling = true;
+		source.disableDepthWrite = false;
+		source.alphaMode = Constants.ALPHA_DISABLE;
+		const raster = {
+			...pass("graphics-state", 0),
+			passType: "raster" as const,
+			injectionPoint: "beforeRendering" as const,
+			output: "graphicsColor",
+			rasterSettings: {
+				...pass("defaults", 0).rasterSettings,
+				meshIds: [parent.id],
+				includeDescendants: true,
+				layerMask: 0x02,
+				materialId: source.id,
+				clearMode: "depthOnly" as const,
+				depthTest: false,
+				depthWrite: false,
+				cullMode: "front" as const,
+				blendMode: "additive" as const,
+			},
+		};
+		applyCustomRenderPassGraph(scene, camera, [raster]);
+		const target = scene.customRenderTargets[0];
+		expect(target.renderList?.map((mesh) => mesh.id)).toEqual([parent.id, child.id]);
+		expect(target.renderList?.map((mesh) => mesh.id)).not.toContain(filtered.id);
+		expect(target.onClearObservable.hasObservers()).toBe(true);
+		expect(getCustomRenderPassSceneRasterTargets(camera)[0]).toMatchObject({
+			meshIds: [parent.id, child.id],
+			materialId: source.id,
+			clearMode: "depthOnly",
+			depthTest: false,
+			depthWrite: false,
+			cullMode: "front",
+			blendMode: "additive",
+			layerMask: 0x02,
+			includeDescendants: true,
+		});
+		const clone = scene.materials.find((material) => material !== source && material.name.includes("graphics override"))!;
+		expect(clone).toMatchObject({ backFaceCulling: true, cullBackFaces: false, disableDepthWrite: true, depthFunction: Constants.ALWAYS, alphaMode: Constants.ALPHA_ADD });
+		expect(source).toMatchObject({ backFaceCulling: true, disableDepthWrite: false, alphaMode: Constants.ALPHA_DISABLE });
+		disposeCustomRenderPassGraph(camera);
+		expect(scene.materials).not.toContain(clone);
+	});
+
 	test("resolves named raster outputs and normalizes/flips GPU byte readback to RGBA8", async () => {
-		const raster = { ...pass("capture-raster", 0), passType: "raster" as const, output: "captureColor" };
+		const raster = { ...pass("capture-raster", 0), passType: "raster" as const, injectionPoint: "beforeRendering" as const, output: "captureColor" };
 		applyCustomRenderPassGraph(scene, camera, [raster]);
 		const target = scene.customRenderTargets[0] as any;
 		target.getSize = () => ({ width: 2, height: 2 });
@@ -424,6 +639,7 @@ describe("rendering/custom-render-pass-graph", () => {
 		const compute = {
 			...pass("compute", 0),
 			passType: "compute" as const,
+			injectionPoint: "afterRenderingPrePasses" as const,
 			output: "computedColor",
 		};
 		const schedule = getCustomRenderPassSchedule([compute]);
@@ -457,6 +673,7 @@ describe("rendering/custom-render-pass-graph", () => {
 		const buffered = {
 			...pass("buffered-compute", 0),
 			passType: "compute" as const,
+			injectionPoint: "afterRenderingPrePasses" as const,
 			output: "bufferedColor",
 			computeSettings: {
 				...pass("defaults", 0).computeSettings,
@@ -528,6 +745,7 @@ describe("rendering/custom-render-pass-graph", () => {
 		const writer = {
 			...pass("shared-writer", 0),
 			passType: "compute" as const,
+			injectionPoint: "afterRenderingPrePasses" as const,
 			output: "writerColor",
 			computeSettings: {
 				...pass("writer-defaults", 0).computeSettings,
@@ -550,6 +768,7 @@ describe("rendering/custom-render-pass-graph", () => {
 		const reader = {
 			...pass("shared-reader", 1, [writer.id]),
 			passType: "compute" as const,
+			injectionPoint: "afterRenderingPrePasses" as const,
 			output: "readerColor",
 			computeSettings: {
 				...pass("reader-defaults", 0).computeSettings,
@@ -612,6 +831,80 @@ describe("rendering/custom-render-pass-graph", () => {
 		expect(getCustomRenderPassPostProcesses(camera)).toHaveLength(0);
 		scene.render();
 		expect(getCustomRenderPassPostProcesses(camera)).toHaveLength(1);
+	});
+
+	test("restores persisted general graphics-pass state in exported scenes", () => {
+		const mesh = CreateBox("Exported Graphics Mesh", {}, scene);
+		const material = new StandardMaterial("Exported Override", scene);
+		const raster = {
+			...pass("exported-graphics", 0),
+			passType: "raster" as const,
+			injectionPoint: "beforeRendering" as const,
+			output: "exportedGraphicsColor",
+			rasterSettings: {
+				...pass("exported-defaults", 0).rasterSettings,
+				meshIds: [mesh.id],
+				materialId: material.id,
+				clearMode: "none" as const,
+				depthWrite: false,
+				cullMode: "none" as const,
+				blendMode: "multiply" as const,
+			},
+		};
+		scene.metadata = { babylonEditorCustomRenderPasses: [raster] };
+		configureCustomRenderPassGraph(scene);
+		scene.render();
+		expect(getCustomRenderPassSceneRasterTargets(camera)[0]).toMatchObject({
+			meshIds: [mesh.id],
+			materialId: material.id,
+			clearMode: "none",
+			depthWrite: false,
+			cullMode: "none",
+			blendMode: "multiply",
+		});
+	});
+
+	test("captures immutable frame debugger evidence and isolates one pass dependency closure without persisting enablement", () => {
+		const mesh = CreateBox("Frame Debug Mesh", {}, scene);
+		const raster = {
+			...pass("frame-raster", 0),
+			passType: "raster" as const,
+			injectionPoint: "beforeRendering" as const,
+			output: "frameSceneColor",
+			rasterSettings: { ...pass("frame-defaults", 0).rasterSettings, meshIds: [mesh.id] },
+		};
+		const consumer = {
+			...pass("frame-consumer", 1, [raster.id]),
+			output: "frameFinalColor",
+			fragmentShader:
+				"precision highp float; varying vec2 vUV; uniform sampler2D textureSampler; uniform sampler2D sceneSampler; void main(void) { gl_FragColor = texture2D(textureSampler, vUV) + texture2D(sceneSampler, vUV); }",
+			inputs: { sceneSampler: { source: "pass" as const, output: raster.output } },
+		};
+		const unrelated = { ...pass("frame-unrelated", 2), output: "frameUnrelatedColor" };
+		const definitions = [raster, consumer, unrelated];
+		applyCustomRenderPassGraph(scene, camera, definitions);
+		scene.render();
+		const first = captureCustomRenderPassFrame(camera);
+		expect(first).toMatchObject({ version: 1, captureId: 1, isolationPassId: null, authoredPassCount: 3, activePassCount: 3, culledPassCount: 0, resourceCount: 3 });
+		expect(first.passes.find((entry) => entry.id === raster.id)).toMatchObject({ phase: "beforeRendering", active: true, writes: ["frameSceneColor"] });
+		expect(first.resources.find((entry) => entry.name === "frameFinalColor")).toMatchObject({ producerId: consumer.id, allocated: true, allocationSlot: expect.any(Number) });
+		const frozenFrame = first.frameId;
+		scene.render();
+		expect(getCustomRenderPassFrameSnapshot(camera)?.frameId).toBe(frozenFrame);
+
+		const isolated = configureCustomRenderPassFrameIsolation(scene, camera, definitions, consumer.id);
+		expect(isolated).toMatchObject({ isolationPassId: consumer.id, executionOrder: [raster.id, consumer.id], activePassCount: 2 });
+		expect(getCustomRenderPassFrameSnapshot(camera)).toBeNull();
+		scene.render();
+		const isolatedFrame = captureCustomRenderPassFrame(camera);
+		expect(isolatedFrame).toMatchObject({ isolationPassId: consumer.id, activePassCount: 2, culledPassCount: 1 });
+		expect(isolatedFrame.passes.find((entry) => entry.id === unrelated.id)).toMatchObject({ active: false, culledReason: "debugIsolation", executionIndex: null });
+		expect(isolatedFrame.resources.find((entry) => entry.name === "frameUnrelatedColor")).toMatchObject({ allocated: false, ready: false });
+		expect(() => configureCustomRenderPassFrameIsolation(scene, camera, definitions, "missing-pass")).toThrow("was not found");
+		expect(getCustomRenderPassFrameIsolation(camera)).toBe(consumer.id);
+		const cleared = configureCustomRenderPassFrameIsolation(scene, camera, definitions, null);
+		expect(cleared).toMatchObject({ isolationPassId: null, activePassCount: 3 });
+		expect(definitions.map((definition) => definition.enabled)).toEqual([true, true, true]);
 	});
 
 	test("keeps exported scenes rendering and reports an unsupported named-output target", () => {

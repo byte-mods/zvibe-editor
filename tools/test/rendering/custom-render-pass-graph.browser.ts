@@ -17,17 +17,28 @@ import {
 	ICustomRenderPassDefinition,
 	readCustomRenderPassOutputPixels,
 } from "../../src/rendering/custom-render-pass-graph";
+import { captureRenderGraphConformanceRun, recordRenderGraphConformanceRun } from "../../src/rendering/render-graph-conformance";
 
 function definition(id: string): ICustomRenderPassDefinition {
 	return {
 		id,
 		name: id,
 		passType: "shader",
+		injectionPoint: "afterRenderingPostProcessing",
+		rendererFeature: null,
 		copySource: { source: "screen" },
 		rasterSettings: {
 			cameraId: null,
 			meshIds: [],
+			includeDescendants: false,
+			layerMask: null,
+			materialId: null,
 			clearColor: [0, 0, 0, 0],
+			clearMode: "colorDepth",
+			depthTest: true,
+			depthWrite: true,
+			cullMode: "back",
+			blendMode: "opaque",
 			renderParticles: false,
 			renderSprites: false,
 			useCameraPostProcesses: false,
@@ -85,12 +96,21 @@ async function run(): Promise<void> {
 	const raster: ICustomRenderPassDefinition = {
 		...definition("Scene Raster"),
 		passType: "raster",
+		injectionPoint: "beforeRendering",
 		order: -1,
 		output: "rasterColor",
 		rasterSettings: {
 			cameraId: camera.id,
 			meshIds: [plane.id],
+			includeDescendants: false,
+			layerMask: null,
+			materialId: null,
 			clearColor: [0, 0, 1, 1],
+			clearMode: "colorDepth",
+			depthTest: true,
+			depthWrite: true,
+			cullMode: "back",
+			blendMode: "opaque",
 			renderParticles: false,
 			renderSprites: false,
 			useCameraPostProcesses: false,
@@ -121,7 +141,8 @@ async function run(): Promise<void> {
 		inputs: { copiedSampler: { source: "pass", output: "copiedAuxColor" } },
 		output: "presentedColor",
 	};
-	applyCustomRenderPassGraph(scene, camera, [raster, producer, copy, presenter]);
+	const definitions = [raster, producer, copy, presenter];
+	applyCustomRenderPassGraph(scene, camera, definitions);
 	for (let frame = 0; frame < 10; frame++) {
 		scene.render();
 		await new Promise<void>((resolve) => setTimeout(resolve, 25));
@@ -139,7 +160,12 @@ async function run(): Promise<void> {
 	const diagnostics = getCustomRenderPassDiagnostics(camera);
 	const targets = getCustomRenderPassMultiRenderTargets(camera);
 	const rasterTargets = getCustomRenderPassSceneRasterTargets(camera);
+	const conformanceRun = captureRenderGraphConformanceRun(scene, camera, definitions, 10);
+	const conformanceManifest = recordRenderGraphConformanceRun(scene, conformanceRun);
 	const passed =
+		conformanceRun.backend === "webgl2" &&
+		conformanceRun.passed &&
+		conformanceManifest.runs.webgl2?.passed === true &&
 		diagnostics.every((pass) => pass.ready && !pass.compilationError) &&
 		diagnostics.some((pass) => pass.id === copy.id && pass.passType === "copy" && pass.resources[0]?.output === "auxColor") &&
 		diagnostics.some((pass) => pass.id === raster.id && pass.passType === "raster" && pass.resources[0]?.name === plane.id) &&
@@ -182,6 +208,8 @@ async function run(): Promise<void> {
 		rasterPixels: Array.from(rasterPixels),
 		copyOutput: { kind: copyOutput.kind, ready: copyOutput.runtimeReady, pixel: Array.from(copyOutputPixel) },
 		shaderOutput: { kind: shaderOutput.kind, ready: shaderOutput.runtimeReady, pixel: Array.from(shaderOutputPixel) },
+		conformanceRun,
+		conformanceManifest,
 		fragmentSources: getCustomRenderPassPostProcesses(camera).map((postProcess) => postProcess.getEffect()?.fragmentSourceCode),
 	});
 	scene.dispose();

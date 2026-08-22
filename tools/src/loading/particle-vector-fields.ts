@@ -6,14 +6,22 @@ type IVectorField = { min: number[]; max: number[]; direction: number[]; strengt
 /** Restores bounded directional CPU-particle vector fields from exported scene metadata. */
 export function configureParticleVectorFields(scene: Scene): void {
 	const configurations = scene.metadata?.babylonEditorParticleVectorFields as Record<string, IVectorField[]> | undefined;
-	if (!configurations) return;
+	if (!configurations) {
+		return;
+	}
 	scene.onBeforeRenderObservable.add(() => {
 		const deltaSeconds = scene.getEngine().getDeltaTime() / 1000;
-		if (!deltaSeconds) return;
+		if (!deltaSeconds) {
+			return;
+		}
 		for (const system of scene.particleSystems as any[]) {
-			if (system.getClassName?.() === "GPUParticleSystem") continue;
+			if (system.getClassName?.() === "GPUParticleSystem") {
+				continue;
+			}
 			for (const field of configurations[system.id] ?? []) {
-				if (field.enabled === false) continue;
+				if (field.enabled === false) {
+					continue;
+				}
 				const min = Vector3.FromArray(field.min),
 					max = Vector3.FromArray(field.max),
 					force = Vector3.FromArray(field.direction).scale(field.strength * deltaSeconds);
@@ -29,8 +37,9 @@ export function configureParticleVectorFields(scene: Scene): void {
 						position.x <= max.x &&
 						position.y <= max.y &&
 						position.z <= max.z
-					)
+					) {
 						direction.addInPlace(force);
+					}
 				}
 			}
 		}

@@ -7,10 +7,8 @@ import sharp from "sharp";
 
 import { NullEngine, Scene, TransformNode } from "babylonjs";
 
-vi.mock("babylonjs-editor-tools", () => ({}));
-
 import { projectConfiguration } from "../../src/project/configuration";
-import { generatePhysics2DPolygonCollider, listPhysics2D } from "../../src/mcp/physics2d/physics2d";
+import { generatePhysics2DPolygonCollider, getPhysics2DPolygonCollider, listPhysics2D, setPhysics2DPolygonCollider } from "../../src/mcp/physics2d/physics2d";
 
 describe("mcp/physics2d alpha outline", () => {
 	let directory: string;
@@ -61,7 +59,32 @@ describe("mcp/physics2d alpha outline", () => {
 
 		expect(result).toMatchObject({ outline: "concave", collider: { shape: "polygon" } });
 		expect(result.collider.points).toHaveLength(6);
-		expect(result.collider.parts).toHaveLength(4);
+		expect(result.collider.parts).toHaveLength(2);
 		expect(listPhysics2D(scene).bodies[0].collider).toEqual(result.collider);
+	});
+
+	test("preserves transparent holes and disconnected opaque islands with exact revisions", async () => {
+		const pixels = Buffer.alloc(16 * 12 * 4);
+		for (let y = 1; y < 11; y++) for (let x = 1; x < 11; x++) pixels[(y * 16 + x) * 4 + 3] = 255;
+		for (let y = 4; y < 8; y++) for (let x = 4; x < 8; x++) pixels[(y * 16 + x) * 4 + 3] = 0;
+		for (let y = 3; y < 7; y++) for (let x = 13; x < 15; x++) pixels[(y * 16 + x) * 4 + 3] = 255;
+		await sharp(pixels, { raw: { width: 16, height: 12, channels: 4 } })
+			.png()
+			.toFile(join(directory, "compound.png"));
+		const node = new TransformNode("Compound Sprite", scene);
+
+		const result = await generatePhysics2DPolygonCollider(
+			scene,
+			{ nodeId: node.id, imagePath: "compound.png", size: [160, 120], outline: "compound", maxVertices: 64 },
+			options
+		);
+		const current = getPhysics2DPolygonCollider(scene, { nodeId: node.id });
+
+		expect(result).toMatchObject({ outline: "compound", outerCount: 2, holeCount: 1, revision: 1 });
+		expect(current).toMatchObject({ version: 2, revision: 1, outerCount: 2, holeCount: 1, vertexCount: 12, legacyMigratedView: false });
+		expect(current.parts.length).toBeGreaterThan(2);
+		expect(() => setPhysics2DPolygonCollider(scene, { nodeId: node.id, expectedRevision: 0, contours: current.contours }, options)).toThrow("current revision is 1");
+		const updated = setPhysics2DPolygonCollider(scene, { nodeId: node.id, expectedRevision: 1, contours: current.contours }, options);
+		expect(updated.revision).toBe(2);
 	});
 });

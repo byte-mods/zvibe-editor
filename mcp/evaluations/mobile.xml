@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which two on-screen control types does the Mobile runtime author?</question>
+      <answer>button, fixed-center stick</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which existing input subsystem receives Mobile Touch Control values?</question>
+      <answer>Input Actions</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Are signing passwords, identities, or store API keys persisted in scene metadata? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which Android native package formats are supported?</question>
+      <answer>APK, AAB</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which native build tools create Android and iOS packages?</question>
+      <answer>Gradle wrapper, xcodebuild</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which tools provide connected-device discovery and operations for Android and iOS?</question>
+      <answer>adb, xcrun devicectl</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What exact state binds a Mobile workflow plan before execution?</question>
+      <answer>deployment revision, scaffold revision, artifact SHA-256, device id</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>How long is a Mobile workflow plan valid?</question>
+      <answer>10 minutes</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does native workflow execution invoke a command shell? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which external prerequisites remain outside editor ownership?</question>
+      <answer>vendor SDKs, signing certificates and profiles, store accounts and agreements, device access, store review outcome</answer>
+   </qa_pair>
+</evaluation>

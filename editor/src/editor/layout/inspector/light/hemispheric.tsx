@@ -7,6 +7,7 @@ import { isHemisphericLight } from "../../../../tools/guards/nodes";
 import { onNodeModifiedObservable } from "../../../../tools/observables";
 
 import { IEditorInspectorImplementationProps } from "../inspector";
+import { LightRenderingLayersInspector } from "../rendering-layers";
 
 import { EditorInspectorColorField } from "../fields/color";
 import { EditorInspectorStringField } from "../fields/string";
@@ -43,6 +44,8 @@ export class EditorHemisphericLightInspector extends Component<IEditorInspectorI
 						onChange={() => onNodeModifiedObservable.notifyObservers(this.props.object)}
 					/>
 				</EditorInspectorSectionField>
+
+				<LightRenderingLayersInspector editor={this.props.editor} light={this.props.object} onUpdate={() => this.forceUpdate()} />
 
 				<EditorInspectorSectionField title="Transforms">
 					<EditorInspectorVectorField label={<div className="w-14">Direction</div>} object={this.props.object} property="direction" />

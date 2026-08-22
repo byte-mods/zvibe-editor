@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect the project package-manager status and package-change planning contract. Which four package-manager families are supported? Answer as a comma-separated list in documented order.</question>
+      <answer>npm, Yarn, pnpm, Bun</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare registry listing, registry planning, and registry apply metadata. Which single project-root configuration file can the registry mutation workflow write?</question>
+      <answer>.npmrc</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect configured package registries and the registry-search contract. Are registry credential values ever returned to the client? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare package-change planning with package-manager capability inspection. Are lifecycle scripts enabled by default? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect exact package-change planning and the compatibility mutation contract. For deterministic registry installs and updates, what kind of version is required?</question>
+      <answer>exact semantic version</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare package-change planning and apply behavior. Which files receive exact rollback snapshots when a package-manager command fails?</question>
+      <answer>package.json and lockfiles</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect package-change rollback evidence and apply documentation. Is node_modules promised to be restored byte-for-byte after arbitrary lifecycle side effects? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the dedicated Samples-view listing contract. Which sample sort field selects publication timestamps?</question>
+      <answer>publish-date</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect exact sample details. Which four bounded image formats can appear in verified preview metadata? Answer as a comma-separated list in documented order.</question>
+      <answer>PNG, JPEG, WebP, GIF</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect development-package technical-name editing. Which two exact hashes must accompany the previous technical name and confirmation?</question>
+      <answer>package fingerprint and manifest SHA-256</answer>
+   </qa_pair>
+</evaluation>

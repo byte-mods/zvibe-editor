@@ -1,7 +1,7 @@
 {
 	"name": "babylonjs-editor",
 	"version": "1.0.0",
-	"description": "Babylon.js Editor is a Web Application helping artists to work with Babylon.js",
+	"description": "Zvibe Editor is a next-generation visual game development environment powered by Babylon.js.",
 	"productName": "Zvibe Editor",
 	"runtimeDependenciesVersion": "5.4.3-alpha.1",
 	"main": "build/src/index.js",
@@ -18,10 +18,11 @@
 		"watch-all": "concurrently \"yarn watch\" \"yarn watch-css\" \"node esbuild.mjs --watch\" -c bgYellow.bold,bgBlue.bold,bgGreen.bold --names editor-ts,editor-css,editor-dependencies",
 		"start": "node scripts/start.mjs",
 		"test": "vitest run",
+		"test-cinematic-audio-electron": "electron test/cinematic/audio-capture-electron.cjs",
 		"watch-test": "vitest --watch",
 		"coverage": "vitest run --coverage"
 	},
-	"license": "(Apache-2.0)",
+	"license": "Apache-2.0",
 	"devDependencies": {
 		"@electron/rebuild": "4.0.2",
 		"@types/decompress": "4.2.7",
@@ -30,6 +31,7 @@
 		"@types/pngjs": "6.0.5",
 		"@types/react": "18.2.47",
 		"@types/react-dom": "18.2.18",
+		"@types/semver": "7.8.0",
 		"@vitest/coverage-v8": "4.0.17",
 		"concurrently": "9.2.0",
 		"electron": "39.8.5",
@@ -41,7 +43,9 @@
 		"vitest": "4.1.0"
 	},
 	"dependencies": {
+		"@litertjs/core": "2.5.3",
 		"@unicode/unicode-13.0.0": "1.6.17",
+		"@aws-sdk/client-s3": "3.975.0",
 		"@babylonjs/addons": "9.12.1",
 		"@babylonjs/core": "9.12.1",
 		"@babylonjs/havok": "1.3.12",
@@ -81,8 +85,8 @@
 		"axios": "1.16.1",
 		"babylonjs": "9.12.1",
 		"babylonjs-addons": "9.12.1",
-		"babylonjs-editor-cli": "latest",
-		"babylonjs-editor-tools": "latest",
+		"babylonjs-editor-cli": "5.4.3-alpha.1",
+		"babylonjs-editor-tools": "5.4.3-alpha.1",
 		"babylonjs-gui": "9.12.1",
 		"babylonjs-gui-editor": "9.12.1",
 		"babylonjs-ktx2decoder": "9.12.1",
@@ -92,6 +96,7 @@
 		"babylonjs-node-particle-editor": "9.12.1",
 		"babylonjs-post-process": "9.12.1",
 		"babylonjs-procedural-textures": "9.12.1",
+		"babylonjs-serializers": "9.12.1",
 		"bidi-js": "1.0.3",
 		"chokidar": "^4.0.3",
 		"class-variance-authority": "^0.7.0",
@@ -102,6 +107,7 @@
 		"dotenv": "17.2.3",
 		"dunder-proto": "1.0.1",
 		"electron-updater": "6.6.2",
+		"fflate": "0.8.3",
 		"esbuild": "0.28.1",
 		"filenamify": "4.3.0",
 		"flexlayout-react": "0.7.15",
@@ -121,6 +127,7 @@
 		"node-forge": "^1.4.0",
 		"node-pty": "1.2.0-beta.12",
 		"node-stream-zip": "1.15.0",
+		"onnxruntime-web": "1.27.0",
 		"pngjs": "7.0.0",
 		"react": "18.2.0",
 		"react-awesome-reveal": "4.2.14",
@@ -129,13 +136,16 @@
 		"react-loader-spinner": "6.1.6",
 		"react-resizable-panels": "^2.1.2",
 		"react-selectable": "^2.1.1",
+		"semver": "7.8.0",
 		"sharp": "0.34.3",
 		"sonner": "^1.4.41",
 		"strip-ansi": "7.2.0",
 		"tailwind-merge": "^2.2.1",
 		"tailwindcss-animate": "^1.0.7",
 		"usehooks-ts": "^3.1.0",
-		"webm-muxer": "^5.0.2"
+		"webm-muxer": "^5.0.2",
+		"ws": "^8.19.0",
+		"yaml": "2.9.0"
 	},
 	"build": {
 		"protocols": [

@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect the Video importer capability and Web codec-matrix contract. Which recommended video codec and container are reported for Web, in that order?</question>
+      <answer>h264, mp4</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the strict Web/Desktop Video override schema. Which five selectable encoder backends are available besides auto? Answer as a comma-separated list in reported order.</question>
+      <answer>software, videotoolbox, nvenc, qsv, amf</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the Web Video codec matrix. Which two video codecs are represented by WebM entries? Answer as a comma-separated list in reported order.</question>
+      <answer>vp8, vp9</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Video platform override validation. What inclusive even-integer range is accepted for maximum width and height?</question>
+      <answer>64 through 8192</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the persistent Video Player creation contract. Which five output target modes are supported? Answer as a comma-separated list in reported order.</question>
+      <answer>material, renderTexture, cameraNearPlane, cameraFarPlane, apiOnly</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the persistent Video Player clock contract. Which three update modes are supported? Answer as a comma-separated list in reported order.</question>
+      <answer>audioTime, gameTime, unscaledGameTime</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect a newly normalized persistent Video Player. Is muted enabled by default for browser-safe autoplay? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the Cinematic Video clip contract. Must its timeScale be strictly positive because reverse browser-video playback is unsupported? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect apply_video_importer. Must confirm be the literal value true before publishing an imported artifact? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect all ten dedicated Video MCP schemas. Are unknown input fields rejected before editor contact? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+</evaluation>

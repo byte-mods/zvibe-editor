@@ -18,6 +18,7 @@ declare module "@babylonjs/core/Particles/Node/nodeParticleSystemSet" {
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export interface NodeParticleSystemMesh extends Mesh {
 	isNodeParticleSystemMesh?: boolean;
+	releaseVfxBatchOnDisable?: boolean;
 	particleSystemSet?: ParticleSystemSet | null;
 	nodeParticleSystemSet?: NodeParticleSystemSet | null;
 }

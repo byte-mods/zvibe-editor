@@ -18,6 +18,7 @@ import {
 } from "babylonjs-editor-tools";
 
 import { projectConfiguration } from "../../project/configuration";
+import { applyImporterArtifactWithAccelerator } from "./import-accelerator";
 import { readAssetMetadata } from "./registry";
 
 const MAX_EMBEDDED_TEXTURE_BYTES = 32 * 1024 * 1024;
@@ -296,6 +297,16 @@ export async function getMaterialImporterArtifactStatus(path: string): Promise<I
 }
 
 export async function applyMaterialImporterArtifact(path: string, expectedFingerprint: string): Promise<IMaterialImporterArtifactStatus> {
+	return applyImporterArtifactWithAccelerator({
+		kind: "material",
+		sourcePath: path,
+		expectedFingerprint,
+		inspect: () => getMaterialImporterArtifactStatus(path),
+		applyLocal: () => applyMaterialImporterArtifactLocally(path, expectedFingerprint),
+	});
+}
+
+async function applyMaterialImporterArtifactLocally(path: string, expectedFingerprint: string): Promise<IMaterialImporterArtifactStatus> {
 	const status = await getMaterialImporterArtifactStatus(path);
 	if (status.fingerprint !== expectedFingerprint) {
 		throw new Error(`Material importer plan changed. Inspect again and use current fingerprint ${status.fingerprint}.`);

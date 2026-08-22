@@ -71,7 +71,7 @@ function build({ x64, arm64 } = options) {
 				target: "AppImage",
 			},
 			asar: true,
-			asarUnpack: ["**/node_modules/sharp/**/*", "**/node_modules/@img/**/*"],
+			asarUnpack: ["**/node_modules/sharp/**/*", "**/node_modules/@img/**/*", "**/node_modules/onnxruntime-web/**/*", "**/node_modules/@litertjs/core/wasm/**/*"],
 			compression: "normal",
 			extraFiles: ["bin/**", "templates/**"],
 			files: ["./build/**", "./fonts/**", "./assets/**", "./index.html"],

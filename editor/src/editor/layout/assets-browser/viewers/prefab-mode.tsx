@@ -35,7 +35,7 @@ import {
 	setPrefabVariantComponents,
 	setPrefabVariantOverrides,
 } from "../../../../mcp/prefabs/prefabs";
-import { showAlert, showConfirm } from "../../../../ui/dialog";
+import { DialogReturnType, showAlert, showConfirm } from "../../../../ui/dialog";
 import { Button } from "../../../../ui/shadcn/ui/button";
 import { Input } from "../../../../ui/shadcn/ui/input";
 
@@ -72,8 +72,28 @@ export interface IOpenPrefabModeOptions {
 	mode?: EditorPrefabStageMode;
 }
 
+let activePrefabModeDialog: DialogReturnType | null = null;
+
 export function openPrefabMode(editor: Editor, absolutePath: string, options?: IOpenPrefabModeOptions): void {
-	showAlert(`Prefab Stage — ${basename(absolutePath)}`, <PrefabMode editor={editor} path={absolutePath} options={options} />, true);
+	activePrefabModeDialog?.close();
+	const dialog = showAlert(`Prefab Stage — ${basename(absolutePath)}`, <PrefabMode editor={editor} path={absolutePath} options={options} />, true);
+	activePrefabModeDialog = dialog;
+	void dialog.wait().finally(() => {
+		if (activePrefabModeDialog === dialog) {
+			activePrefabModeDialog = null;
+		}
+	});
+}
+
+/** Closes the active Prefab Stage dialog, if one is open. */
+export function closePrefabMode(): boolean {
+	const dialog = activePrefabModeDialog;
+	if (!dialog) {
+		return false;
+	}
+	activePrefabModeDialog = null;
+	dialog.close();
+	return true;
 }
 
 function serializedNodes(document: any): IPrefabModeNode[] {

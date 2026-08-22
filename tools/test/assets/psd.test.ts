@@ -6436,6 +6436,1140 @@ describe("PSD smart-object placement rendering", () => {
 		expect(() => applyPsdSmartFilters(source, [{ ...filter(), deInterlace: null }])).toThrow("missing De-Interlace parameters");
 	});
 
+	test("executes exact 5x5 Custom convolution", () => {
+		const source = {
+			width: 8,
+			height: 6,
+			pixels: new Uint8Array(Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 7, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat()),
+		};
+		const parameters: NonNullable<IPsdSmartFilterInfo["customConvolution"]> = {
+			scale: 1,
+			offset: 4,
+			matrix: [0, 0, 0, 0, 0, 0, -1, -1, -1, 0, 0, -1, 9, -1, 0, 0, -1, -1, -1, 0, 0, 0, 0, 0, 0],
+		};
+		const filter = (customConvolution = parameters) => ({
+			index: 0,
+			name: "Custom",
+			type: "customConvolution" as const,
+			filterClassId: "Cstm",
+			filterId: 1131639917,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			customConvolution,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-custom-5x5-convolution-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const output = applyPsdSmartFilters(source, [filter()]);
+		expect(createHash("sha256").update(output.pixels).digest("hex")).toBe("f41c5017a40e3e7fe8a9881ad8a6c25c82b7855a6f685f08235244912f548aea");
+		expect(output.pixels[3]).toBe(0);
+		expect(output.pixels[27 * 4 + 3]).toBe(128);
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(output.pixels);
+		expect(applyPsdSmartFilters(source, [filter({ ...parameters, scale: 2 })]).pixels).not.toEqual(output.pixels);
+		expect(applyPsdSmartFilters(source, [filter({ ...parameters, offset: -4 })]).pixels).not.toEqual(output.pixels);
+		expect(applyPsdSmartFilters(source, [filter({ ...parameters, matrix: Array.from({ length: 25 }, (_, index) => (index === 12 ? 1 : 0)) })]).pixels).not.toEqual(
+			output.pixels
+		);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), customConvolution: null }])).toThrow("missing Custom parameters");
+	});
+
+	test("executes exact three-mode Offset displacement", () => {
+		const source = {
+			width: 8,
+			height: 6,
+			pixels: new Uint8Array(Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 7, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat()),
+		};
+		const parameters: NonNullable<IPsdSmartFilterInfo["offset"]> = { horizontalPixels: 2, verticalPixels: -1, undefinedAreas: "wrapAround" };
+		const filter = (offset = parameters) => ({
+			index: 0,
+			name: "Offset",
+			type: "offset" as const,
+			filterClassId: "Ofst",
+			filterId: 1332114292,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			offset,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-three-mode-offset-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const output = applyPsdSmartFilters(source, [filter()]);
+		expect(createHash("sha256").update(output.pixels).digest("hex")).toBe("b8d9ccfa5b3761f2e0b96242bb45274081f2c0751d9bc48345aa5a2c10bf6ceb");
+		expect(output.pixels[21 * 4 + 3]).toBe(128);
+		expect(output.pixels[42 * 4 + 3]).toBe(0);
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(output.pixels);
+		expect(applyPsdSmartFilters(source, [filter({ ...parameters, horizontalPixels: -2 })]).pixels).not.toEqual(output.pixels);
+		expect(applyPsdSmartFilters(source, [filter({ ...parameters, verticalPixels: 2 })]).pixels).not.toEqual(output.pixels);
+		for (const undefinedAreas of ["setToTransparent", "repeatEdgePixels"] as const) {
+			expect(applyPsdSmartFilters(source, [filter({ ...parameters, undefinedAreas })]).pixels).not.toEqual(output.pixels);
+		}
+		expect(applyPsdSmartFilters(source, [filter({ ...parameters, undefinedAreas: "setToTransparent" })]).pixels[3]).toBe(0);
+		expect(applyPsdSmartFilters(source, [filter({ ...parameters, undefinedAreas: "repeatEdgePixels" })]).pixels[3]).toBe(255);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), offset: null }])).toThrow("missing Offset parameters");
+	});
+
+	test("executes exact leased PSD/PSB Displace maps deterministically", () => {
+		const source = {
+			width: 8,
+			height: 6,
+			pixels: new Uint8Array(Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 7, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat()),
+		};
+		const mapPixels = new Uint8Array(Array.from({ length: 12 }, (_, index) => [32 + index * 17, 224 - index * 13, 128 + (index % 3) * 20, 255]).flat());
+		const evidence = {
+			filterIndex: 0,
+			sourcePath: "assets/maps/displace.psd",
+			sourceHash: "a".repeat(64),
+			sourceBytes: 1234,
+			format: "psd" as const,
+			documentVersion: 1 as const,
+			depth: 8 as const,
+			colorMode: "rgb" as const,
+			channelMapping: "red-horizontal-green-vertical" as const,
+			width: 4,
+			height: 3,
+			executionModel: "bounded-explicit-psd-displacement-map-binding-v1" as const,
+		};
+		const binding = { ...evidence, pixels: mapPixels };
+		const parameters: NonNullable<IPsdSmartFilterInfo["displace"]> = {
+			horizontalScalePercent: 12,
+			verticalScalePercent: -8,
+			displacementMap: "stretchToFit",
+			undefinedAreas: "repeatEdgePixels",
+			displacementFile: { signature: "Pth ", path: "/stored/not-followed/displace.psd" },
+			mapBinding: evidence,
+		};
+		const filter = (displace = parameters) => ({
+			index: 0,
+			name: "Displace",
+			type: "displace" as const,
+			filterClassId: "Dspl",
+			filterId: 1148416108,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			displace,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-explicit-map-displace-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const output = applyPsdSmartFilters(source, [filter()], true, [], [binding]);
+		expect(createHash("sha256").update(output.pixels).digest("hex")).toBe("d074b20c772b147fbf8719963eb17aa749e1c52bd25f4e5839919d9ff0e661fe");
+		expect(output.pixels[3]).toBe(255);
+		expect(output.pixels[27 * 4 + 3]).toBeGreaterThan(0);
+		expect(applyPsdSmartFilters(source, [filter()], true, [], [binding]).pixels).toEqual(output.pixels);
+		for (const displace of [
+			{ ...parameters, horizontalScalePercent: -12 },
+			{ ...parameters, verticalScalePercent: 8 },
+			{ ...parameters, displacementMap: "tile" as const },
+			{ ...parameters, undefinedAreas: "wrapAround" as const },
+		]) {
+			expect(applyPsdSmartFilters(source, [filter(displace)], true, [], [binding]).pixels).not.toEqual(output.pixels);
+		}
+		const grayscaleEvidence = {
+			...evidence,
+			sourcePath: "assets/maps/displace-gray.psb",
+			sourceHash: "b".repeat(64),
+			format: "psb" as const,
+			documentVersion: 2 as const,
+			colorMode: "grayscale" as const,
+			channelMapping: "grayscale-both-axes" as const,
+		};
+		const grayscaleBinding = { ...grayscaleEvidence, pixels: mapPixels };
+		expect(applyPsdSmartFilters(source, [filter({ ...parameters, mapBinding: grayscaleEvidence })], true, [], [grayscaleBinding]).pixels).not.toEqual(output.pixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), displace: null }], true, [], [binding])).toThrow("missing Displace parameters");
+		expect(() => applyPsdSmartFilters(source, [filter()])).toThrow("missing its exact Displace map binding");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...parameters, mapBinding: { ...evidence, sourceBytes: 1235 } })], true, [], [binding])).toThrow(
+			"does not match its exact leased evidence"
+		);
+		expect(() => applyPsdSmartFilters(source, [filter()], true, [], [{ ...binding, pixels: new Uint8Array(4) }])).toThrow("bounded exact PSD/PSB RGBA8 rasters");
+	});
+
+	test("executes exact-amount radial Pinch deterministically", () => {
+		const source = {
+			width: 9,
+			height: 7,
+			pixels: new Uint8Array(Array.from({ length: 63 }, (_, index) => [index * 13, 255 - index * 9, index * 19, index === 0 ? 0 : index === 31 ? 128 : 255]).flat()),
+		};
+		const parameters: NonNullable<IPsdSmartFilterInfo["pinch"]> = { amountPercent: 65 };
+		const filter = (pinch = parameters) => ({
+			index: 0,
+			name: "Pinch",
+			type: "pinch" as const,
+			filterClassId: "Pnch",
+			filterId: 1349411688,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			pinch,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-radial-power-pinch-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const output = applyPsdSmartFilters(source, [filter()]);
+		expect(createHash("sha256").update(output.pixels).digest("hex")).toBe("2904f1d311c693ddb525a1b922b119ee14004171b59d48eee78c73bc9d4527c8");
+		expect(output.pixels[3]).toBe(0);
+		expect(output.pixels[31 * 4 + 3]).toBe(128);
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(output.pixels);
+		expect(applyPsdSmartFilters(source, [filter({ amountPercent: -65 })]).pixels).not.toEqual(output.pixels);
+		expect(applyPsdSmartFilters(source, [filter({ amountPercent: 100 })]).pixels).not.toEqual(output.pixels);
+		expect(applyPsdSmartFilters(source, [filter({ amountPercent: -100 })]).pixels).not.toEqual(output.pixels);
+		const identityPixels = source.pixels.slice();
+		identityPixels[0] = identityPixels[1] = identityPixels[2] = 0;
+		expect(applyPsdSmartFilters(source, [filter({ amountPercent: 0 })]).pixels).toEqual(identityPixels);
+		const impulsePixels = new Uint8Array(9 * 9 * 4);
+		for (let offset = 0; offset < impulsePixels.length; offset += 4) {
+			impulsePixels[offset + 3] = 255;
+		}
+		impulsePixels[(4 * 9 + 6) * 4] = impulsePixels[(4 * 9 + 6) * 4 + 1] = impulsePixels[(4 * 9 + 6) * 4 + 2] = 255;
+		const positiveImpulse = applyPsdSmartFilters({ width: 9, height: 9, pixels: impulsePixels }, [filter({ amountPercent: 100 })]).pixels;
+		const negativeImpulse = applyPsdSmartFilters({ width: 9, height: 9, pixels: impulsePixels }, [filter({ amountPercent: -100 })]).pixels;
+		expect(positiveImpulse[(4 * 9 + 5) * 4]).toBeGreaterThan(positiveImpulse[(4 * 9 + 7) * 4]);
+		expect(negativeImpulse[(4 * 9 + 7) * 4]).toBeGreaterThan(negativeImpulse[(4 * 9 + 5) * 4]);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), pinch: null }])).toThrow("missing Pinch parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ amountPercent: 101 })])).toThrow("invalid bounded Pinch amount");
+	});
+
+	test("executes both exact Polar Coordinates conversions deterministically", () => {
+		const source = {
+			width: 9,
+			height: 7,
+			pixels: new Uint8Array(Array.from({ length: 63 }, (_, index) => [index * 13, 255 - index * 9, index * 19, index === 0 ? 0 : index === 31 ? 128 : 255]).flat()),
+		};
+		const filter = (conversion: "rectangularToPolar" | "polarToRectangular") => ({
+			index: 0,
+			name: "Polar Coordinates",
+			type: "polarCoordinates" as const,
+			filterClassId: "Plr ",
+			filterId: 1349284384,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			polarCoordinates: { conversion },
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-aspect-correct-polar-coordinates-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const rectangularToPolar = applyPsdSmartFilters(source, [filter("rectangularToPolar")]);
+		const polarToRectangular = applyPsdSmartFilters(source, [filter("polarToRectangular")]);
+		expect(createHash("sha256").update(rectangularToPolar.pixels).digest("hex")).toBe("0cac8098945cb081de6c0d5a0c9995a90a1e8f809f0cb10d03301c2cf0471e46");
+		expect(createHash("sha256").update(polarToRectangular.pixels).digest("hex")).toBe("f6c4bf77a988eea18b2e4f7efa57c4bef877ce4f75824b9b91ec77252763d4d6");
+		expect(rectangularToPolar.pixels).not.toEqual(polarToRectangular.pixels);
+		expect(applyPsdSmartFilters(source, [filter("rectangularToPolar")]).pixels).toEqual(rectangularToPolar.pixels);
+		expect(applyPsdSmartFilters(source, [filter("polarToRectangular")]).pixels).toEqual(polarToRectangular.pixels);
+
+		const semanticPixels = new Uint8Array(9 * 9 * 4);
+		for (let y = 0; y < 9; ++y) {
+			for (let x = 0; x < 9; ++x) {
+				const offset = (y * 9 + x) * 4;
+				semanticPixels[offset + 3] = 255;
+				if (y === 0) semanticPixels[offset] = 255;
+				if (y === 8) semanticPixels[offset + 2] = 255;
+			}
+		}
+		const wrapped = applyPsdSmartFilters({ width: 9, height: 9, pixels: semanticPixels }, [filter("rectangularToPolar")]).pixels;
+		expect(wrapped[(4 * 9 + 4) * 4]).toBeGreaterThan(wrapped[(4 * 9 + 4) * 4 + 2]);
+		expect(wrapped[2]).toBeGreaterThan(wrapped[0]);
+
+		const centerPixels = new Uint8Array(9 * 9 * 4);
+		for (let offset = 0; offset < centerPixels.length; offset += 4) centerPixels[offset + 3] = 255;
+		centerPixels[(4 * 9 + 4) * 4 + 1] = 255;
+		const unwrapped = applyPsdSmartFilters({ width: 9, height: 9, pixels: centerPixels }, [filter("polarToRectangular")]).pixels;
+		expect(unwrapped[(0 * 9 + 4) * 4 + 1]).toBeGreaterThan(unwrapped[(8 * 9 + 4) * 4 + 1]);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter("rectangularToPolar"), polarCoordinates: null }])).toThrow("missing Polar Coordinates parameters");
+		expect(() => applyPsdSmartFilters(source, [{ ...filter("rectangularToPolar"), polarCoordinates: { conversion: "unsupported" as "rectangularToPolar" } }])).toThrow(
+			"invalid bounded Polar Coordinates conversion"
+		);
+	});
+
+	test("executes exact signed Ripple amount and all three sizes deterministically", () => {
+		const source = {
+			width: 11,
+			height: 9,
+			pixels: new Uint8Array(Array.from({ length: 99 }, (_, index) => [index * 17, 255 - index * 11, index * 23, index === 0 ? 0 : index === 49 ? 128 : 255]).flat()),
+		};
+		const filter = (ripple: NonNullable<IPsdSmartFilterInfo["ripple"]> = { amountPercent: 240, size: "medium" }) => ({
+			index: 0,
+			name: "Ripple",
+			type: "ripple" as const,
+			filterClassId: "Rple",
+			filterId: 1383099493,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			ripple,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-two-axis-sinusoidal-ripple-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const medium = applyPsdSmartFilters(source, [filter()]);
+		const small = applyPsdSmartFilters(source, [filter({ amountPercent: 240, size: "small" })]);
+		const large = applyPsdSmartFilters(source, [filter({ amountPercent: 240, size: "large" })]);
+		const negative = applyPsdSmartFilters(source, [filter({ amountPercent: -240, size: "medium" })]);
+		expect(createHash("sha256").update(medium.pixels).digest("hex")).toBe("03f1994143bd3aafd1753cafe6b5f20a0183c04292b1c285784d0ef78fa22fb8");
+		expect(createHash("sha256").update(small.pixels).digest("hex")).toBe("a49a238c692b93e9c8eb17be076e2cfe21b72e07d03c0fb24d9c8aeb936ff67f");
+		expect(createHash("sha256").update(large.pixels).digest("hex")).toBe("5fb572c603b1a4266fab2b5554c6042d836e304f61a640d1cb2572b2ebb3e0c4");
+		expect(createHash("sha256").update(negative.pixels).digest("hex")).toBe("0c32f05d920c9849d2df31bfedbc9dc910af26edab6fea26d378c1e7a58d240d");
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(medium.pixels);
+		expect(small.pixels).not.toEqual(medium.pixels);
+		expect(large.pixels).not.toEqual(medium.pixels);
+		expect(negative.pixels).not.toEqual(medium.pixels);
+		const identityPixels = source.pixels.slice();
+		identityPixels[0] = identityPixels[1] = identityPixels[2] = 0;
+		expect(applyPsdSmartFilters(source, [filter({ amountPercent: 0, size: "large" })]).pixels).toEqual(identityPixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), ripple: null }])).toThrow("missing Ripple parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ amountPercent: 1000, size: "medium" })])).toThrow("invalid bounded Ripple parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ amountPercent: 100, size: "unsupported" as "medium" })])).toThrow("invalid bounded Ripple parameters");
+	});
+
+	test("executes an exact bounded Shear curve with both undefined-area modes deterministically", () => {
+		const source = {
+			width: 12,
+			height: 9,
+			pixels: new Uint8Array(Array.from({ length: 108 }, (_, index) => [index * 19, 255 - index * 7, index * 29, index === 0 ? 0 : index === 53 ? 128 : 255]).flat()),
+		};
+		const settings: NonNullable<IPsdSmartFilterInfo["shear"]> = {
+			curvePoints: [
+				{ x: 0, y: 0 },
+				{ x: 18, y: 42 },
+				{ x: -12, y: 86 },
+				{ x: 6, y: 128 },
+			],
+			curveStartIndex: 0,
+			curveEndIndex: 3,
+			undefinedAreas: "wrapAround",
+		};
+		const filter = (shear = settings) => ({
+			index: 0,
+			name: "Shear",
+			type: "shear" as const,
+			filterClassId: "Shr ",
+			filterId: 1399353888,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			shear,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-monotone-cubic-shear-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const wrapAround = applyPsdSmartFilters(source, [filter()]);
+		const repeatEdgePixels = applyPsdSmartFilters(source, [filter({ ...settings, undefinedAreas: "repeatEdgePixels" })]);
+		const reverseCurve = applyPsdSmartFilters(source, [filter({ ...settings, curvePoints: settings.curvePoints.map((point) => ({ x: -point.x, y: point.y })) })]);
+		expect({
+			wrapAround: createHash("sha256").update(wrapAround.pixels).digest("hex"),
+			repeatEdgePixels: createHash("sha256").update(repeatEdgePixels.pixels).digest("hex"),
+			reverseCurve: createHash("sha256").update(reverseCurve.pixels).digest("hex"),
+		}).toEqual({
+			wrapAround: "6af9bf340a39a99919eadc382e481427668b5a5eb414e06d06450e6e46d2b8f0",
+			repeatEdgePixels: "a5a589a04b48f5dcda26a014d91b3f99fcaf0738959372899634696e035e4f57",
+			reverseCurve: "0312a8af476c89549b87ee20c9d91c6e9988b7500107e47a4651f2c430659160",
+		});
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(wrapAround.pixels);
+		expect(repeatEdgePixels.pixels).not.toEqual(wrapAround.pixels);
+		expect(reverseCurve.pixels).not.toEqual(wrapAround.pixels);
+		const identityPixels = source.pixels.slice();
+		identityPixels[0] = identityPixels[1] = identityPixels[2] = 0;
+		expect(
+			applyPsdSmartFilters(source, [
+				filter({
+					curvePoints: [
+						{ x: 0, y: 0 },
+						{ x: 0, y: 128 },
+					],
+					curveStartIndex: 0,
+					curveEndIndex: 1,
+					undefinedAreas: "repeatEdgePixels",
+				}),
+			]).pixels
+		).toEqual(identityPixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), shear: null }])).toThrow("missing Shear parameters");
+		expect(() =>
+			applyPsdSmartFilters(source, [
+				filter({
+					...settings,
+					curvePoints: [
+						{ x: 0, y: 64 },
+						{ x: 0, y: 32 },
+					],
+				}),
+			])
+		).toThrow("invalid bounded Shear parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...settings, curveStartIndex: 3 })])).toThrow("invalid bounded Shear parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...settings, undefinedAreas: "unsupported" as "wrapAround" })])).toThrow("invalid bounded Shear parameters");
+	});
+
+	test("executes exact signed Spherize amount and all three modes deterministically", () => {
+		const source = {
+			width: 11,
+			height: 9,
+			pixels: new Uint8Array(Array.from({ length: 99 }, (_, index) => [index * 17, 255 - index * 11, index * 23, index === 0 ? 0 : index === 49 ? 128 : 255]).flat()),
+		};
+		const filter = (spherize: NonNullable<IPsdSmartFilterInfo["spherize"]> = { amountPercent: 70, mode: "normal" }) => ({
+			index: 0,
+			name: "Spherize",
+			type: "spherize" as const,
+			filterClassId: "Sphr",
+			filterId: 1399875698,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			spherize,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-axis-selective-spherical-spherize-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const normal = applyPsdSmartFilters(source, [filter()]);
+		const horizontal = applyPsdSmartFilters(source, [filter({ amountPercent: 70, mode: "horizontalOnly" })]);
+		const vertical = applyPsdSmartFilters(source, [filter({ amountPercent: 70, mode: "verticalOnly" })]);
+		const negative = applyPsdSmartFilters(source, [filter({ amountPercent: -70, mode: "normal" })]);
+		expect({
+			normal: createHash("sha256").update(normal.pixels).digest("hex"),
+			horizontal: createHash("sha256").update(horizontal.pixels).digest("hex"),
+			vertical: createHash("sha256").update(vertical.pixels).digest("hex"),
+			negative: createHash("sha256").update(negative.pixels).digest("hex"),
+		}).toEqual({
+			normal: "4fefe8ab76a32d5acda1c4b10ee5e8425fb9f9cee5a53d1f78af77ec37cdeed4",
+			horizontal: "784be4efe8ec7de947d341b37f01afeb81c9931ea6c0f7b2177519d5ca06edde",
+			vertical: "4c29b2207cacf0332b408566d8acbdf076abd09790a2575bd5b84e9148241329",
+			negative: "25f0227e42b5448a522940fa770ba387cec174452e9dc69ddf7cf4dc3aca2f25",
+		});
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(normal.pixels);
+		expect(horizontal.pixels).not.toEqual(normal.pixels);
+		expect(vertical.pixels).not.toEqual(normal.pixels);
+		expect(negative.pixels).not.toEqual(normal.pixels);
+		const identityPixels = source.pixels.slice();
+		identityPixels[0] = identityPixels[1] = identityPixels[2] = 0;
+		expect(applyPsdSmartFilters(source, [filter({ amountPercent: 0, mode: "verticalOnly" })]).pixels).toEqual(identityPixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), spherize: null }])).toThrow("missing Spherize parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ amountPercent: 101, mode: "normal" })])).toThrow("invalid bounded Spherize parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ amountPercent: 70, mode: "unsupported" as "normal" })])).toThrow("invalid bounded Spherize parameters");
+	});
+
+	test("executes exact signed Twirl angles with radial falloff deterministically", () => {
+		const source = {
+			width: 11,
+			height: 9,
+			pixels: new Uint8Array(Array.from({ length: 99 }, (_, index) => [index * 17, 255 - index * 11, index * 23, index === 0 ? 0 : index === 49 ? 128 : 255]).flat()),
+		};
+		const filter = (angleDegrees = 420) => ({
+			index: 0,
+			name: "Twirl",
+			type: "twirl" as const,
+			filterClassId: "Twrl",
+			filterId: 1417114220,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			twirl: { angleDegrees },
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-radial-falloff-twirl-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const clockwise = applyPsdSmartFilters(source, [filter(420)]);
+		const counterClockwise = applyPsdSmartFilters(source, [filter(-420)]);
+		const maximum = applyPsdSmartFilters(source, [filter(999)]);
+		expect({
+			clockwise: createHash("sha256").update(clockwise.pixels).digest("hex"),
+			counterClockwise: createHash("sha256").update(counterClockwise.pixels).digest("hex"),
+			maximum: createHash("sha256").update(maximum.pixels).digest("hex"),
+		}).toEqual({
+			clockwise: "d2ada68e80696a5a71aeb4143db9565f0954a824816c72ebd47273b0d0b2bc8a",
+			counterClockwise: "206d42d8dc549f4d8d0ef08e1658ca76f2f2d60204435eecf0bfe16fcf52e561",
+			maximum: "cd81cf555be0b621d704a04367bb4f6b1ac4008569b8eb4cc44c236d98df4d08",
+		});
+		expect(applyPsdSmartFilters(source, [filter(420)]).pixels).toEqual(clockwise.pixels);
+		expect(counterClockwise.pixels).not.toEqual(clockwise.pixels);
+		expect(maximum.pixels).not.toEqual(clockwise.pixels);
+		const identityPixels = source.pixels.slice();
+		identityPixels[0] = identityPixels[1] = identityPixels[2] = 0;
+		expect(applyPsdSmartFilters(source, [filter(0)]).pixels).toEqual(identityPixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), twirl: null }])).toThrow("missing Twirl parameters");
+		expect(() => applyPsdSmartFilters(source, [filter(1000)])).toThrow("invalid bounded Twirl angle");
+	});
+
+	test("executes exact seeded multi-generator Wave controls deterministically", () => {
+		const source = {
+			width: 11,
+			height: 9,
+			pixels: new Uint8Array(Array.from({ length: 99 }, (_, index) => [index * 17, 255 - index * 11, index * 23, index === 0 ? 0 : index === 49 ? 128 : 255]).flat()),
+		};
+		const settings = (overrides: Partial<NonNullable<IPsdSmartFilterInfo["wave"]>> = {}): NonNullable<IPsdSmartFilterInfo["wave"]> => ({
+			numberOfGenerators: 3,
+			type: "sine",
+			wavelength: { minimum: 3, maximum: 9 },
+			amplitude: { minimum: 1, maximum: 4 },
+			scale: { horizontalPercent: 75, verticalPercent: 55 },
+			randomSeed: 123456,
+			undefinedAreas: "wrapAround",
+			...overrides,
+		});
+		const filter = (wave = settings()) => ({
+			index: 0,
+			name: "Wave",
+			type: "wave" as const,
+			filterClassId: "Wave",
+			filterId: 1466005093,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			wave,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-seeded-multi-generator-wave-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const sine = applyPsdSmartFilters(source, [filter()]);
+		const triangle = applyPsdSmartFilters(source, [filter(settings({ type: "triangle" }))]);
+		const square = applyPsdSmartFilters(source, [filter(settings({ type: "square" }))]);
+		const repeatEdge = applyPsdSmartFilters(source, [filter(settings({ undefinedAreas: "repeatEdgePixels" }))]);
+		expect({
+			sine: createHash("sha256").update(sine.pixels).digest("hex"),
+			triangle: createHash("sha256").update(triangle.pixels).digest("hex"),
+			square: createHash("sha256").update(square.pixels).digest("hex"),
+			repeatEdge: createHash("sha256").update(repeatEdge.pixels).digest("hex"),
+		}).toEqual({
+			sine: "7c85e26ad646f16c128a01516954e408538f40f35965d101b5e6acba6968ecb4",
+			triangle: "e8012664d9fc2d173033521214d3259f73b8492fedb98c25126103513dc524bc",
+			square: "cf6f2134685fefbeaebd4d6015646fe3471dfa815bb0a19d6cf180c07813ea7e",
+			repeatEdge: "2a99fafd488f340461caad4f82783a3ec3d6bfd1016cd39e4a281c44e592b487",
+		});
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(sine.pixels);
+		expect(triangle.pixels).not.toEqual(sine.pixels);
+		expect(square.pixels).not.toEqual(sine.pixels);
+		expect(repeatEdge.pixels).not.toEqual(sine.pixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), wave: null }])).toThrow("missing Wave parameters");
+		expect(() => applyPsdSmartFilters(source, [filter(settings({ numberOfGenerators: 1000 }))])).toThrow("invalid bounded Wave parameters");
+		expect(() => applyPsdSmartFilters(source, [filter(settings({ wavelength: { minimum: 9, maximum: 9 } }))])).toThrow("invalid bounded Wave parameters");
+	});
+
+	test("executes exact signed ZigZag amount, ridges, and all three styles deterministically", () => {
+		const source = {
+			width: 11,
+			height: 9,
+			pixels: new Uint8Array(Array.from({ length: 99 }, (_, index) => [index * 17, 255 - index * 11, index * 23, index === 0 ? 0 : index === 49 ? 128 : 255]).flat()),
+		};
+		const filter = (zigzag: NonNullable<IPsdSmartFilterInfo["zigzag"]> = { amountPercent: 65, ridges: 5, style: "aroundCenter" }) => ({
+			index: 0,
+			name: "ZigZag",
+			type: "zigzag" as const,
+			filterClassId: "ZgZg",
+			filterId: 1516722791,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			zigzag,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-aspect-correct-radial-zigzag-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const aroundCenter = applyPsdSmartFilters(source, [filter()]);
+		const outFromCenter = applyPsdSmartFilters(source, [filter({ amountPercent: 65, ridges: 5, style: "outFromCenter" })]);
+		const pondRipples = applyPsdSmartFilters(source, [filter({ amountPercent: 65, ridges: 5, style: "pondRipples" })]);
+		const negative = applyPsdSmartFilters(source, [filter({ amountPercent: -65, ridges: 5, style: "aroundCenter" })]);
+		expect({
+			aroundCenter: createHash("sha256").update(aroundCenter.pixels).digest("hex"),
+			outFromCenter: createHash("sha256").update(outFromCenter.pixels).digest("hex"),
+			pondRipples: createHash("sha256").update(pondRipples.pixels).digest("hex"),
+			negative: createHash("sha256").update(negative.pixels).digest("hex"),
+		}).toEqual({
+			aroundCenter: "70730b49d85e549912dbf23d0e0fe15187b988c44b9d072c8210e6c9ae87ba7b",
+			outFromCenter: "df8d457a0565c5b4d27c97ce5cdcd1ccfd71dbfb0862ed5981a4650a14f7a603",
+			pondRipples: "5322db9c7fa2632a36229736707a4e00b2dcf0556b0f74d24b2bd31c25337f8e",
+			negative: "4d014542dac331d2e0aa9a3450ce469902f04541dede9a78735f9fa1973fcb71",
+		});
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(aroundCenter.pixels);
+		expect(outFromCenter.pixels).not.toEqual(aroundCenter.pixels);
+		expect(pondRipples.pixels).not.toEqual(aroundCenter.pixels);
+		expect(negative.pixels).not.toEqual(aroundCenter.pixels);
+		const identityPixels = source.pixels.slice();
+		identityPixels[0] = identityPixels[1] = identityPixels[2] = 0;
+		expect(applyPsdSmartFilters(source, [filter({ amountPercent: 0, ridges: 20, style: "pondRipples" })]).pixels).toEqual(identityPixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), zigzag: null }])).toThrow("missing ZigZag parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ amountPercent: 101, ridges: 5, style: "aroundCenter" })])).toThrow("invalid bounded ZigZag parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ amountPercent: 65, ridges: 21, style: "aroundCenter" })])).toThrow("invalid bounded ZigZag parameters");
+	});
+
+	test("executes exact RGB, HSB, and HSL channel-model conversions deterministically", () => {
+		const source = {
+			width: 7,
+			height: 5,
+			pixels: new Uint8Array(Array.from({ length: 35 }, (_, index) => [index * 37, 255 - index * 19, index * 53, index === 0 ? 0 : index === 17 ? 128 : 255]).flat()),
+		};
+		const filter = (hsbHsl: NonNullable<IPsdSmartFilterInfo["hsbHsl"]> = { inputMode: "rgb", rowOrder: "hsb" }) => ({
+			index: 0,
+			name: "HSB/HSL",
+			type: "hsbHsl" as const,
+			filterClassId: "HsbP",
+			filterId: 1215521360,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			hsbHsl,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-channel-model-hsb-hsl-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const variants = {
+			rgbToHsb: applyPsdSmartFilters(source, [filter({ inputMode: "rgb", rowOrder: "hsb" })]).pixels,
+			rgbToHsl: applyPsdSmartFilters(source, [filter({ inputMode: "rgb", rowOrder: "hsl" })]).pixels,
+			hsbToRgb: applyPsdSmartFilters(source, [filter({ inputMode: "hsb", rowOrder: "rgb" })]).pixels,
+			hslToRgb: applyPsdSmartFilters(source, [filter({ inputMode: "hsl", rowOrder: "rgb" })]).pixels,
+			hsbToHsl: applyPsdSmartFilters(source, [filter({ inputMode: "hsb", rowOrder: "hsl" })]).pixels,
+		};
+		expect(Object.fromEntries(Object.entries(variants).map(([key, pixels]) => [key, createHash("sha256").update(pixels).digest("hex")]))).toEqual({
+			rgbToHsb: "4101413ed4898e487c5d586f90de83407634b1bb951404a9ea3dc59913d56ca1",
+			rgbToHsl: "8665f1e1fa439ab409ad82d6a5c87d693d0141eb228a42c3ba690ad918d7bda6",
+			hsbToRgb: "b2731c3c32b04d7ca6876b2e68ec31166b060a374e2f9e62c5c1bfa6446b8c93",
+			hslToRgb: "8cb82404b4825857f70fdcef044b248a1a7f1cd5d7914b4b1420920425ab0765",
+			hsbToHsl: "8c53661f4dbb3004fd04583af92689437fcddaf5991149ca09198236aadbb603",
+		});
+		expect(variants.rgbToHsb).not.toEqual(variants.rgbToHsl);
+		expect(variants.hsbToRgb).not.toEqual(variants.hslToRgb);
+		const identityPixels = source.pixels.slice();
+		identityPixels[0] = identityPixels[1] = identityPixels[2] = 0;
+		for (const mode of ["rgb", "hsb", "hsl"] as const) {
+			expect(applyPsdSmartFilters(source, [filter({ inputMode: mode, rowOrder: mode })]).pixels).toEqual(identityPixels);
+		}
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), hsbHsl: null }])).toThrow("missing HSB/HSL parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ inputMode: "lab" as "rgb", rowOrder: "rgb" })])).toThrow("invalid bounded HSB/HSL parameters");
+	});
+
+	test("executes bounded single and connected-plane Perspective Warp homographies deterministically", () => {
+		const source = {
+			width: 9,
+			height: 7,
+			pixels: new Uint8Array(
+				Array.from({ length: 63 }, (_, index) => {
+					const x = index % 9;
+					const y = Math.floor(index / 9);
+					return [x * 29, y * 37, (x * 17 + y * 23) % 256, x === 0 && y === 0 ? 0 : x === 4 && y === 3 ? 128 : 255];
+				}).flat()
+			),
+		};
+		const onePlane: NonNullable<IPsdSmartFilterInfo["perspectiveWarp"]> = {
+			vertices: [
+				{ x: 1, y: 1 },
+				{ x: 7, y: 1 },
+				{ x: 7, y: 5 },
+				{ x: 1, y: 5 },
+			],
+			warpedVertices: [
+				{ x: 0.5, y: 1.5 },
+				{ x: 7.5, y: 0.5 },
+				{ x: 6.5, y: 5.5 },
+				{ x: 1.5, y: 5 },
+			],
+			quads: [[0, 1, 2, 3]],
+			connectedEdgeCount: 0,
+		};
+		const filter = (perspectiveWarp: NonNullable<IPsdSmartFilterInfo["perspectiveWarp"]> = onePlane) => ({
+			index: 0,
+			name: "Perspective Warp",
+			type: "perspectiveWarp" as const,
+			filterClassId: "perspectiveWarpTransform",
+			filterId: 442,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			perspectiveWarp,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-piecewise-projective-perspective-warp-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const connected: NonNullable<IPsdSmartFilterInfo["perspectiveWarp"]> = {
+			vertices: [
+				{ x: 0, y: 0 },
+				{ x: 4.5, y: 0 },
+				{ x: 9, y: 0 },
+				{ x: 0, y: 7 },
+				{ x: 4.5, y: 7 },
+				{ x: 9, y: 7 },
+			],
+			warpedVertices: [
+				{ x: 0, y: 0 },
+				{ x: 3.5, y: 0.75 },
+				{ x: 9, y: 0 },
+				{ x: 0, y: 7 },
+				{ x: 5.5, y: 6.25 },
+				{ x: 9, y: 7 },
+			],
+			quads: [
+				[0, 1, 4, 3],
+				[1, 2, 5, 4],
+			],
+			connectedEdgeCount: 1,
+		};
+		const onePlanePixels = applyPsdSmartFilters(source, [filter()]).pixels;
+		const connectedPixels = applyPsdSmartFilters(source, [filter(connected)]).pixels;
+		expect({
+			onePlane: createHash("sha256").update(onePlanePixels).digest("hex"),
+			connected: createHash("sha256").update(connectedPixels).digest("hex"),
+		}).toEqual({
+			onePlane: "390af730e762612cb9094d476b7583eb0e448a9145e8588403ea6bb537cddc94",
+			connected: "249f0a784a4ebf8b5cccb2237dff7210d4382c5b154cc6bbb2fca3bbc7da658e",
+		});
+		expect(onePlanePixels).not.toEqual(connectedPixels);
+		const identity = { ...onePlane, warpedVertices: onePlane.vertices.map((point) => ({ ...point })) };
+		expect(applyPsdSmartFilters(source, [filter(identity)]).pixels).toEqual(source.pixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), perspectiveWarp: null }])).toThrow("missing Perspective Warp parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...onePlane, quads: [[0, 1, 2, 2]] })])).toThrow("invalid bounded Perspective Warp parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...connected, connectedEdgeCount: 0 })])).toThrow("connected-edge summary does not match");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...onePlane, quads: [...onePlane.quads, ...onePlane.quads] })])).toThrow("repeats Perspective Warp plane");
+		expect(() =>
+			applyPsdSmartFilters(source, [
+				filter({
+					vertices: [...identity.vertices, { x: 8, y: 6 }],
+					warpedVertices: [...identity.warpedVertices, { x: 8, y: 6 }],
+					quads: identity.quads,
+					connectedEdgeCount: 0,
+				}),
+			])
+		).toThrow("unreferenced Perspective Warp vertex");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...connected, quads: [connected.quads[0], [1, 4, 5, 2]] })])).toThrow("invalid Perspective Warp connectivity");
+		expect(() =>
+			applyPsdSmartFilters(source, [
+				filter({
+					...onePlane,
+					warpedVertices: [onePlane.warpedVertices[0], onePlane.warpedVertices[2], onePlane.warpedVertices[1], onePlane.warpedVertices[3]],
+				}),
+			])
+		).toThrow("degenerate, non-convex, or folded Perspective Warp plane");
+	});
+
+	test("executes authored composite and RGB Curves point/mapping forms deterministically", () => {
+		const source = {
+			width: 8,
+			height: 6,
+			pixels: new Uint8Array(
+				Array.from({ length: 48 }, (_, index) => {
+					const x = index % 8;
+					const y = Math.floor(index / 8);
+					return [x * 36, y * 49, (x * 19 + y * 31) % 256, x === 0 && y === 0 ? 0 : x === 4 && y === 3 ? 128 : 255];
+				}).flat()
+			),
+		};
+		const curves: NonNullable<IPsdSmartFilterInfo["curves"]> = {
+			presetKind: "custom",
+			adjustments: [
+				{
+					channels: ["composite"],
+					mode: "curve",
+					points: [
+						{ input: 0, output: 0, curved: false },
+						{ input: 64, output: 48, curved: true },
+						{ input: 128, output: 176, curved: true },
+						{ input: 255, output: 255, curved: false },
+					],
+				},
+				{
+					channels: ["red"],
+					mode: "curve",
+					points: [
+						{ input: 0, output: 12, curved: false },
+						{ input: 96, output: 112, curved: false },
+						{ input: 255, output: 244, curved: false },
+					],
+				},
+				{ channels: ["green", "blue"], mode: "mapping", values: Array.from({ length: 256 }, (_, value) => 255 - value) },
+			],
+		};
+		const filter = (settings: NonNullable<IPsdSmartFilterInfo["curves"]> = curves) => ({
+			index: 0,
+			name: "Curves Mixed Forms",
+			type: "curves" as const,
+			filterClassId: "Crvs",
+			filterId: 1131574899,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			curves: settings,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-authored-channel-curves-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const mixed = applyPsdSmartFilters(source, [filter()]).pixels;
+		const cornerComposite = {
+			presetKind: "custom" as const,
+			adjustments: [
+				{
+					channels: ["composite" as const],
+					mode: "curve" as const,
+					points: curves.adjustments[0].mode === "curve" ? curves.adjustments[0].points.map((point) => ({ ...point, curved: false })) : [],
+				},
+			],
+		};
+		const corner = applyPsdSmartFilters(source, [filter(cornerComposite)]).pixels;
+		expect({
+			mixed: createHash("sha256").update(mixed).digest("hex"),
+			corner: createHash("sha256").update(corner).digest("hex"),
+		}).toEqual({
+			mixed: "4854cf06f3b98ca290d38de6f191fc1b623ca6b9ebc77f50960c9c605f7ff4cd",
+			corner: "769b7d4a6c7b7c5a35ca9538c23cd61f1db3e84987f66bd7a7a0fcd37da47d9d",
+		});
+		expect(mixed).not.toEqual(corner);
+		expect(applyPsdSmartFilters(source, [filter({ presetKind: "default", adjustments: [] })]).pixels).toEqual(source.pixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), curves: null }])).toThrow("missing Curves parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...curves, adjustments: [...curves.adjustments, curves.adjustments[1]] })])).toThrow(
+			"assigns Curves channel red more than once"
+		);
+		expect(() =>
+			applyPsdSmartFilters(source, [
+				filter({
+					presetKind: "custom",
+					adjustments: [{ channels: ["red"], mode: "curve", points: [{ input: 0, output: 0, curved: false }] }],
+				}),
+			])
+		).toThrow("invalid bounded Curves control-point sequence");
+		expect(() => applyPsdSmartFilters(source, [filter({ presetKind: "custom", adjustments: [{ channels: ["blue"], mode: "mapping", values: [0, 1, 2] }] })])).toThrow(
+			"invalid bounded Curves mapping table"
+		);
+	});
+
+	test("executes exact modern and legacy Brightness/Contrast controls deterministically", () => {
+		const source = {
+			width: 8,
+			height: 6,
+			pixels: new Uint8Array(
+				Array.from({ length: 48 }, (_, index) => {
+					const x = index % 8;
+					const y = Math.floor(index / 8);
+					return [x * 36, y * 49, (x * 19 + y * 31) % 256, x === 0 && y === 0 ? 0 : x === 4 && y === 3 ? 128 : 255];
+				}).flat()
+			),
+		};
+		const filter = (brightnessContrast: NonNullable<IPsdSmartFilterInfo["brightnessContrast"]>) => ({
+			index: 0,
+			name: "Brightness/Contrast",
+			type: "brightnessContrast" as const,
+			filterClassId: "BrgC",
+			filterId: 1114793795,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			brightnessContrast,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-modern-legacy-brightness-contrast-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const modern = applyPsdSmartFilters(source, [filter({ brightness: 42, contrast: 65, useLegacy: false })]).pixels;
+		const legacy = applyPsdSmartFilters(source, [filter({ brightness: -35, contrast: 40, useLegacy: true })]).pixels;
+		expect({
+			modern: createHash("sha256").update(modern).digest("hex"),
+			legacy: createHash("sha256").update(legacy).digest("hex"),
+		}).toEqual({
+			modern: "8705f2ca75722b9b2e0ed4af172f268759256474041d78ec445d4836b8acf06f",
+			legacy: "6570ebf7e3f5b3c10d34064ac021d7f8f5d95ad77dd8ee39b7632b8dac191acd",
+		});
+		expect(modern).not.toEqual(legacy);
+		expect([...modern.slice(0, 4)]).toEqual([0, 0, 0, 0]);
+		expect(modern[28 * 4 + 3]).toBe(128);
+		expect(applyPsdSmartFilters(source, [filter({ brightness: 0, contrast: 0, useLegacy: false })]).pixels).toEqual(source.pixels);
+		expect(applyPsdSmartFilters(source, [filter({ brightness: 0, contrast: 0, useLegacy: true })]).pixels).toEqual(source.pixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter({ brightness: 0, contrast: 0, useLegacy: false }), brightnessContrast: null }])).toThrow(
+			"missing Brightness/Contrast parameters"
+		);
+		expect(() => applyPsdSmartFilters(source, [filter({ brightness: 151, contrast: 0, useLegacy: false })])).toThrow("invalid bounded Brightness/Contrast parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ brightness: 0, contrast: -51, useLegacy: false })])).toThrow("invalid bounded Brightness/Contrast parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ brightness: 0.5, contrast: 0, useLegacy: false })])).toThrow("invalid bounded Brightness/Contrast parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ brightness: 0, contrast: 0, useLegacy: "false" as unknown as boolean })])).toThrow(
+			"invalid bounded Brightness/Contrast parameters"
+		);
+	});
+
+	test("executes bounded modern and legacy Oil Paint controls deterministically", () => {
+		const source = {
+			width: 8,
+			height: 6,
+			pixels: new Uint8Array(Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 5, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat()),
+		};
+		const parameters: NonNullable<IPsdSmartFilterInfo["oilPaint"]> = {
+			descriptorVariant: "modern",
+			lightingOn: true,
+			stylization: 6.5,
+			cleanliness: 4,
+			brushScale: 7,
+			bristleDetail: 3.5,
+			lightDirectionDegrees: 135,
+			shine: 5,
+			legacyPlugin: null,
+		};
+		const filter = (oilPaint = parameters) => ({
+			index: 0,
+			name: "Oil Paint",
+			type: "oilPaint" as const,
+			filterClassId: "oilPaint",
+			filterId: 1122,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			oilPaint,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-anisotropic-kuwahara-oil-paint-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const output = applyPsdSmartFilters(source, [filter()]);
+		expect(createHash("sha256").update(output.pixels).digest("hex")).toBe("0e52072438ef42703665e1b713080e57291e3e00a35c01c6caf5afb878a80390");
+		expect(output.pixels[3]).toBe(0);
+		expect(output.pixels[27 * 4 + 3]).toBe(128);
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(output.pixels);
+		for (const oilPaint of [
+			{ ...parameters, stylization: 1 },
+			{ ...parameters, cleanliness: 9 },
+			{ ...parameters, brushScale: 2 },
+			{ ...parameters, bristleDetail: 9 },
+			{ ...parameters, lightDirectionDegrees: -45 },
+			{ ...parameters, shine: 10 },
+			{ ...parameters, lightingOn: false },
+		] as const) {
+			expect(applyPsdSmartFilters(source, [filter(oilPaint)]).pixels).not.toEqual(output.pixels);
+		}
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), oilPaint: null }])).toThrow("missing Oil Paint parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...parameters, stylization: 11 })])).toThrow("invalid bounded Oil Paint contract");
+	});
+
+	test("executes an exact authored Liquify displacement field deterministically", () => {
+		const source = {
+			width: 8,
+			height: 6,
+			pixels: new Uint8Array(Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 5, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat()),
+		};
+		const displacements = new Float32Array(source.width * source.height * 2);
+		for (let y = 0; y < source.height; ++y) {
+			for (let x = 0; x < source.width; ++x) {
+				const index = (y * source.width + x) * 2;
+				displacements[index] = ((x - 3.5) * (y - 2.5)) / 12;
+				displacements[index + 1] = Math.sin((x + y) * 0.7) * 0.75;
+			}
+		}
+		const xValues = Array.from({ length: source.width * source.height }, (_, index) => displacements[index * 2]);
+		const yValues = Array.from({ length: source.width * source.height }, (_, index) => displacements[index * 2 + 1]);
+		const parameters: NonNullable<IPsdSmartFilterInfo["liquify"]> = {
+			meshVersion: 2,
+			signature: "yfqLhseM",
+			formatMarker: 2,
+			headerBytes: 24,
+			meshWidth: source.width,
+			meshHeight: source.height,
+			imageWidth: source.width,
+			imageHeight: source.height,
+			repeatedImageWidth: null,
+			repeatedImageHeight: null,
+			reservedHeaderWords: [],
+			meshByteLength: 24 + source.width * source.height * 8,
+			trailingPaddingBytes: 0,
+			displacementEncoding: "little-endian-float32-pairs",
+			displacementCount: source.width * source.height,
+			nonzeroDisplacementCount: source.width * source.height,
+			rlePacketCount: null,
+			minimumDisplacement: { x: Math.min(0, ...xValues), y: Math.min(0, ...yValues) },
+			maximumDisplacement: { x: Math.max(0, ...xValues), y: Math.max(0, ...yValues) },
+			displacements,
+		};
+		const filter = (liquify = parameters) => ({
+			index: 0,
+			name: "Liquify",
+			type: "liquify" as const,
+			filterClassId: "LqFy",
+			filterId: 1282492025,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			liquify,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-authored-displacement-liquify-smart-filter-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const output = applyPsdSmartFilters(source, [filter()]);
+		expect(createHash("sha256").update(output.pixels).digest("hex")).toBe("af7f9c9fea614d674f7d39179bdd70aee060a66eb0c4b95597b971fc1a3e162b");
+		expect(output.pixels).not.toEqual(source.pixels);
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(output.pixels);
+		const identityDisplacements = new Float32Array(displacements.length);
+		const normalizedSourcePixels = new Uint8Array(source.pixels);
+		for (let offset = 0; offset < normalizedSourcePixels.length; offset += 4) {
+			if (normalizedSourcePixels[offset + 3] === 0) normalizedSourcePixels.fill(0, offset, offset + 3);
+		}
+		expect(
+			applyPsdSmartFilters(source, [
+				filter({
+					...parameters,
+					nonzeroDisplacementCount: 0,
+					minimumDisplacement: { x: 0, y: 0 },
+					maximumDisplacement: { x: 0, y: 0 },
+					displacements: identityDisplacements,
+				}),
+			]).pixels
+		).toEqual(normalizedSourcePixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), liquify: null }])).toThrow("missing Liquify parameters");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...parameters, imageWidth: source.width + 1 })])).toThrow("invalid bounded Liquify mesh contract");
+		expect(() => applyPsdSmartFilters(source, [filter({ ...parameters, nonzeroDisplacementCount: 0 })])).toThrow("summary does not match");
+	});
+
+	test("executes an exact authored Puppet Warp solved triangle mesh", () => {
+		const source = {
+			width: 8,
+			height: 6,
+			pixels: new Uint8Array(Array.from({ length: 48 }, (_, index) => [index * 11, 255 - index * 5, index * 17, index === 0 ? 0 : index === 27 ? 128 : 255]).flat()),
+		};
+		const originalVertices = [
+			{ x: 0, y: 0 },
+			{ x: 8, y: 0 },
+			{ x: 8, y: 6 },
+			{ x: 0, y: 6 },
+		];
+		const unitPoint = (x: number, y: number) => ({ x: { value: x, units: "#Pxl" }, y: { value: y, units: "#Pxl" } });
+		const parameters: NonNullable<IPsdSmartFilterInfo["puppetWarp"]> = {
+			rigidType: false,
+			bounds: originalVertices as NonNullable<IPsdSmartFilterInfo["puppetWarp"]>["bounds"],
+			shapes: [
+				{
+					rigidType: false,
+					meshVersionMajor: 1,
+					meshVersionMinor: 0,
+					originalVertices,
+					deformedVertices: [originalVertices[0], originalVertices[1], { x: 6, y: 5 }, originalVertices[3]],
+					triangleIndices: [0, 1, 2, 0, 2, 3],
+					pinOffsets: [originalVertices[0], { x: -2, y: -1 }],
+					finalPinPositions: [originalVertices[0], { x: 6, y: 5 }],
+					pinVertexIndices: [0, 2],
+					pinPositions: [originalVertices[0], originalVertices[2]],
+					pinRotationsDegrees: [0, 15],
+					pinOverlays: [false, true],
+					pinDepths: [0, 1],
+					selectedPins: [1],
+					meshQuality: 2,
+					meshExpansion: 0,
+					meshRigidity: 1,
+					imageResolution: 72,
+					boundaryPath: {
+						pathComponents: [
+							{
+								shapeOperation: "xor",
+								paths: [
+									{
+										closed: true,
+										points: originalVertices.map(({ x, y }) => ({
+											anchor: unitPoint(x, y),
+											forward: unitPoint(x, y),
+											backward: unitPoint(x, y),
+											smooth: false,
+										})),
+									},
+								],
+							},
+						],
+					},
+				},
+			],
+			vertexEncoding: "little-endian-float32-pairs",
+			indexEncoding: "little-endian-uint32-triangles",
+		};
+		const filter = (puppetWarp = parameters) => ({
+			index: 0,
+			name: "Puppet Warp",
+			type: "puppetWarp" as const,
+			filterClassId: "rigidTransform",
+			filterId: 991,
+			enabled: true,
+			opacity: 100,
+			blendMode: "Nrml",
+			normalizedBlendMode: "norm" as const,
+			radius: null,
+			puppetWarp,
+			bakeSupported: true,
+			warning: null,
+			algorithmExecutionModel: "bounded-authored-triangle-mesh-puppet-warp-v1" as const,
+			blendExecutionModel: "bounded-smart-filter-blend-v1" as const,
+			executionModel: "bounded-smart-filter-v1" as const,
+		});
+		const output = applyPsdSmartFilters(source, [filter()]);
+		expect(createHash("sha256").update(output.pixels).digest("hex")).toBe("d8e4f130706ee7d1ba4852f8f97299109ddcd40603d32bd9299dee940de8ad72");
+		expect(output.pixels.slice(-4)).toEqual(new Uint8Array([0, 0, 0, 0]));
+		expect(applyPsdSmartFilters(source, [filter()]).pixels).toEqual(output.pixels);
+		expect(
+			applyPsdSmartFilters(source, [
+				filter({ ...parameters, shapes: [{ ...parameters.shapes[0], deformedVertices: [originalVertices[0], originalVertices[1], { x: 7, y: 6 }, originalVertices[3]] }] }),
+			]).pixels
+		).not.toEqual(output.pixels);
+		expect(() => applyPsdSmartFilters(source, [{ ...filter(), puppetWarp: null }])).toThrow("missing Puppet Warp parameters");
+		expect(() =>
+			applyPsdSmartFilters(source, [
+				filter({
+					...parameters,
+					shapes: [{ ...parameters.shapes[0], deformedVertices: [originalVertices[0], originalVertices[1], originalVertices[1], originalVertices[3]] }],
+				}),
+			])
+		).toThrow("degenerate");
+	});
+
 	test.each([
 		["Nrml", "norm", [159, 127, 95, 255]],
 		["Mltp", "mul ", [52, 80, 84, 255]],

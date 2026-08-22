@@ -3,14 +3,17 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 
 import packageJson from "../package.json" with { type: "json" };
 
+import { attachMCPClientCompatibleInputSchema } from "./schema-compatibility.mjs";
 import { registerSceneTools } from "./tools/scene.mjs";
 import { registerNodeTools } from "./tools/nodes.mjs";
 import { registerMeshTools } from "./tools/meshes.mjs";
 import { registerLightTools } from "./tools/lights.mjs";
+import { registerLighting2DTools } from "./tools/lighting-2d.mjs";
 import { registerCameraTools } from "./tools/cameras.mjs";
 import { registerRenderingTools } from "./tools/rendering.mjs";
 import { registerMaterialTools } from "./tools/materials.mjs";
 import { registerAssetTools } from "./tools/assets.mjs";
+import { registerImportAcceleratorTools } from "./tools/import-accelerator.mjs";
 import { registerParticleTools } from "./tools/particles.mjs";
 import { registerSoundTools } from "./tools/sounds.mjs";
 import { registerAnimationTools } from "./tools/animations.mjs";
@@ -21,6 +24,7 @@ import { registerVerificationTools } from "./tools/verification.mjs";
 import { registerBatchTools } from "./tools/batch.mjs";
 import { registerEditorTools } from "./tools/editor.mjs";
 import { registerSpriteTools } from "./tools/sprites.mjs";
+import { registerSpriteShapeTools } from "./tools/sprite-shapes.mjs";
 import { registerGUITools } from "./tools/gui.mjs";
 import { registerCinematicTools } from "./tools/cinematic.mjs";
 import { registerNavMeshTools } from "./tools/navmesh.mjs";
@@ -28,6 +32,8 @@ import { registerRagdollTools } from "./tools/ragdoll.mjs";
 import { registerProjectTools } from "./tools/project.mjs";
 import { registerPrefabTools } from "./tools/prefabs.mjs";
 import { registerExportTools } from "./tools/export.mjs";
+import { registerPlatformTools } from "./tools/platforms.mjs";
+import { registerDeviceToolingTools } from "./tools/device-tooling.mjs";
 import { registerEditorControlTools } from "./tools/editor-controls.mjs";
 import { registerSplineTools } from "./tools/splines.mjs";
 import { registerAnimatorTools } from "./tools/animator.mjs";
@@ -39,6 +45,7 @@ import { registerClothTools } from "./tools/cloth.mjs";
 import { registerPhysics2DTools } from "./tools/physics2d.mjs";
 import { registerVisualScriptingTools } from "./tools/visual-scripting.mjs";
 import { registerTestingTools } from "./tools/testing.mjs";
+import { registerProfilingTools } from "./tools/profiling.mjs";
 import { registerAddressableTools } from "./tools/addressables.mjs";
 import { registerLocalizationTools } from "./tools/localization.mjs";
 import { registerBehaviorTreeTools } from "./tools/behavior-trees.mjs";
@@ -46,6 +53,25 @@ import { registerSortingLayerTools } from "./tools/sorting-layers.mjs";
 import { registerXRTools } from "./tools/xr.mjs";
 import { registerVideoTools } from "./tools/videos.mjs";
 import { registerComponentTools } from "./tools/components.mjs";
+import { registerECSTools } from "./tools/ecs.mjs";
+import { registerExtensionTools } from "./tools/extensions.mjs";
+import { registerCollaborationTools } from "./tools/collaboration.mjs";
+import { registerServiceTools } from "./tools/services.mjs";
+import { registerNetworkingTools } from "./tools/networking.mjs";
+import { registerMobileTools } from "./tools/mobile.mjs";
+import { registerAdaptivePerformanceTools } from "./tools/adaptive-performance.mjs";
+import { registerMobileSystemTools } from "./tools/mobile-system.mjs";
+import { registerConsoleServerTools } from "./tools/console-server.mjs";
+import { registerProjectAuditorTools } from "./tools/project-auditor.mjs";
+import { registerPlatformPlayerTools } from "./tools/platform-player.mjs";
+import { registerAssetStreamingTools } from "./tools/asset-streaming.mjs";
+import { registerRuntimeAiTools } from "./tools/runtime-ai.mjs";
+import { registerGenerativeAssetTools } from "./tools/generative-assets.mjs";
+import { registerMlTrainingTools } from "./tools/ml-training.mjs";
+import { registerOcclusionCullingTools } from "./tools/occlusion-culling.mjs";
+import { registerAlembicTools } from "./tools/alembic.mjs";
+import { registerAsepriteTools } from "./tools/aseprite.mjs";
+import { registerFbxExportTools } from "./tools/fbx-export.mjs";
 
 const server = new McpServer(
 	{
@@ -72,13 +98,19 @@ const server = new McpServer(
 			"- Modular building / level: create or import wall/floor/roof/door modules ONCE, place them with instances on a grid, and group each room/building under an `empty` transform node so the hierarchy is tidy and hand-editable.",
 			"- Props, pickups & gameplay objects: import/instance the prop, give dynamic ones a `set_mesh_physics` body (box/capsule), then attach a small behavior script (pickup, damage, button) that references the authored mesh.",
 			"- Player / character: import a character mesh, add a `dynamic` capsule body with `set_mesh_physics`, create/position a `create_camera`, then attach a movement/input script that drives the AUTHORED mesh and camera.",
+			"- Multiplayer: inspect `get_networking_capabilities` and the exact scene configuration, add one Network Replication component per replicated authored node with `inspect_game_object_components` + `add_game_object_component`, enable/configure networking with its exact revision, then use `start_multiplayer_play_mode` for isolated 1–4-player validation. Preserve the exact run revision for controls and always call `stop_multiplayer_play_mode` when finished. Credentials from `create_gameplay_session` are one-time memory-only values; never write them into scripts or scene metadata.",
+			"- Mobile: inspect `get_mobile_capabilities`, author Input Actions first, then exact-revision on-screen buttons/sticks with the Touch Controls tools and validate their <touch>/ bindings. Use existing Build Profiles plus Android/iOS scaffolds to export and sync Web content. For runtime quality, inspect `get_adaptive_performance_capabilities`, patch the exact-revision Basic/Apple policy, and use simulation/reset only as labeled preview evidence; Apple thermal hardware evidence exists only when the generated native bridge is compiled and run on iOS, tvOS, or visionOS. Use `get_mobile_system_capabilities` for Android inset/system-bar policy and the separate iOS Serious/Critical FPS gate; simulations are never hardware evidence. Use `get_grpc_transport_capabilities` before authoring a gRPC-Web/Connect endpoint, keep credentials transient per call, and respect browser CORS and the explicit lack of client/bidirectional streaming. Native package/install/launch/log/store effects require an exact expiring plan followed by confirmed execution; signing and store secrets are environment-only and must never be authored into the scene.",
+			"- Dedicated server / licensed consoles: inspect `get_console_server_capabilities`, author an enabled Headless Build Profile and scaffold, set exact Console & Server configuration, validate, and generate hash-owned deployment artifacts. Every build/container/Kubernetes/fleet/vendor effect requires an exact expiring plan and confirmed execution. Console SDKs and credentials come only from separately licensed project provider manifests and environment references; never invent or persist vendor secrets.",
+			"- Windows packaged asset streaming: inspect `get_asset_streaming_capabilities`, author an Electron/win32 Build Profile with its disabled-by-default assetStreaming policy, inspect the exact build plan, then prepare the runtime before bounded `assets/` or `public/` probes. Re-read the runtime revision before start/cancel/reset. Probe results are hash-only. The bundled backend is portable Electron asynchronous file streaming—not Microsoft DirectStorage/GPU decompression API identity.",
 			"- Water / effects: use a `water` material on a plane for lakes/rivers; use `instantiate_particle_system` for fire, smoke, sparks, magic, weather.",
 			"- Mood & quality: `set_active_camera`, then `set_camera_post_process` on it — `default` for tone mapping + bloom + vignette + depth of field, `ssao` for contact shadows. A sunset = warm directional light color + tuned sky/skybox material.",
+			"- Cinematic Timeline: inspect with `get_cinematic_capabilities`/`list_cinematics`, create or read a `.cinematic`, preserve its exact revision + fingerprint, author with the granular track/clip/key/marker/profile tools, run `validate_cinematic`, then preview with `control_cinematic_preview`. Before audio-enabled WebM/MP4 capture, call `inspect_cinematic_audio_capture_plan`; start capture and poll its status for exact mux evidence.",
 			"",
 			"WHEN SCRIPTS ARE APPROPRIATE (and only then):",
 			"- Scripts (`create_script`/`write_script`/`attach_script`) are ONLY for runtime BEHAVIOR/logic that cannot be authored as static content: player input & movement, game rules, AI, scoring, reacting to collisions, opening doors, runtime spawning, etc.",
 			"- Scripts should reference the assets you already authored (via exported inspector values set with `set_script_exported_value`, or by name/id) rather than building visuals from scratch.",
 			"- If a huge/streamed world genuinely must spawn content at runtime, first author the building-block meshes/materials as real assets, then have the script instantiate copies of THOSE authored assets.",
+			"- To diagnose behavior code, call `get_script_debugger_capabilities`, enable instrumented Play with `prepare_script_debugger`, preserve the exact manifest/configuration lease from `get_script_debugger`, then set breakpoints or coverage. Pausing is a safe lifecycle boundary: the synchronous callback that hits a probe completes, and no arbitrary expression evaluation is supported.",
 			"",
 			"TWO DIFFERENT KINDS OF SCRIPTS — DON'T CONFUSE THEM:",
 			"1) BEHAVIOR scripts (`create_script`/`write_script`/`attach_script`, under `src/`, implement `IScript` onStart/onUpdate/onStop) run in the FINAL GAME and define runtime behavior (input, rules, AI). Covered above.",
@@ -104,7 +136,7 @@ const server = new McpServer(
  * Contract hardening applied uniformly to EVERY registered tool.
  *
  * Two invariants the published surface must satisfy, enforced once here
- * instead of being restated (and drifted from) across 839 call sites:
+ * instead of being restated (and drifted from) across every call site:
  *
  * 1. **Closed-world input schemas.** Every object input rejects unknown fields
  *    with MCP `-32602` before the editor is ever contacted. Tools that already
@@ -118,6 +150,10 @@ const server = new McpServer(
  *    `readOnlyHint` is only ever honoured as authored. A tool that did not
  *    declare itself read-only is treated as mutating, possibly destructive and
  *    non-idempotent — over-warning is harmless, under-warning is not.
+ *
+ * 3. **Client-compatible published JSON Schema.** Runtime validation retains
+ *    the exact authored Zod schema, while tools/list projects draft-7 tuples
+ *    and typed map schemas into forms accepted by Codex CLI and Claude CLI.
  */
 function hardenRegisteredTools(target: McpServer): void {
 	const original = target.registerTool.bind(target) as (...args: unknown[]) => unknown;
@@ -130,6 +166,7 @@ function hardenRegisteredTools(target: McpServer): void {
 			if (schema && typeof schema.strict === "function" && schema._def?.unknownKeys !== "strict") {
 				config.inputSchema = schema.strict();
 			}
+			attachMCPClientCompatibleInputSchema(config.inputSchema);
 
 			const authored = config.annotations ?? {};
 			const readOnly = authored.readOnlyHint === true;
@@ -163,17 +200,28 @@ registerClothTools(server);
 registerPhysics2DTools(server);
 registerVisualScriptingTools(server);
 registerTestingTools(server);
+registerProfilingTools(server);
 registerAddressableTools(server);
 registerLocalizationTools(server);
 registerBehaviorTreeTools(server);
+registerRuntimeAiTools(server);
+registerMlTrainingTools(server);
+registerGenerativeAssetTools(server);
+registerOcclusionCullingTools(server);
+registerAlembicTools(server);
+registerAsepriteTools(server);
+registerFbxExportTools(server);
 registerSortingLayerTools(server);
 registerXRTools(server);
 registerLightTools(server);
+registerLighting2DTools(server);
 registerCameraTools(server);
 registerRenderingTools(server);
 registerMaterialTools(server);
 registerAssetTools(server);
+registerImportAcceleratorTools(server);
 registerSpriteTools(server);
+registerSpriteShapeTools(server);
 registerGUITools(server);
 registerCinematicTools(server);
 registerNavMeshTools(server);
@@ -181,10 +229,24 @@ registerRagdollTools(server);
 registerProjectTools(server);
 registerPrefabTools(server);
 registerExportTools(server);
+registerPlatformTools(server);
+registerDeviceToolingTools(server);
 registerParticleTools(server);
 registerSoundTools(server);
 registerVideoTools(server);
 registerComponentTools(server);
+registerECSTools(server);
+registerExtensionTools(server);
+registerCollaborationTools(server);
+registerServiceTools(server);
+registerNetworkingTools(server);
+registerMobileTools(server);
+registerAdaptivePerformanceTools(server);
+registerMobileSystemTools(server);
+registerConsoleServerTools(server);
+registerProjectAuditorTools(server);
+registerPlatformPlayerTools(server);
+registerAssetStreamingTools(server);
 registerAnimationTools(server);
 registerMarketplaceTools(server);
 registerScriptTools(server);

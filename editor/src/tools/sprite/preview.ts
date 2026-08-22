@@ -1,13 +1,20 @@
-import { join } from "path/posix";
+import { isAbsolute, join } from "path/posix";
 
 import { SpriteMapNode } from "../../editor/nodes/sprite-map";
 import { SpriteManagerNode } from "../../editor/nodes/sprite-manager";
 
 import { getProjectAssetsRootUrl } from "../../project/configuration";
 
+export function getSpriteSheetPreviewPath(name: string): string {
+	if (isAbsolute(name) || /^[a-z][a-z0-9+.-]*:\/\//i.test(name)) {
+		return name;
+	}
+	return join(getProjectAssetsRootUrl()!, name);
+}
+
 export async function computeSpriteManagerPreviews(spriteNode: SpriteManagerNode) {
 	if (spriteNode.spritesheet) {
-		const imagePath = join(getProjectAssetsRootUrl()!, spriteNode.spritesheet!.name);
+		const imagePath = getSpriteSheetPreviewPath(spriteNode.spritesheet.name);
 
 		if (spriteNode.atlasJson) {
 			await computeSpritePreviewImagesFromAtlasJson(spriteNode.atlasJson, imagePath);
@@ -19,7 +26,7 @@ export async function computeSpriteManagerPreviews(spriteNode: SpriteManagerNode
 
 export async function computeSpriteMapPreviews(spriteNode: SpriteMapNode) {
 	if (spriteNode.atlasJson && spriteNode.spritesheet) {
-		const imagePath = join(getProjectAssetsRootUrl()!, spriteNode.spritesheet!.name);
+		const imagePath = getSpriteSheetPreviewPath(spriteNode.spritesheet.name);
 		await computeSpritePreviewImagesFromAtlasJson(spriteNode.atlasJson, imagePath);
 	}
 }
@@ -41,7 +48,7 @@ export async function computeSpritePreviewImagesFromDimensions(imagePath: string
 
 	for (let row = 0; row < rows; row++) {
 		for (let col = 0; col < cols; col++) {
-			const context = canvas.getContext("2d");
+			const context = canvas.getContext("2d", { willReadFrequently: true });
 			if (!context) {
 				continue;
 			}

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { NullEngine, Scene, Vector2 } from "babylonjs";
 
-vi.mock("babylonjs-editor-tools", () => ({}));
+vi.mock("babylonjs-editor-tools", async (importOriginal) => await importOriginal());
 
 import { SpriteMapNode } from "../../src/editor/nodes/sprite-map";
 import { generateTileColliders } from "../../src/mcp/sprites/sprites";

@@ -17,6 +17,8 @@ import { handleApplyImpulseEvent } from "./events/apply-impulse";
 
 import { ICinematic } from "./typings";
 import { Cinematic } from "./cinematic";
+import { toLegacyCinematic } from "./compatibility";
+import { ICinematicDocument, cinematicDocumentVersion, normalizeCinematicDocument } from "./model";
 import { isCinematicKey, isCinematicKeyCut } from "./guards";
 import { getPropertyValue, registerAfterAnimationCallback } from "./tools";
 
@@ -30,15 +32,16 @@ export type GenerateCinematicAnimationGroupOptions = {
 };
 
 /**
- * Parses the given cinematic object and generates a new playable animation group.
+ * Generates a playable compatibility AnimationGroup from original or version-2 cinematic data.
  * @param cinematic defines the cinematic object to parse that was previously loaded.
  * @param scene defines the reference to the scene where to retrieve the animated objects.
  * @param options defines the options to use when generating the animation group.
  */
-export function generateCinematicAnimationGroup(cinematic: ICinematic, scene: Scene, options?: GenerateCinematicAnimationGroupOptions) {
-	const result = new Cinematic(cinematic.name, scene);
+export function generateCinematicAnimationGroup(cinematic: ICinematic | ICinematicDocument, scene: Scene, options?: GenerateCinematicAnimationGroupOptions) {
+	const legacyCinematic = "version" in cinematic && cinematic.version === cinematicDocumentVersion ? toLegacyCinematic(normalizeCinematicDocument(cinematic)) : cinematic;
+	const result = new Cinematic(legacyCinematic.name, scene);
 
-	cinematic.tracks.forEach((track) => {
+	legacyCinematic.tracks.forEach((track) => {
 		// Animation groups
 		const animationGroup = track.animationGroup as AnimationGroup;
 		if (animationGroup && track.animationGroups?.length) {
@@ -162,7 +165,7 @@ export function generateCinematicAnimationGroup(cinematic: ICinematic, scene: Sc
 						configuration.frame,
 						(currentFrame) => {
 							const frameDiff = currentFrame - configuration.frame;
-							const offset = (frameDiff + configuration.startFrame) / cinematic.framesPerSecond;
+							const offset = (frameDiff + configuration.startFrame) / legacyCinematic.framesPerSecond;
 
 							// sound.stop();
 							sound.play({

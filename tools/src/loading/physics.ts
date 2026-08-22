@@ -7,6 +7,7 @@ import { PhysicsConstraintType } from "@babylonjs/core/Physics/v2/IPhysicsEngine
 import { Scene } from "@babylonjs/core/scene";
 
 import { isInstancedMesh, isMesh } from "../tools/guards";
+import { configureHybridPhysicsSolver } from "./physics-hybrid-solver";
 
 /**
  * Parses and loads the physics aggregate data for the given mesh.
@@ -41,8 +42,12 @@ export function configurePhysicsAggregate(transformNode: AbstractMesh) {
 	aggregate.body.setMotionType(data.body.motionType);
 	aggregate.shape.material = data.material;
 	const filter = transformNode.metadata?.babylonEditorPhysicsCollisionFilter;
-	if (filter?.group !== undefined) aggregate.shape.filterMembershipMask = filter.group;
-	if (filter?.mask !== undefined) aggregate.shape.filterCollideMask = filter.mask;
+	if (filter?.group !== undefined) {
+		aggregate.shape.filterMembershipMask = filter.group;
+	}
+	if (filter?.mask !== undefined) {
+		aggregate.shape.filterCollideMask = filter.mask;
+	}
 
 	transformNode.physicsAggregate = aggregate;
 	transformNode.metadata.physicsAggregate = undefined;
@@ -59,14 +64,19 @@ const constraintTypes: Record<string, PhysicsConstraintType> = {
 
 /** Recreates editor-authored Havok constraints after all mesh aggregates have been loaded. */
 export function configurePhysicsConstraints(scene: Scene): void {
+	configureHybridPhysicsSolver(scene);
 	const constraints = scene.metadata?.babylonEditorPhysicsConstraints;
-	if (!Array.isArray(constraints)) return;
+	if (!Array.isArray(constraints)) {
+		return;
+	}
 
 	for (const config of constraints) {
 		const parent = scene.getNodeById(config.parentNodeId) as AbstractMesh | null;
 		const child = scene.getNodeById(config.childNodeId) as AbstractMesh | null;
 		const type = constraintTypes[config.type];
-		if (!parent?.physicsAggregate || !child?.physicsAggregate || type === undefined) continue;
+		if (!parent?.physicsAggregate || !child?.physicsAggregate || type === undefined) {
+			continue;
+		}
 		const vector = (value: number[] | undefined, fallback: number[]): Vector3 => Vector3.FromArray(value ?? fallback);
 		const constraint = new PhysicsConstraint(
 			type,

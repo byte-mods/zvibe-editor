@@ -1,10 +1,19 @@
-import { Animation, AnimationGroup, BoneIKController, BoneLookController, Scene, Tools, TransformNode, Vector3 } from "babylonjs";
+import { Animation, AnimationGroup, BoneIKController, BoneLookController, Quaternion, Scene, Space, Tools, TransformNode, Vector3 } from "babylonjs";
+import { getTwoBoneIKEndpoint, updateConfiguredTwoBoneIKController } from "babylonjs-editor-tools";
 
 import { IMCPActionOptions } from "../action";
 import { resolveNode } from "../tools/resolve";
 import { isAbstractMesh, isTransformNode } from "../../tools/guards/nodes";
 
-type IRuntimeIKController = { controller: BoneIKController; observer: any };
+type IRuntimeIKController = {
+	controller: BoneIKController;
+	observer: any;
+	bone: any;
+	mesh: TransformNode;
+	target: TransformNode;
+	poleTarget?: TransformNode;
+	config: any;
+};
 type IRuntimeLookAtConstraint = { controller: BoneLookController; observer: any };
 type IRuntimeSpriteIKController = { observer: any };
 
@@ -19,7 +28,9 @@ function configs(scene: Scene): any[] {
 
 function runtime(scene: Scene): Map<string, IRuntimeIKController> {
 	let controllers = runtimeControllers.get(scene);
-	if (!controllers) runtimeControllers.set(scene, (controllers = new Map()));
+	if (!controllers) {
+		runtimeControllers.set(scene, (controllers = new Map()));
+	}
 	return controllers;
 }
 function lookAtConfigs(scene: Scene): any[] {
@@ -28,7 +39,9 @@ function lookAtConfigs(scene: Scene): any[] {
 }
 function lookAtRuntime(scene: Scene): Map<string, IRuntimeLookAtConstraint> {
 	let constraints = runtimeLookAtConstraints.get(scene);
-	if (!constraints) runtimeLookAtConstraints.set(scene, (constraints = new Map()));
+	if (!constraints) {
+		runtimeLookAtConstraints.set(scene, (constraints = new Map()));
+	}
 	return constraints;
 }
 function spriteIKConfigs(scene: Scene): any[] {
@@ -37,7 +50,9 @@ function spriteIKConfigs(scene: Scene): any[] {
 }
 function spriteIKRuntime(scene: Scene): Map<string, IRuntimeSpriteIKController> {
 	let controllers = runtimeSpriteIKControllers.get(scene);
-	if (!controllers) runtimeSpriteIKControllers.set(scene, (controllers = new Map()));
+	if (!controllers) {
+		runtimeSpriteIKControllers.set(scene, (controllers = new Map()));
+	}
 	return controllers;
 }
 
@@ -51,10 +66,14 @@ export function applySpriteIKController(scene: Scene, config: any): boolean {
 	const joint = scene.getTransformNodeById(config.jointNodeId);
 	const tip = scene.getTransformNodeById(config.tipNodeId);
 	const target = scene.getTransformNodeById(config.targetNodeId);
-	if (!root || !joint || !tip || !target || joint.parent !== root || tip.parent !== joint) return false;
+	if (!root || !joint || !tip || !target || joint.parent !== root || tip.parent !== joint) {
+		return false;
+	}
 	const firstLength = Math.hypot(joint.position.x, joint.position.y);
 	const secondLength = Math.hypot(tip.position.x, tip.position.y);
-	if (firstLength < 0.0001 || secondLength < 0.0001) return false;
+	if (firstLength < 0.0001 || secondLength < 0.0001) {
+		return false;
+	}
 	const rootPosition = root.getAbsolutePosition();
 	const targetPosition = target.getAbsolutePosition();
 	const dx = targetPosition.x - rootPosition.x;
@@ -73,49 +92,139 @@ export function applySpriteIKController(scene: Scene, config: any): boolean {
 }
 
 function createRuntimeSpriteIKController(scene: Scene, config: any): IRuntimeSpriteIKController {
-	if (!applySpriteIKController(scene, config))
+	if (!applySpriteIKController(scene, config)) {
 		throw new Error("A Sprite IK chain requires TransformNodes parented root -> joint -> tip, non-zero XY segment lengths, and a TransformNode target.");
+	}
 	const observer = scene.onBeforeRenderObservable.add(() => {
-		if (config.enabled !== false) applySpriteIKController(scene, config);
+		if (config.enabled !== false) {
+			applySpriteIKController(scene, config);
+		}
 	});
 	return { observer };
 }
 
 function createRuntimeController(scene: Scene, config: any): IRuntimeIKController {
 	const skeleton = scene.skeletons.find((candidate) => candidate.id === config.skeletonId);
-	if (!skeleton) throw new Error(`Skeleton "${config.skeletonId}" was not found.`);
+	if (!skeleton) {
+		throw new Error(`Skeleton "${config.skeletonId}" was not found.`);
+	}
 	const bone = skeleton.bones.find((candidate) => candidate.name === config.boneName);
-	if (!bone) throw new Error(`Bone "${config.boneName}" was not found in skeleton "${skeleton.name}".`);
-	if (!bone.getParent()) throw new Error(`Bone "${bone.name}" needs a parent bone for two-bone IK.`);
+	if (!bone) {
+		throw new Error(`Bone "${config.boneName}" was not found in skeleton "${skeleton.name}".`);
+	}
+	if (!bone.getParent()) {
+		throw new Error(`Bone "${bone.name}" needs a parent bone for two-bone IK.`);
+	}
 	const mesh = scene.meshes.find((candidate) => candidate.id === config.meshId && candidate.skeleton === skeleton);
-	if (!mesh) throw new Error("The IK controller mesh was not found or no longer uses the selected skeleton.");
+	if (!mesh) {
+		throw new Error("The IK controller mesh was not found or no longer uses the selected skeleton.");
+	}
 	const target = resolveNode({ scene, nodeId: config.targetNodeId });
-	if (!isTransformNode(target) && !isAbstractMesh(target)) throw new Error("The IK target must be a mesh or transform node.");
+	if (!isTransformNode(target) && !isAbstractMesh(target)) {
+		throw new Error("The IK target must be a mesh or transform node.");
+	}
 	const poleTarget = config.poleTargetNodeId ? resolveNode({ scene, nodeId: config.poleTargetNodeId }) : undefined;
-	if (poleTarget && !isTransformNode(poleTarget) && !isAbstractMesh(poleTarget)) throw new Error("The IK pole target must be a mesh or transform node.");
+	if (poleTarget && !isTransformNode(poleTarget) && !isAbstractMesh(poleTarget)) {
+		throw new Error("The IK pole target must be a mesh or transform node.");
+	}
+	if (Number(config.targetRotationWeight ?? 0) > 0 && !bone.children[0]) {
+		throw new Error(`Bone "${bone.name}" needs a child Tip bone when targetRotationWeight is greater than zero.`);
+	}
 	const controller = new BoneIKController(mesh as TransformNode, bone, {
-		targetMesh: target,
-		poleTargetMesh: poleTarget,
 		poleAngle: config.poleAngle,
 		bendAxis: config.bendAxis ? Vector3.FromArray(config.bendAxis) : undefined,
 		maxAngle: config.maxAngle,
 		slerpAmount: config.slerpAmount,
 	});
 	const observer = scene.onBeforeRenderObservable.add(() => {
-		if (config.enabled !== false) controller.update();
+		if (config.enabled !== false) {
+			updateConfiguredTwoBoneIKController(controller, mesh as TransformNode, bone, target as TransformNode, config, poleTarget as TransformNode | undefined);
+		}
 	});
-	return { controller, observer };
+	return { controller, observer, bone, mesh: mesh as TransformNode, target: target as TransformNode, poleTarget: poleTarget as TransformNode | undefined, config };
+}
+
+/** Evaluates one persisted native two-bone IK controller immediately through the same controller used by preview rendering. */
+export function evaluateIKController(scene: Scene, id: string): boolean {
+	const config = configs(scene).find((candidate) => candidate.id === id);
+	if (!config || config.enabled === false) {
+		return false;
+	}
+	let active = runtime(scene).get(id);
+	if (!active) {
+		active = createRuntimeController(scene, config);
+		runtime(scene).set(id, active);
+	}
+	updateConfiguredTwoBoneIKController(active.controller, active.mesh, active.bone, active.target, active.config, active.poleTarget);
+	return true;
+}
+
+function captureIKTargetOffsets(scene: Scene, config: any, position: boolean, rotation: boolean): void {
+	const skeleton = scene.skeletons.find((candidate) => candidate.id === config.skeletonId);
+	const bone = skeleton?.bones.find((candidate) => candidate.name === config.boneName);
+	const mesh = scene.meshes.find((candidate) => candidate.id === config.meshId && candidate.skeleton === skeleton);
+	const target = scene.getNodeById(config.targetNodeId);
+	if (!bone || !mesh || !(target instanceof TransformNode)) {
+		return;
+	}
+	skeleton!.computeAbsoluteMatrices(true);
+	target.computeWorldMatrix(true);
+	if (position) {
+		const inverseTarget = target.getWorldMatrix().clone().invert();
+		config.targetPositionOffset = Vector3.TransformCoordinates(getTwoBoneIKEndpoint(mesh, bone), inverseTarget).asArray();
+	}
+	if (rotation) {
+		const tip = bone.children[0];
+		if (!tip) {
+			throw new Error(`Bone "${bone.name}" needs a child Tip bone to maintain a target rotation offset.`);
+		}
+		const targetRotation = Quaternion.Identity();
+		target.getWorldMatrix().decompose(undefined, targetRotation);
+		config.targetRotationOffset = targetRotation.conjugate().multiply(tip.getRotationQuaternion(Space.WORLD, mesh)).normalize().asArray();
+	}
+}
+
+function validateIKWeights(config: any): void {
+	for (const key of ["targetPositionWeight", "targetRotationWeight", "hintWeight"] as const) {
+		const value = Number(config[key] ?? (key === "targetRotationWeight" ? 0 : 1));
+		if (!Number.isFinite(value) || value < 0 || value > 1) {
+			throw new Error(`${key} must be a finite value from 0 through 1.`);
+		}
+	}
+}
+
+/** Recreates one native IK runtime from its current serialized configuration so subsequent deterministic evaluation cannot use stale controller fields. */
+export function rebuildIKControllerRuntime(scene: Scene, id: string): boolean {
+	const config = configs(scene).find((candidate) => candidate.id === id);
+	if (!config || config.enabled === false) {
+		return false;
+	}
+	const replacement = createRuntimeController(scene, config);
+	const previous = runtime(scene).get(id);
+	if (previous) {
+		scene.onBeforeRenderObservable.remove(previous.observer);
+	}
+	runtime(scene).set(id, replacement);
+	return true;
 }
 
 function createRuntimeLookAtConstraint(scene: Scene, config: any): IRuntimeLookAtConstraint {
 	const skeleton = scene.skeletons.find((candidate) => candidate.id === config.skeletonId);
-	if (!skeleton) throw new Error(`Skeleton "${config.skeletonId}" was not found.`);
+	if (!skeleton) {
+		throw new Error(`Skeleton "${config.skeletonId}" was not found.`);
+	}
 	const bone = skeleton.bones.find((candidate) => candidate.name === config.boneName);
-	if (!bone) throw new Error(`Bone "${config.boneName}" was not found in skeleton "${skeleton.name}".`);
+	if (!bone) {
+		throw new Error(`Bone "${config.boneName}" was not found in skeleton "${skeleton.name}".`);
+	}
 	const mesh = scene.meshes.find((candidate) => candidate.id === config.meshId && candidate.skeleton === skeleton);
-	if (!mesh) throw new Error("The look-at constraint mesh was not found or no longer uses the selected skeleton.");
+	if (!mesh) {
+		throw new Error("The look-at constraint mesh was not found or no longer uses the selected skeleton.");
+	}
 	const target = resolveNode({ scene, nodeId: config.targetNodeId });
-	if (!isTransformNode(target) && !isAbstractMesh(target)) throw new Error("The look-at target must be a mesh or transform node.");
+	if (!isTransformNode(target) && !isAbstractMesh(target)) {
+		throw new Error("The look-at target must be a mesh or transform node.");
+	}
 	const controller = new BoneLookController(mesh as TransformNode, bone, target.getAbsolutePosition().clone(), {
 		minYaw: config.minYaw,
 		maxYaw: config.maxYaw,
@@ -127,7 +236,9 @@ function createRuntimeLookAtConstraint(scene: Scene, config: any): IRuntimeLookA
 		adjustRoll: config.adjustRoll,
 	});
 	const observer = scene.onBeforeRenderObservable.add(() => {
-		if (config.enabled === false) return;
+		if (config.enabled === false) {
+			return;
+		}
 		controller.target.copyFrom(target.getAbsolutePosition());
 		controller.update();
 	});
@@ -137,7 +248,9 @@ function createRuntimeLookAtConstraint(scene: Scene, config: any): IRuntimeLookA
 /** Restores serialized IK controls after the skeletons and meshes have loaded. */
 export function restoreIKControllers(scene: Scene): void {
 	for (const config of configs(scene)) {
-		if (runtime(scene).has(config.id)) continue;
+		if (runtime(scene).has(config.id)) {
+			continue;
+		}
 		try {
 			runtime(scene).set(config.id, createRuntimeController(scene, config));
 		} catch (error) {
@@ -149,7 +262,9 @@ export function restoreIKControllers(scene: Scene): void {
 /** Restores persisted bone look-at constraints once skeletons and target nodes have loaded. */
 export function restoreLookAtConstraints(scene: Scene): void {
 	for (const config of lookAtConfigs(scene)) {
-		if (lookAtRuntime(scene).has(config.id)) continue;
+		if (lookAtRuntime(scene).has(config.id)) {
+			continue;
+		}
 		try {
 			lookAtRuntime(scene).set(config.id, createRuntimeLookAtConstraint(scene, config));
 		} catch (error) {
@@ -161,7 +276,9 @@ export function restoreLookAtConstraints(scene: Scene): void {
 /** Lists a skeleton's hierarchy so agents can safely choose an IK-compatible bone. */
 export function getSkeletonBones(scene: Scene, data: any): any {
 	const skeleton = scene.skeletons.find((candidate) => candidate.id === data.skeletonId);
-	if (!skeleton) throw new Error(`Skeleton "${data.skeletonId}" was not found.`);
+	if (!skeleton) {
+		throw new Error(`Skeleton "${data.skeletonId}" was not found.`);
+	}
 	return {
 		skeletonId: skeleton.id,
 		bones: skeleton.bones.map((bone, index) => ({
@@ -192,9 +309,18 @@ export function createIKController(scene: Scene, data: any, options: IMCPActionO
 		bendAxis: data.bendAxis,
 		maxAngle: data.maxAngle,
 		slerpAmount: data.slerpAmount ?? 1,
+		targetPositionWeight: data.targetPositionWeight ?? 1,
+		targetRotationWeight: data.targetRotationWeight ?? 0,
+		hintWeight: data.hintWeight ?? 1,
+		maintainTargetPositionOffset: data.maintainTargetPositionOffset ?? false,
+		maintainTargetRotationOffset: data.maintainTargetRotationOffset ?? false,
 		enabled: data.enabled ?? true,
 	};
-	if (configs(scene).some((candidate) => candidate.id === config.id)) throw new Error(`IK controller "${config.id}" already exists.`);
+	validateIKWeights(config);
+	if (configs(scene).some((candidate) => candidate.id === config.id)) {
+		throw new Error(`IK controller "${config.id}" already exists.`);
+	}
+	captureIKTargetOffsets(scene, config, config.maintainTargetPositionOffset, config.maintainTargetRotationOffset);
 	const controller = createRuntimeController(scene, config);
 	configs(scene).push(config);
 	runtime(scene).set(config.id, controller);
@@ -205,12 +331,51 @@ export function createIKController(scene: Scene, data: any, options: IMCPActionO
 /** Changes enabled state, pole target, or numerical IK properties without recreating the scene. */
 export function setIKController(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const config = configs(scene).find((candidate) => candidate.id === data.id);
-	if (!config) throw new Error(`IK controller "${data.id}" was not found.`);
+	if (!config) {
+		throw new Error(`IK controller "${data.id}" was not found.`);
+	}
 	const next = { ...config };
-	for (const key of ["enabled", "poleTargetNodeId", "poleAngle", "maxAngle", "slerpAmount"] as const) if (data[key] !== undefined) next[key] = data[key];
-	if (data.bendAxis !== undefined) next.bendAxis = data.bendAxis;
+	for (const key of [
+		"enabled",
+		"poleAngle",
+		"maxAngle",
+		"slerpAmount",
+		"targetPositionWeight",
+		"targetRotationWeight",
+		"hintWeight",
+		"maintainTargetPositionOffset",
+		"maintainTargetRotationOffset",
+	] as const) {
+		if (data[key] !== undefined) {
+			next[key] = data[key];
+		}
+	}
+	const clearsPoleTarget = data.poleTargetNodeId === null || data.poleTargetNodeId === "";
+	if (clearsPoleTarget) {
+		delete next.poleTargetNodeId;
+	} else if (data.poleTargetNodeId !== undefined) {
+		next.poleTargetNodeId = data.poleTargetNodeId;
+	}
+	if (data.bendAxis !== undefined) {
+		next.bendAxis = data.bendAxis;
+	}
+	validateIKWeights(next);
+	if (data.maintainTargetPositionOffset === true) {
+		captureIKTargetOffsets(scene, next, true, false);
+	}
+	if (data.maintainTargetRotationOffset === true) {
+		captureIKTargetOffsets(scene, next, false, true);
+	}
 	const active = runtime(scene).get(config.id);
-	if (active && next.poleTargetNodeId !== config.poleTargetNodeId) {
+	const runtimeFieldsChanged = [
+		"poleTargetNodeId",
+		"targetPositionWeight",
+		"targetRotationWeight",
+		"hintWeight",
+		"maintainTargetPositionOffset",
+		"maintainTargetRotationOffset",
+	].some((key) => next[key] !== config[key]);
+	if (active && runtimeFieldsChanged) {
 		const replacement = createRuntimeController(scene, next);
 		scene.onBeforeRenderObservable.remove(active.observer);
 		runtime(scene).set(config.id, replacement);
@@ -218,6 +383,9 @@ export function setIKController(scene: Scene, data: any, options: IMCPActionOpti
 		active.controller.poleAngle = next.poleAngle ?? active.controller.poleAngle;
 		active.controller.maxAngle = next.maxAngle ?? active.controller.maxAngle;
 		active.controller.slerpAmount = next.slerpAmount ?? active.controller.slerpAmount;
+	}
+	if (clearsPoleTarget) {
+		delete config.poleTargetNodeId;
 	}
 	Object.assign(config, next);
 	options.editor.layout.inspector.forceUpdate();
@@ -227,9 +395,13 @@ export function setIKController(scene: Scene, data: any, options: IMCPActionOpti
 /** Stops and removes a persistent IK controller. */
 export function deleteIKController(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const index = configs(scene).findIndex((candidate) => candidate.id === data.id);
-	if (index === -1) throw new Error(`IK controller "${data.id}" was not found.`);
+	if (index === -1) {
+		throw new Error(`IK controller "${data.id}" was not found.`);
+	}
 	const active = runtime(scene).get(data.id);
-	if (active) scene.onBeforeRenderObservable.remove(active.observer);
+	if (active) {
+		scene.onBeforeRenderObservable.remove(active.observer);
+	}
 	runtime(scene).delete(data.id);
 	configs(scene).splice(index, 1);
 	options.editor.layout.inspector.forceUpdate();
@@ -259,7 +431,9 @@ export function createLookAtConstraint(scene: Scene, data: any, options: IMCPAct
 		adjustRoll: data.adjustRoll,
 		enabled: data.enabled ?? true,
 	};
-	if (lookAtConfigs(scene).some((candidate) => candidate.id === config.id)) throw new Error(`Look-at constraint "${config.id}" already exists.`);
+	if (lookAtConfigs(scene).some((candidate) => candidate.id === config.id)) {
+		throw new Error(`Look-at constraint "${config.id}" already exists.`);
+	}
 	const active = createRuntimeLookAtConstraint(scene, config);
 	lookAtConfigs(scene).push(config);
 	lookAtRuntime(scene).set(config.id, active);
@@ -270,18 +444,26 @@ export function createLookAtConstraint(scene: Scene, data: any, options: IMCPAct
 /** Updates look-at constraint limits, adjustments, target, or enabled state without recreating it. */
 export function setLookAtConstraint(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const config = lookAtConfigs(scene).find((candidate) => candidate.id === data.id);
-	if (!config) throw new Error(`Look-at constraint "${data.id}" was not found.`);
+	if (!config) {
+		throw new Error(`Look-at constraint "${data.id}" was not found.`);
+	}
 	const next = { ...config };
-	for (const key of ["targetNodeId", "enabled", "minYaw", "maxYaw", "minPitch", "maxPitch", "slerpAmount", "adjustYaw", "adjustPitch", "adjustRoll"] as const)
-		if (data[key] !== undefined) next[key] = data[key];
+	for (const key of ["targetNodeId", "enabled", "minYaw", "maxYaw", "minPitch", "maxPitch", "slerpAmount", "adjustYaw", "adjustPitch", "adjustRoll"] as const) {
+		if (data[key] !== undefined) {
+			next[key] = data[key];
+		}
+	}
 	const current = lookAtRuntime(scene).get(config.id);
 	if (current && next.targetNodeId !== config.targetNodeId) {
 		const replacement = createRuntimeLookAtConstraint(scene, next);
 		scene.onBeforeRenderObservable.remove(current.observer);
 		lookAtRuntime(scene).set(config.id, replacement);
 	} else if (current) {
-		for (const key of ["minYaw", "maxYaw", "minPitch", "maxPitch", "slerpAmount", "adjustYaw", "adjustPitch", "adjustRoll"] as const)
-			if (next[key] !== undefined) current.controller[key] = next[key];
+		for (const key of ["minYaw", "maxYaw", "minPitch", "maxPitch", "slerpAmount", "adjustYaw", "adjustPitch", "adjustRoll"] as const) {
+			if (next[key] !== undefined) {
+				current.controller[key] = next[key];
+			}
+		}
 	}
 	Object.assign(config, next);
 	options.editor.layout.inspector.forceUpdate();
@@ -291,9 +473,13 @@ export function setLookAtConstraint(scene: Scene, data: any, options: IMCPAction
 /** Stops and removes a persistent bone look-at constraint. */
 export function deleteLookAtConstraint(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const index = lookAtConfigs(scene).findIndex((candidate) => candidate.id === data.id);
-	if (index === -1) throw new Error(`Look-at constraint "${data.id}" was not found.`);
+	if (index === -1) {
+		throw new Error(`Look-at constraint "${data.id}" was not found.`);
+	}
 	const current = lookAtRuntime(scene).get(data.id);
-	if (current) scene.onBeforeRenderObservable.remove(current.observer);
+	if (current) {
+		scene.onBeforeRenderObservable.remove(current.observer);
+	}
 	lookAtRuntime(scene).delete(data.id);
 	lookAtConfigs(scene).splice(index, 1);
 	options.editor.layout.inspector.forceUpdate();
@@ -303,7 +489,9 @@ export function deleteLookAtConstraint(scene: Scene, data: any, options: IMCPAct
 /** Recreates planar cutout/sprite IK controllers after transform nodes load. */
 export function restoreSpriteIKControllers(scene: Scene): void {
 	for (const config of spriteIKConfigs(scene)) {
-		if (spriteIKRuntime(scene).has(config.id)) continue;
+		if (spriteIKRuntime(scene).has(config.id)) {
+			continue;
+		}
 		try {
 			spriteIKRuntime(scene).set(config.id, createRuntimeSpriteIKController(scene, config));
 		} catch (error) {
@@ -328,7 +516,9 @@ export function createSpriteIKController(scene: Scene, data: any, options: IMCPA
 		bendDirection: data.bendDirection ?? "counterClockwise",
 		enabled: data.enabled ?? true,
 	};
-	if (spriteIKConfigs(scene).some((candidate) => candidate.id === config.id)) throw new Error(`Sprite IK controller "${config.id}" already exists.`);
+	if (spriteIKConfigs(scene).some((candidate) => candidate.id === config.id)) {
+		throw new Error(`Sprite IK controller "${config.id}" already exists.`);
+	}
 	const active = createRuntimeSpriteIKController(scene, config);
 	spriteIKConfigs(scene).push(config);
 	spriteIKRuntime(scene).set(config.id, active);
@@ -339,7 +529,9 @@ export function createSpriteIKController(scene: Scene, data: any, options: IMCPA
 /** Creates an editable planar Root -> Joint -> Tip transform hierarchy and its persisted Sprite IK controller. */
 export function createSpriteIKRig(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const name = String(data.name ?? "Sprite Rig").trim();
-	if (!name) throw new Error("Sprite IK rig name must not be empty.");
+	if (!name) {
+		throw new Error("Sprite IK rig name must not be empty.");
+	}
 	const firstLength = Number(data.firstLength ?? 100);
 	const secondLength = Number(data.secondLength ?? 100);
 	if (!Number.isFinite(firstLength) || !Number.isFinite(secondLength) || firstLength <= 0 || secondLength <= 0) {
@@ -374,15 +566,25 @@ export function createSpriteIKRig(scene: Scene, data: any, options: IMCPActionOp
 /** Bakes a sequence of planar Sprite IK target positions into editable root/joint rotation AnimationGroup tracks. */
 export function bakeSpriteIKAnimation(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const controller = spriteIKConfigs(scene).find((candidate) => candidate.id === data.id);
-	if (!controller) throw new Error(`Sprite IK controller "${data.id}" was not found.`);
+	if (!controller) {
+		throw new Error(`Sprite IK controller "${data.id}" was not found.`);
+	}
 	const name = String(data.name ?? "Sprite IK Pose").trim();
-	if (!name) throw new Error("Animation name must not be empty.");
-	if (scene.animationGroups.some((group) => group.name === name)) throw new Error(`Animation group "${name}" already exists.`);
-	if (!Array.isArray(data.poses) || data.poses.length < 2) throw new Error("Provide at least two Sprite IK poses to bake an animation.");
+	if (!name) {
+		throw new Error("Animation name must not be empty.");
+	}
+	if (scene.animationGroups.some((group) => group.name === name)) {
+		throw new Error(`Animation group "${name}" already exists.`);
+	}
+	if (!Array.isArray(data.poses) || data.poses.length < 2) {
+		throw new Error("Provide at least two Sprite IK poses to bake an animation.");
+	}
 	const root = scene.getTransformNodeById(controller.rootNodeId);
 	const joint = scene.getTransformNodeById(controller.jointNodeId);
 	const target = scene.getTransformNodeById(controller.targetNodeId);
-	if (!root || !joint || !target) throw new Error("The Sprite IK controller references missing TransformNodes.");
+	if (!root || !joint || !target) {
+		throw new Error("The Sprite IK controller references missing TransformNodes.");
+	}
 	const originalTarget = target.position.clone();
 	const originalRootRotation = root.rotation.z;
 	const originalJointRotation = joint.rotation.z;
@@ -397,12 +599,16 @@ export function bakeSpriteIKAnimation(scene: Scene, data: any, options: IMCPActi
 			}
 			previousFrame = frame;
 			target.position.copyFromFloats(pose.targetPosition[0], pose.targetPosition[1], pose.targetPosition[2]);
-			if (!applySpriteIKController(scene, controller)) throw new Error("Unable to solve the Sprite IK chain for a baked pose.");
+			if (!applySpriteIKController(scene, controller)) {
+				throw new Error("Unable to solve the Sprite IK chain for a baked pose.");
+			}
 			rootKeys.push({ frame, value: root.rotation.z });
 			jointKeys.push({ frame, value: joint.rotation.z });
 		}
 		const framesPerSecond = Number(data.framesPerSecond ?? 60);
-		if (!Number.isFinite(framesPerSecond) || framesPerSecond <= 0) throw new Error("framesPerSecond must be a positive finite number.");
+		if (!Number.isFinite(framesPerSecond) || framesPerSecond <= 0) {
+			throw new Error("framesPerSecond must be a positive finite number.");
+		}
 		const group = new AnimationGroup(name, scene);
 		const rootAnimation = new Animation(`${name} Root Rotation`, "rotation.z", framesPerSecond, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CYCLE);
 		const jointAnimation = new Animation(`${name} Joint Rotation`, "rotation.z", framesPerSecond, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CYCLE);
@@ -422,9 +628,15 @@ export function bakeSpriteIKAnimation(scene: Scene, data: any, options: IMCPActi
 /** Updates a Sprite IK target, bend direction, or enabled state. */
 export function setSpriteIKController(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const config = spriteIKConfigs(scene).find((candidate) => candidate.id === data.id);
-	if (!config) throw new Error(`Sprite IK controller "${data.id}" was not found.`);
+	if (!config) {
+		throw new Error(`Sprite IK controller "${data.id}" was not found.`);
+	}
 	const next = { ...config };
-	for (const key of ["targetNodeId", "bendDirection", "enabled"] as const) if (data[key] !== undefined) next[key] = data[key];
+	for (const key of ["targetNodeId", "bendDirection", "enabled"] as const) {
+		if (data[key] !== undefined) {
+			next[key] = data[key];
+		}
+	}
 	const active = spriteIKRuntime(scene).get(config.id);
 	if (active && next.targetNodeId !== config.targetNodeId) {
 		const replacement = createRuntimeSpriteIKController(scene, next);
@@ -439,9 +651,13 @@ export function setSpriteIKController(scene: Scene, data: any, options: IMCPActi
 /** Stops and removes a persistent planar Sprite IK controller. */
 export function deleteSpriteIKController(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const index = spriteIKConfigs(scene).findIndex((candidate) => candidate.id === data.id);
-	if (index === -1) throw new Error(`Sprite IK controller "${data.id}" was not found.`);
+	if (index === -1) {
+		throw new Error(`Sprite IK controller "${data.id}" was not found.`);
+	}
 	const active = spriteIKRuntime(scene).get(data.id);
-	if (active) scene.onBeforeRenderObservable.remove(active.observer);
+	if (active) {
+		scene.onBeforeRenderObservable.remove(active.observer);
+	}
 	spriteIKRuntime(scene).delete(data.id);
 	spriteIKConfigs(scene).splice(index, 1);
 	options.editor.layout.inspector.forceUpdate();

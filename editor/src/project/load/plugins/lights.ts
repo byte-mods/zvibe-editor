@@ -1,7 +1,8 @@
 import { join } from "path/posix";
-import { readJSON } from "fs-extra";
+import { readSerializedJSON as readJSON } from "../../serialization-session";
 
-import { Scene, Light } from "babylonjs";
+import { Scene, Light, Texture } from "babylonjs";
+import { configureAreaLights, getLightCookieMetadata, setLightCookie } from "babylonjs-editor-tools";
 
 import { Editor } from "../../../editor/main";
 
@@ -23,6 +24,14 @@ export async function loadLights(editor: Editor, lightsFiles: string[], scene: S
 
 				const light = Light.Parse(data, scene);
 				if (light) {
+					configureAreaLights(scene as any, [light as any]);
+					const cookie = getLightCookieMetadata(light as any);
+					if (cookie?.texture) {
+						const texture = Texture.Parse(structuredClone(cookie.texture), scene, join(options.projectPath, "/"));
+						if (texture) {
+							setLightCookie(light as any, texture as any, { ...cookie, revision: cookie.revision });
+						}
+					}
 					light.uniqueId = data.uniqueId;
 					light.metadata ??= {};
 					light.metadata._waitingParentId = data.metadata?.parentId;

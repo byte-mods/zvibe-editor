@@ -133,6 +133,13 @@ export interface IHumanoidAvatarMask {
 	avatarId: string;
 	bodyParts: Record<HumanoidBodyPart, boolean>;
 	transformNames: string[];
+	unitySource?: {
+		guid: string;
+		fileId: string;
+		path: string;
+		contentHash: string;
+		metaHash: string;
+	};
 }
 
 export interface IHumanoidAvatarValidation {

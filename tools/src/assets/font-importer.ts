@@ -1,4 +1,4 @@
-import { extname } from "path/posix";
+import { extnamePortablePath as extname } from "./portable-path";
 
 export type FontImporterRenderMode = "dynamic" | "bitmap" | "sdf" | "msdf";
 export type FontImporterCharacterSet = "ascii" | "latin1" | "custom";
@@ -51,6 +51,8 @@ export interface IFontImportResult {
 	missingCodepoints: number[];
 	pages: IFontAtlasPage[];
 	dynamicFontPath: string | null;
+	/** Browser-loadable source font retained for GUI fallback rendering in every import mode. */
+	sourceFontPath?: string | null;
 }
 
 export interface IFontAtlasManifest {
@@ -69,6 +71,8 @@ export interface IFontAtlasManifest {
 	kernings: IFontAtlasKerning[];
 	missingCodepoints: number[];
 	dynamicFontPath: string | null;
+	/** Source font filename retained alongside generated atlas data. */
+	sourceFontPath?: string | null;
 }
 
 export function normalizeFontImporterSettings(settings: Record<string, unknown>): IFontImporterSettings {

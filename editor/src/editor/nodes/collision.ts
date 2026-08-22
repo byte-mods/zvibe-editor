@@ -43,6 +43,15 @@ export class CollisionMesh extends Mesh {
 		this.uniqueId = UniqueNumber.Get();
 	}
 
+	public override dispose(doNotRecurse?: boolean, disposeMaterialAndTextures?: boolean): void {
+		const scene = this.getScene();
+		super.dispose(doNotRecurse, false);
+		if (!scene.meshes.some((mesh) => mesh instanceof CollisionMesh)) {
+			CollisionMesh._debugMaterial?.dispose(false, disposeMaterialAndTextures);
+			CollisionMesh._debugMaterial = null;
+		}
+	}
+
 	public async setType(type: CollisionMeshType, sourceMesh: AbstractMesh): Promise<void> {
 		sourceMesh.refreshBoundingInfo({
 			applyMorph: true,

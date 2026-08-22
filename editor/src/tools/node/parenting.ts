@@ -1,7 +1,7 @@
 import { Node, Vector3, Quaternion, TransformNode } from "babylonjs";
 
 import { isScene } from "../guards/scene";
-import { isAbstractMesh, isAnyTransformNode, isDirectionalLight, isPointLight, isSpotLight } from "../guards/nodes";
+import { isAbstractMesh, isAnyTransformNode, isDirectionalLight, isPointLight, isRectAreaLight, isSpotLight } from "../guards/nodes";
 
 export interface IOldNodeHierarchyConfiguration {
 	parent: Node | null;
@@ -51,7 +51,7 @@ export function applyTransformNodeParentingConfiguration(node: Node, newParent: 
 		tempTransfromNode.rotationQuaternion = node.rotationQuaternion?.clone() || null;
 	}
 
-	if (isPointLight(node) || isDirectionalLight(node) || isSpotLight(node)) {
+	if (isPointLight(node) || isDirectionalLight(node) || isSpotLight(node) || isRectAreaLight(node)) {
 		tempTransfromNode.position.copyFrom(node.position);
 	}
 
@@ -71,7 +71,7 @@ export function applyTransformNodeParentingConfiguration(node: Node, newParent: 
 		}
 	}
 
-	if (isPointLight(node) || isDirectionalLight(node) || isSpotLight(node)) {
+	if (isPointLight(node) || isDirectionalLight(node) || isSpotLight(node) || isRectAreaLight(node)) {
 		node.position.copyFrom(tempTransfromNode.position);
 	}
 }

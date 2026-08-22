@@ -1,0 +1,42 @@
+<evaluation>
+	<qa_pair>
+		<question>Inspect a new Electron Build Profile. Is Enable Direct Storage enabled by default? Respond True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect asset-streaming capabilities. On which Electron target can Enable Direct Storage become effective?</question>
+		<answer>Windows</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect an enabled Windows asset-streaming plan. Which built-in backend is selected?</question>
+		<answer>electron-asynchronous-file-streams</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the native boundary. Does the built-in backend claim Microsoft DirectStorage API identity? Respond True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the priority inventory. Which priority is scheduled before high, normal, low, and background work?</question>
+		<answer>critical</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect file-probe restrictions. Which two project roots may be read?</question>
+		<answer>assets/ and public/</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect a completed file probe. Are raw asset bytes returned over MCP? Respond True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect a completed file probe. Which digest algorithm identifies the streamed range?</question>
+		<answer>SHA-256</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect runtime mutations. Which lease must start, cancel, and reset calls provide?</question>
+		<answer>the exact runtime revision</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect a Windows Electron package output. What asset-streaming plan manifest is emitted?</question>
+		<answer>zvibe-asset-streaming-build-plan.json</answer>
+	</qa_pair>
+</evaluation>

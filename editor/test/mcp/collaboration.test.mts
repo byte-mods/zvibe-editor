@@ -52,6 +52,8 @@ describe("mcp/project/collaboration", () => {
 	test("keeps legacy access until enabled, then centrally enforces admin/editor/viewer roles", async () => {
 		await expect(authorizeProjectCollaborationRequest("create_primitive_mesh", {}, options)).resolves.toBeUndefined();
 		const admin = await bootstrapAdmin();
+		await expect(authorizeProjectCollaborationRequest("get_project_collaboration_capabilities", {}, options)).resolves.toBeUndefined();
+		await expect(authorizeProjectCollaborationRequest("validate_project_collaboration_readiness", {}, options)).resolves.toBeUndefined();
 		await expect(authorizeProjectCollaborationRequest("create_primitive_mesh", { collaborationToken: admin.token }, options)).resolves.toBeUndefined();
 
 		const viewer = await createProjectCollaborationMember(scene, { name: "Reviewer", role: "viewer", collaborationToken: admin.token }, options);

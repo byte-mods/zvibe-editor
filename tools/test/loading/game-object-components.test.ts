@@ -217,12 +217,24 @@ describe("loading/game-object-components", () => {
 	});
 
 	test("normalizes malformed entity data and drops non-numeric fields", () => {
-		expect(normalizeEntityComponentData({})).toEqual({ archetype: "Default", values: {}, bakingEnabled: true });
+		expect(normalizeEntityComponentData({})).toEqual({
+			version: 3,
+			archetype: "Default",
+			sectionId: "main",
+			values: {},
+			components: {},
+			bakingEnabled: true,
+			hiddenInHierarchy: false,
+		});
 		// Only finite numeric fields survive — a data-oriented column cannot hold a string.
 		expect(normalizeEntityComponentData({ archetype: "  ", values: { good: 3, bad: "x", nan: Number.NaN } })).toEqual({
+			version: 3,
 			archetype: "Default",
+			sectionId: "main",
 			values: { good: 3 },
+			components: {},
 			bakingEnabled: true,
+			hiddenInHierarchy: false,
 		});
 		expect(normalizeEntityComponentData({ archetype: "  Squad  " }).archetype).toBe("Squad");
 	});

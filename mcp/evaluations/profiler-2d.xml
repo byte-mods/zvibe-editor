@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which MCP tool reads live sprite-atlas occupancy or retained per-frame 2D counters?</question>
+      <answer>get_2d_profiler_state</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which profiler module must be captured to retain per-frame 2D atlas counters?</question>
+      <answer>2d</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does a retained profiler frame store every atlas region? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the maximum number of detailed atlas owners in one live 2D profiler snapshot?</question>
+      <answer>128</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the maximum total number of source atlas regions inspected in one live snapshot?</question>
+      <answer>65536</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the maximum total number of atlas regions returned for visualization?</question>
+      <answer>4096</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two atlas-owner kinds does the 2D profiler report?</question>
+      <answer>sprite-manager, sprite-map</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does the texture-byte counter claim exact GPU residency? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Can get_2d_profiler_state return detailed atlas regions directly from a connected player? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Can portable profiler v1 captures be imported through strict migration? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+</evaluation>

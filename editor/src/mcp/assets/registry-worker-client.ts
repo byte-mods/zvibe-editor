@@ -20,6 +20,7 @@ export interface IAssetFileWorkerAnalysis {
 interface IWorkerResponse {
 	id: number;
 	analysis?: IAssetFileWorkerAnalysis;
+	missing?: boolean;
 	error?: string;
 }
 
@@ -68,12 +69,20 @@ export async function analyzeAssetFilesWithWorkers(
 	const workerCount = Math.min(8, Math.max(1, options.workerCount ?? defaultAssetIndexingWorkerCount()), files.length);
 	if (process.env.VITEST === "true") {
 		const analyses: IAssetFileWorkerAnalysis[] = [];
+		let completed = 0;
 		for (const file of files) {
 			if (options.isCancelled?.()) {
 				throw new AssetIndexingCancelledError();
 			}
-			analyses.push(await inlineAnalyze(file, projectRoot));
-			options.onProgress?.(analyses.length, files.length);
+			try {
+				analyses.push(await inlineAnalyze(file, projectRoot));
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+					throw error;
+				}
+			}
+			completed++;
+			options.onProgress?.(completed, files.length);
 		}
 		return analyses;
 	}
@@ -90,7 +99,7 @@ export async function analyzeAssetFilesWithWorkers(
 			}
 			settled = true;
 			await Promise.all(workers.map((worker) => terminateAnalysisWorker(worker).catch(() => undefined)));
-			error ? reject(error) : resolve(analyses);
+			error ? reject(error) : resolve(analyses.filter((analysis): analysis is IAssetFileWorkerAnalysis => Boolean(analysis)));
 		};
 		const dispatch = (worker: AssetAnalysisWorker): void => {
 			if (options.isCancelled?.()) {
@@ -109,6 +118,12 @@ export async function analyzeAssetFilesWithWorkers(
 		for (const worker of workers) {
 			const onMessage = (response: IWorkerResponse): void => {
 				if (settled) {
+					return;
+				}
+				if (response.missing) {
+					completed++;
+					options.onProgress?.(completed, files.length);
+					dispatch(worker);
 					return;
 				}
 				if (response.error || !response.analysis) {

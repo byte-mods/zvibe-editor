@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { Animation, AnimationGroup, NullEngine, Scene, TransformNode } from "babylonjs";
+import { Animation, AnimationGroup, Bone, Matrix, NullEngine, Quaternion, Scene, Skeleton, TransformNode, Vector3 } from "babylonjs";
 import { _registerScriptInstance } from "babylonjs-editor-tools";
 
 import {
@@ -10,6 +10,7 @@ import {
 	deleteAnimatorController,
 	deleteAnimatorSubgraph,
 	getAnimatorCompiledGraph,
+	getAnimatorHumanoidMuscleTraceForController,
 	getAnimatorRuntimeDebug,
 	listAnimatorControllers,
 	openAnimatorRuntimeDebugger,
@@ -26,6 +27,8 @@ import {
 	setAnimatorParameter,
 	setAnimatorParameterDefinition,
 	setAnimatorRootMotion,
+	setAnimatorHumanoidMuscleTrace,
+	setAnimatorRuntimeDebug,
 	setAnimatorStateMask,
 	setAnimatorStateBehaviours,
 	setAnimatorStateGraphPosition,
@@ -34,6 +37,7 @@ import {
 	setAnimatorSubStateMachine,
 	setAnimatorTransition,
 	setAnimatorTrigger,
+	stepAnimatorRuntimeDebug,
 } from "../../src/mcp/animator/animator";
 
 describe("mcp/animator", () => {
@@ -181,6 +185,182 @@ describe("mcp/animator", () => {
 		]);
 		expect(clips[1].currentFrame).toBeCloseTo(25);
 		expect(scene.animationGroups.map((group) => group.name)).toEqual(["Idle", "Run", "Sprint"]);
+	});
+
+	test("authors and previews static Unity-style state playback settings through the shared Animator actions", () => {
+		const leftHand = new TransformNode("EditorLeftHand", scene);
+		const rightHand = new TransformNode("EditorRightHand", scene);
+		const animation = new Animation("Run Hand", "position", 30, Animation.ANIMATIONTYPE_VECTOR3, Animation.ANIMATIONLOOPMODE_CYCLE);
+		animation.setKeys([
+			{ frame: 0, value: new Vector3(1, 0, 0) },
+			{ frame: 30, value: new Vector3(2, 0, 0) },
+		]);
+		scene.getAnimationGroupByName("Run")!.addTargetedAnimation(animation, leftHand);
+		scene.metadata = {
+			babylonEditorHumanoidAvatars: [
+				{ id: "editor-static-avatar", name: "Editor Static Avatar", animationType: "humanoid", mapping: { leftHand: leftHand.name, rightHand: rightHand.name } },
+			],
+		};
+		const controller = createAnimatorController(
+			scene,
+			{
+				name: "Static Playback",
+				parameters: {},
+				states: [
+					{
+						name: "Reverse Mirrored",
+						animationGroup: "Run",
+						speed: -1.5,
+						cycleOffset: 0.25,
+						mirror: true,
+						loop: false,
+						tag: "Locomotion",
+						footIK: true,
+						writeDefaultValues: false,
+					},
+				],
+				transitions: [],
+				playOnCreate: true,
+			},
+			options
+		);
+
+		const initialDebug = getAnimatorRuntimeDebug(scene, { controllerId: controller.id }).base;
+		expect(initialDebug).toMatchObject({
+			activeState: "Reverse Mirrored",
+			speed: -1.5,
+			cycleOffset: 0.25,
+			mirror: true,
+			loop: false,
+			tag: "Locomotion",
+			footIK: true,
+			writeDefaultValues: false,
+			clips: [{ sourceAnimationGroup: "Run", speedRatio: -1.5, cycleOffset: 0.25, mirrored: true, internalLayerClone: true, playbackFromFrame: 30, currentFrame: 7.5 }],
+		});
+		const initial = getAnimatorRuntimeDebug(scene, { controllerId: controller.id });
+		const paused = setAnimatorRuntimeDebug(scene, { controllerId: controller.id, expectedFingerprint: initial.debugger.fingerprint, paused: true }, options);
+		const stepped = stepAnimatorRuntimeDebug(scene, { controllerId: controller.id, expectedFingerprint: paused.debugger.fingerprint, deltaSeconds: 0.1, steps: 1 }, options);
+		expect(stepped.base.clips[0].currentFrame).toBeCloseTo(3);
+		expect(getAnimatorRuntimeDebug(scene, { controllerId: controller.id }).footIK.layers[0]).toMatchObject({ enabled: true, invocations: 1, failedFeet: 2, avatarId: null });
+		expect(() => setAnimatorController(scene, { controllerId: controller.id, states: [{ name: "Bad", animationGroup: "Run", speed: 0 }] }, options)).toThrow(
+			"speed must be a finite non-zero"
+		);
+		expect(() => setAnimatorController(scene, { controllerId: controller.id, states: [{ name: "Bad", animationGroup: "Run", cycleOffset: 1.1 }] }, options)).toThrow(
+			"cycleOffset must be normalized"
+		);
+	});
+
+	test("executes Write Defaults property restoration through the editor preview and debugger", () => {
+		const target = new TransformNode("EditorWriteDefaultsTarget", scene);
+		const moveAnimation = new Animation("Move X", "position.x", 30, Animation.ANIMATIONTYPE_FLOAT);
+		moveAnimation.setKeys([
+			{ frame: 0, value: 2 },
+			{ frame: 30, value: 4 },
+		]);
+		const scaleAnimation = new Animation("Scale X", "scaling.x", 30, Animation.ANIMATIONTYPE_FLOAT);
+		scaleAnimation.setKeys([
+			{ frame: 0, value: 5 },
+			{ frame: 30, value: 6 },
+		]);
+		scene.getAnimationGroupByName("Idle")!.addTargetedAnimation(moveAnimation, target);
+		scene.getAnimationGroupByName("Run")!.addTargetedAnimation(scaleAnimation, target);
+		const controller = createAnimatorController(
+			scene,
+			{
+				name: "Editor Write Defaults",
+				parameters: {},
+				states: [
+					{ name: "Scale", animationGroup: "Run" },
+					{ name: "Move", animationGroup: "Idle", writeDefaultValues: true },
+				],
+				transitions: [],
+				activeState: "Scale",
+				playOnCreate: true,
+			},
+			options
+		);
+
+		expect(target.scaling.x).toBe(5);
+		setAnimatorState(scene, { controllerId: controller.id, state: "Move" }, options);
+		expect(target.scaling.x).toBe(1);
+		expect(target.position.x).toBe(2);
+		expect(getAnimatorRuntimeDebug(scene, { controllerId: controller.id }).writeDefaults).toMatchObject({
+			enabled: true,
+			invocations: 1,
+			resetCount: 1,
+			lastResetProperties: ["EditorWriteDefaultsTarget.scaling.x"],
+			algorithm: "bounded-controller-default-snapshot-v1",
+		});
+	});
+
+	test("executes dynamic Unity state playback parameters and validates their declared types", () => {
+		const target = new TransformNode("DynamicTarget", scene);
+		const rootMotionTarget = new TransformNode("DynamicRootMotionTarget", scene);
+		const animation = new Animation("Dynamic Run", "position.x", 30, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CYCLE);
+		animation.setKeys([
+			{ frame: 0, value: 0 },
+			{ frame: 30, value: 30 },
+		]);
+		scene.getAnimationGroupByName("Run")!.addTargetedAnimation(animation, target);
+		const controller = createAnimatorController(
+			scene,
+			{
+				name: "Dynamic Playback",
+				parameters: { rate: 0.5, mirrorState: false, phase: 0.1, scrub: 0.25 },
+				parameterTypes: { rate: "float", mirrorState: "bool", phase: "float", scrub: "float" },
+				states: [
+					{
+						name: "Dynamic",
+						animationGroup: "Run",
+						speed: 2,
+						speedParameter: "rate",
+						mirrorParameter: "mirrorState",
+						cycleOffsetParameter: "phase",
+						timeParameter: "scrub",
+					},
+				],
+				transitions: [],
+				rootMotion: { enabled: true, sourceNodeId: target.id, targetNodeId: rootMotionTarget.id },
+				playOnCreate: true,
+			},
+			options
+		);
+
+		const initialDynamicDebug = getAnimatorRuntimeDebug(scene, { controllerId: controller.id }).base;
+		expect(initialDynamicDebug).toMatchObject({
+			effectiveSpeed: 1,
+			cycleOffset: 0.1,
+			mirror: false,
+			timeDriven: true,
+			time: 0.25,
+			playbackBindings: { speed: "rate", mirror: "mirrorState", cycleOffset: "phase", time: "scrub" },
+		});
+		expect(initialDynamicDebug.clips[0].currentFrame).toBeCloseTo(10.5);
+		expect(getAnimatorRuntimeDebug(scene, { controllerId: controller.id }).rootMotion).toMatchObject({ enabled: true, suppressedByTimeParameter: true, sampled: false });
+		setAnimatorParameter(scene, { controllerId: controller.id, parameter: "rate", value: -1 }, options);
+		setAnimatorParameter(scene, { controllerId: controller.id, parameter: "phase", value: 0.4 }, options);
+		setAnimatorParameter(scene, { controllerId: controller.id, parameter: "scrub", value: 0.75 }, options);
+		const updatedDebug = getAnimatorRuntimeDebug(scene, { controllerId: controller.id }).base;
+		expect(updatedDebug).toMatchObject({
+			effectiveSpeed: -2,
+			cycleOffset: 0.4,
+			time: 0.75,
+			loopProgress: 0.75,
+		});
+		expect(updatedDebug.clips[0].currentFrame).toBeCloseTo(4.5);
+		expect(() =>
+			createAnimatorController(
+				scene,
+				{
+					name: "Wrong Dynamic Type",
+					parameters: { flag: true },
+					parameterTypes: { flag: "bool" },
+					states: [{ name: "Bad", animationGroup: "Idle", speedParameter: "flag" }],
+					transitions: [],
+				},
+				options
+			)
+		).toThrow("speedParameter requires a float parameter");
 	});
 
 	test("authors and evaluates bounded recursive Blend Trees through the focused action", () => {
@@ -701,6 +881,181 @@ describe("mcp/animator", () => {
 		expect(options.editor.layout.animations.openAnimatorDebugger).toHaveBeenCalledWith(controller.id);
 	});
 
+	test("pauses, fixed-steps, records transition history, and stops on exact runtime breakpoints", () => {
+		const animated = new TransformNode("Debug Target", scene);
+		for (const groupName of ["Idle", "Run"]) {
+			const animation = new Animation(`${groupName} Debug`, "position.x", 60, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CYCLE);
+			animation.setKeys([
+				{ frame: 0, value: 0 },
+				{ frame: 60, value: 1 },
+			]);
+			scene.getAnimationGroupByName(groupName)!.addTargetedAnimation(animation, animated);
+		}
+		const controller = createAnimatorController(
+			scene,
+			{
+				name: "Steppable",
+				states: [
+					{ name: "Idle", animationGroup: "Idle" },
+					{ name: "Run", animationGroup: "Run" },
+				],
+				entryState: "Idle",
+				transitions: [{ from: "Idle", to: "Run", exitTime: 0.5, duration: 0.2 }],
+			},
+			options
+		);
+		setAnimatorState(scene, { controllerId: controller.id, state: "Idle" }, options);
+
+		const initial = getAnimatorRuntimeDebug(scene, { controllerId: controller.id });
+		const configured = setAnimatorRuntimeDebug(
+			scene,
+			{
+				controllerId: controller.id,
+				expectedFingerprint: initial.debugger.fingerprint,
+				paused: true,
+				breakpoints: [{ id: "idle-to-run", layer: "$base", from: "Idle", to: "Run" }],
+			},
+			options
+		);
+		expect(configured.debugger).toMatchObject({ paused: true, historyCount: 0, breakpoints: [{ id: "idle-to-run", enabled: true }] });
+		expect(scene.getAnimationGroupByName("Idle")?.isPlaying).toBe(false);
+		expect(() => setAnimatorRuntimeDebug(scene, { controllerId: controller.id, expectedFingerprint: initial.debugger.fingerprint, paused: false }, options)).toThrow(
+			"changed after inspection"
+		);
+
+		const beforeBreakpoint = stepAnimatorRuntimeDebug(
+			scene,
+			{ controllerId: controller.id, expectedFingerprint: configured.debugger.fingerprint, deltaSeconds: 0.1, steps: 4 },
+			options
+		);
+		expect(beforeBreakpoint).toMatchObject({ stepped: { completedSteps: 4, elapsedSeconds: 0.4, haltedByBreakpoint: false }, base: { activeState: "Idle" } });
+		expect(beforeBreakpoint.debugger).toMatchObject({ paused: true, runtimeSeconds: 0.4, historyCount: 0 });
+
+		const hit = stepAnimatorRuntimeDebug(
+			scene,
+			{ controllerId: controller.id, expectedFingerprint: beforeBreakpoint.debugger.fingerprint, deltaSeconds: 0.1, steps: 4 },
+			options
+		);
+		expect(hit).toMatchObject({
+			stepped: { requestedSteps: 4, completedSteps: 1, elapsedSeconds: 0.1, haltedByBreakpoint: true },
+			base: { activeState: "Run", transition: { from: "Idle", to: "Run", durationSeconds: 0.2 } },
+			debugger: {
+				paused: true,
+				runtimeSeconds: 0.5,
+				historyCount: 1,
+				history: [{ sequence: 1, layer: "$base", from: "Idle", authoredFrom: "Idle", to: "Run", hitBreakpointIds: ["idle-to-run"] }],
+			},
+		});
+		expect(scene.getAnimationGroupByName("Run")?.isPlaying).toBe(false);
+
+		const afterHitFingerprint = hit.debugger.fingerprint;
+		expect(() =>
+			setAnimatorRuntimeDebug(
+				scene,
+				{
+					controllerId: controller.id,
+					expectedFingerprint: afterHitFingerprint,
+					breakpoints: [{ id: "invalid", from: "Missing", to: "Run" }],
+				},
+				options
+			)
+		).toThrow("was not found");
+		expect(getAnimatorRuntimeDebug(scene, { controllerId: controller.id }).debugger.fingerprint).toBe(afterHitFingerprint);
+
+		const cleared = setAnimatorRuntimeDebug(
+			scene,
+			{ controllerId: controller.id, expectedFingerprint: afterHitFingerprint, paused: false, clearHistory: true, breakpoints: [] },
+			options
+		);
+		expect(cleared.debugger).toMatchObject({ paused: false, historyCount: 0, droppedHistoryCount: 0, breakpoints: [] });
+		expect(scene.getAnimationGroupByName("Run")?.isPlaying).toBe(true);
+		deleteAnimatorController(scene, { controllerId: controller.id }, options);
+		expect(scene.getAnimationGroupByName("Run")?.isStarted).toBe(false);
+		expect(() => getAnimatorRuntimeDebug(scene, { controllerId: controller.id })).toThrow("not found");
+	});
+
+	test("matches layer-scoped runtime breakpoints and records bounded transition history", () => {
+		const controller = createAnimatorController(
+			scene,
+			{
+				name: "Layer Debugger",
+				parameters: { aiming: false },
+				states: [{ name: "Base", animationGroup: "Idle" }],
+				transitions: [],
+				layers: [
+					{
+						name: "Upper",
+						states: [
+							{ name: "Relax", animationGroup: "Idle" },
+							{ name: "Aim", animationGroup: "Run" },
+						],
+						transitions: [{ from: "Relax", to: "Aim", conditions: [{ parameter: "aiming", equals: true }] }],
+						activeState: "Relax",
+					},
+				],
+			},
+			options
+		);
+		setAnimatorLayerState(scene, { controllerId: controller.id, layer: "Upper", state: "Relax" }, options);
+		const initial = getAnimatorRuntimeDebug(scene, { controllerId: controller.id });
+		setAnimatorRuntimeDebug(
+			scene,
+			{
+				controllerId: controller.id,
+				expectedFingerprint: initial.debugger.fingerprint,
+				breakpoints: [{ id: "upper-aim", layer: "Upper", from: "Relax", to: "Aim" }],
+			},
+			options
+		);
+
+		setAnimatorParameter(scene, { controllerId: controller.id, parameter: "aiming", value: true }, options);
+		const hit = getAnimatorRuntimeDebug(scene, { controllerId: controller.id });
+		expect(hit.debugger).toMatchObject({
+			paused: true,
+			historyCount: 1,
+			history: [
+				{
+					layer: "Upper",
+					from: "Relax",
+					to: "Aim",
+					hitBreakpointIds: ["upper-aim"],
+					conditions: [{ parameter: "aiming", operator: "equals", authoredValue: true, runtimeValue: true }],
+				},
+			],
+		});
+	});
+
+	test("caps transition history at 256 entries with explicit dropped evidence", () => {
+		const controller = createAnimatorController(
+			scene,
+			{
+				name: "Bounded History",
+				parameters: { moving: false },
+				states: [
+					{ name: "Idle", animationGroup: "Idle" },
+					{ name: "Run", animationGroup: "Run" },
+				],
+				transitions: [
+					{ from: "Idle", to: "Run", conditions: [{ parameter: "moving", equals: true }] },
+					{ from: "Run", to: "Idle", conditions: [{ parameter: "moving", equals: false }] },
+				],
+			},
+			options
+		);
+		setAnimatorState(scene, { controllerId: controller.id, state: "Idle" }, options);
+		for (let index = 0; index < 300; index++) {
+			setAnimatorParameter(scene, { controllerId: controller.id, parameter: "moving", value: index % 2 === 0 }, options);
+		}
+		const snapshot = getAnimatorRuntimeDebug(scene, { controllerId: controller.id, historyLimit: 3 });
+		expect(snapshot.debugger).toMatchObject({
+			historyCount: 256,
+			droppedHistoryCount: 44,
+			historyTruncated: true,
+			lastSequence: 300,
+		});
+		expect(snapshot.debugger.history.map((entry: any) => entry.sequence)).toEqual([298, 299, 300]);
+	});
+
 	test("authors typed parameters and consumes trigger values exactly once", () => {
 		const controller = createAnimatorController(
 			scene,
@@ -1158,6 +1513,8 @@ describe("mcp/animator", () => {
 				onAnimatorStateEnter: (_object, info) => events.push(`${info.phase}:${info.stateName}`),
 				onAnimatorStateUpdate: (_object, info) => events.push(`${info.phase}:${info.stateName}`),
 				onAnimatorStateExit: (_object, info) => events.push(`${info.phase}:${info.stateName}`),
+				onAnimatorStateMachineEnter: (_object, info) => events.push(`${info.phase}:${info.machinePath.join("/") || "$root"}`),
+				onAnimatorStateMachineExit: (_object, info) => events.push(`${info.phase}:${info.machinePath.join("/") || "$root"}`),
 			},
 			"src/character-state.ts",
 			{}
@@ -1167,6 +1524,7 @@ describe("mcp/animator", () => {
 			{
 				name: "Behaviour Preview",
 				targetNodeId: target.id,
+				behaviours: [{ id: "root-machine-behaviour", scriptKey: "src/character-state.ts" }],
 				states: [
 					{ name: "Idle", animationGroup: "Idle" },
 					{ name: "Run", animationGroup: "Run" },
@@ -1206,8 +1564,15 @@ describe("mcp/animator", () => {
 		scene.onBeforeRenderObservable.notifyObservers(scene);
 		setAnimatorState(scene, { controllerId: controller.id, state: "Run" }, options);
 
-		expect(events).toEqual(["enter:Idle", "update:Idle", "exit:Idle"]);
-		expect(getAnimatorRuntimeDebug(scene, { controllerId: controller.id }).stateBehaviours).toMatchObject({ enterCalls: 1, updateCalls: 1, exitCalls: 1, errorCount: 0 });
+		expect(events).toEqual(["machineEnter:$root", "enter:Idle", "update:Idle", "exit:Idle"]);
+		expect(getAnimatorRuntimeDebug(scene, { controllerId: controller.id }).stateBehaviours).toMatchObject({
+			enterCalls: 1,
+			updateCalls: 1,
+			exitCalls: 1,
+			machineEnterCalls: 1,
+			machineExitCalls: 0,
+			errorCount: 0,
+		});
 		expect(() =>
 			setAnimatorStateBehaviours(scene, { controllerId: controller.id, state: "Run", behaviours: [{ id: "missing", scriptKey: "src/missing.ts" }] }, options)
 		).toThrow("is not attached");
@@ -1352,5 +1717,81 @@ describe("mcp/animator", () => {
 				],
 			},
 		});
+	});
+
+	test("binds one exact Humanoid Avatar and exposes bounded controller muscle tracing through the shared editor/MCP backend", () => {
+		const skeleton = new Skeleton("Hero", "hero-skeleton", scene);
+		const arm = new Bone("LeftArm", skeleton, null, Matrix.Identity(), Matrix.Identity());
+		arm.rotationQuaternion = Quaternion.Identity();
+		const target = new TransformNode("Humanoid Character", scene);
+		target.metadata = { scripts: [{ key: "src/humanoid-ik.ts", enabled: true, values: {} }] };
+		_registerScriptInstance(
+			target,
+			{
+				onAnimatorIK: () => {
+					arm.rotationQuaternion = Quaternion.RotationAxis(Vector3.Right(), (20 * Math.PI) / 180);
+				},
+			},
+			"src/humanoid-ik.ts",
+			{}
+		);
+		scene.metadata = {
+			babylonEditorHumanoidAvatars: [
+				{
+					version: 1,
+					id: "hero-avatar",
+					name: "Hero Avatar",
+					skeletonId: skeleton.id,
+					animationType: "humanoid",
+					source: "model",
+					mapping: { leftUpperArm: arm.name },
+					restPose: { [arm.name]: { position: [0, 0, 0], rotationQuaternion: [0, 0, 0, 1], scaling: [1, 1, 1] } },
+					humanScale: 1,
+					muscleLimitsEnabled: true,
+					muscleLimits: { leftUpperArm: { min: [-10, -10, -10], max: [10, 10, 10] } },
+				},
+			],
+		};
+		const controller = createAnimatorController(
+			scene,
+			{
+				name: "Humanoid Runtime",
+				targetNodeId: target.id,
+				humanoidAvatarId: "hero-avatar",
+				baseIKPass: true,
+				states: [{ name: "Idle", animationGroup: "Idle" }],
+				transitions: [],
+			},
+			options
+		);
+		vi.spyOn(engine, "getDeltaTime").mockReturnValue(100);
+		scene.onBeforeRenderObservable.notifyObservers(scene);
+
+		const read = getAnimatorHumanoidMuscleTraceForController(scene, { controllerId: controller.id, roles: ["leftUpperArm"], limit: 1 });
+		expect(read).toMatchObject({
+			controllerId: controller.id,
+			avatarId: "hero-avatar",
+			avatarName: "Hero Avatar",
+			skeletonId: "hero-skeleton",
+			enabled: true,
+			samplingPhase: "postAnimatorPreMuscleLimit",
+			history: { total: 1, count: 1 },
+			latest: { sequence: 1, runtimeSeconds: 0.1, baseState: "Idle", limitViolationCount: 1 },
+			availableAvatars: [{ id: "hero-avatar", skeletonFound: true, mappedBoneCount: 1, muscleLimitsEnabled: true }],
+		});
+		expect(read.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+		expect(read.current.muscles).toHaveLength(1);
+		expect(getAnimatorRuntimeDebug(scene, { controllerId: controller.id }).humanoidMuscleTrace.history.total).toBe(1);
+		expect(() => setAnimatorHumanoidMuscleTrace(scene, { controllerId: controller.id, expectedFingerprint: "0".repeat(64), clearHistory: true }, options)).toThrow(
+			"changed since it was read"
+		);
+
+		const cleared = setAnimatorHumanoidMuscleTrace(scene, { controllerId: controller.id, expectedFingerprint: read.fingerprint, clearHistory: true }, options);
+		expect(cleared.history.total).toBe(0);
+		const unassigned = setAnimatorHumanoidMuscleTrace(scene, { controllerId: controller.id, expectedFingerprint: cleared.fingerprint, humanoidAvatarId: null }, options);
+		expect(unassigned).toMatchObject({ enabled: false, avatarId: null, current: null, history: { total: 0 } });
+		expect(() =>
+			setAnimatorHumanoidMuscleTrace(scene, { controllerId: controller.id, expectedFingerprint: unassigned.fingerprint, humanoidAvatarId: "missing-avatar" }, options)
+		).toThrow('Humanoid Avatar "missing-avatar" was not found');
 	});
 });

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, readJSON, remove, writeFile } from "fs-extra";
+import { mkdir, mkdtemp, pathExists, readFile, readJSON, remove, writeFile } from "fs-extra";
 import { tmpdir } from "os";
 import { join } from "path";
 
 import { NullEngine, Scene } from "babylonjs";
 
-vi.mock("babylonjs-editor-tools", async () => import("../../../tools/src/assets/importers"));
+vi.mock("babylonjs-editor-tools", async () => ({ ...(await import("../../../tools/src/assets/importers")), ...(await import("../../../tools/src/assets/extensions")) }));
 
 import {
 	applyAssetImporterPreset,
@@ -63,7 +63,19 @@ describe("mcp/asset importer presets", () => {
 	});
 
 	test("discovers, validates, and atomically applies type-specific importer settings", async () => {
-		expect(listAssetImporterTypes().importers.map((importer: any) => importer.kind)).toEqual(["texture", "model", "audio", "video", "font", "material", "animation", "custom"]);
+		expect(listAssetImporterTypes().importers.map((importer: any) => importer.kind)).toEqual([
+			"texture",
+			"model",
+			"alembic",
+			"aseprite",
+			"audio",
+			"video",
+			"font",
+			"material",
+			"animation",
+			"aiModel",
+			"custom",
+		]);
 		await setAssetImporterSettings(scene, { paths: ["texture.png"], settings: { maxSize: 1024, generateMipmaps: false, textureType: "normalMap" } }, options);
 		expect(await getAssetImporter(scene, { path: "texture.png" })).toMatchObject({
 			inferredKind: "texture",
@@ -75,6 +87,13 @@ describe("mcp/asset importer presets", () => {
 		});
 		await expect(setAssetImporterSettings(scene, { paths: ["texture.png"], settings: { maxSize: 1000 } }, options)).rejects.toThrow("power of two");
 		expect((await getAssetImporter(scene, { path: "texture.png" })).importer.settings.maxSize).toBe(1024);
+
+		await writeFile(join(projectDirectory, "identity.onnx"), "onnx bytes");
+		expect(await getAssetImporter(scene, { path: "identity.onnx" })).toMatchObject({
+			inferredKind: "aiModel",
+			importer: { version: 1, kind: "aiModel", settings: { backend: "automatic", wasmNumThreads: 1, maximumTensorElements: 1_048_576 } },
+		});
+		await expect(validateAssetImporterSettings(scene, { path: "identity.onnx", settings: { wasmNumThreads: 17 } })).rejects.toThrow("at most 16");
 	});
 
 	test("finds direct and reverse project text-asset references without inferring binary content", async () => {
@@ -174,5 +193,20 @@ describe("mcp/asset importer presets", () => {
 			importState: { status: "error", error: { code: "REIMPORT_FAILED" } },
 		});
 		expect(await listAssetImportDiagnostics(scene, { status: "error" })).toMatchObject({ totalCount: 1 });
+	});
+
+	test("matches Assets Browser root placement for files and nested folders", async () => {
+		await expect(importAsset(scene, { sourcePath: join(projectDirectory, "texture.png"), destinationPath: "hero.psd" }, options)).rejects.toThrow("must be imported under");
+		expect(await pathExists(join(projectDirectory, "hero.psd"))).toBe(false);
+
+		const sourceFolder = join(projectDirectory, "external-folder");
+		await mkdir(join(sourceFolder, "nested"), { recursive: true });
+		await writeFile(join(sourceFolder, "nested", "model.onnx"), "model");
+		await expect(importAsset(scene, { sourcePath: sourceFolder, destinationPath: "imported-folder" }, options)).rejects.toThrow("must be imported under");
+		expect(await pathExists(join(projectDirectory, "imported-folder"))).toBe(false);
+
+		const sourceJson = join(projectDirectory, "external-settings.json");
+		await writeFile(sourceJson, '{"enabled":true}');
+		expect(await importAsset(scene, { sourcePath: sourceJson, destinationPath: "settings-copy.json" }, options)).toMatchObject({ imported: true, path: "settings-copy.json" });
 	});
 });

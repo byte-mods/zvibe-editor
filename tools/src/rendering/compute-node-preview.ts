@@ -36,8 +36,9 @@ export interface IComputeNodeGraphAnalysis {
 }
 
 function finiteVector(value: unknown, length: number, label: string): number[] {
-	if (!Array.isArray(value) || value.length !== length || value.some((component) => typeof component !== "number" || !Number.isFinite(component)))
+	if (!Array.isArray(value) || value.length !== length || value.some((component) => typeof component !== "number" || !Number.isFinite(component))) {
 		throw new Error(`${label} must contain ${length} finite numbers.`);
+	}
 	return [...value];
 }
 
@@ -89,7 +90,9 @@ export function analyzeComputeNodeGraph(graph: IComputeNodeGraph): IComputeNodeG
 	}
 	const deadNodeIds = graph.nodes.filter((node) => !reachesSink.has(node.id)).map((node) => node.id);
 	deadNodeIds.forEach((nodeId) => diagnostics.push({ severity: "warning", message: "Node does not contribute to an output or storage side effect.", nodeId }));
-	if (!diagnostics.length) diagnostics.push({ severity: "info", message: "Graph topology is complete and every node contributes to a sink." });
+	if (!diagnostics.length) {
+		diagnostics.push({ severity: "info", message: "Graph topology is complete and every node contributes to a sink." });
+	}
 	return {
 		valid: true,
 		complete: disconnectedInputs.length === 0,
@@ -113,7 +116,9 @@ export function evaluateComputeNodeGraphPreview(
 ): { invocationId: number[]; outputSize: number[]; entries: IComputeNodePreviewEntry[] } {
 	const invocationId = finiteVector(options.invocationId, 3, "Preview invocationId");
 	const outputSize = finiteVector(options.outputSize, 2, "Preview outputSize");
-	if (outputSize.some((component) => component < 1 || !Number.isInteger(component))) throw new Error("Preview outputSize values must be positive integers.");
+	if (outputSize.some((component) => component < 1 || !Number.isInteger(component))) {
+		throw new Error("Preview outputSize values must be positive integers.");
+	}
 	const ordered = getComputeNodeExecutionOrder(graph, true);
 	const incoming = new Map(graph.edges.map((edge) => [`${edge.to}.${edge.toPort}`, edge.from]));
 	const entries = new Map<string, IComputeNodePreviewEntry>();
@@ -142,11 +147,15 @@ export function evaluateComputeNodeGraphPreview(
 	};
 	for (const node of ordered) {
 		let entry: IComputeNodePreviewEntry;
-		if (node.type === "global-id") entry = ready(node, invocationId);
-		else if (node.type === "output-size") entry = ready(node, outputSize);
-		else if (node.type === "constant-color") entry = ready(node, node.value!);
-		else if (node.type === "constant-scalar") entry = ready(node, [node.scalarValue!]);
-		else if (node.type === "uv-color") {
+		if (node.type === "global-id") {
+			entry = ready(node, invocationId);
+		} else if (node.type === "output-size") {
+			entry = ready(node, outputSize);
+		} else if (node.type === "constant-color") {
+			entry = ready(node, node.value!);
+		} else if (node.type === "constant-scalar") {
+			entry = ready(node, [node.scalarValue!]);
+		} else if (node.type === "uv-color") {
 			const source = values(node, ["id", "size"]);
 			entry = source ? ready(node, [source[0][0] / source[1][0], source[0][1] / source[1][1], 0.5, 1]) : unavailable(node, "UV preview depends on an unavailable input.");
 		} else if (node.type === "texture-load") {
@@ -162,15 +171,17 @@ export function evaluateComputeNodeGraphPreview(
 		} else if (node.type === "storage-load") {
 			const id = input(node, "id");
 			const buffer = node.resourceName ? options.storageBuffers?.[node.resourceName] : undefined;
-			if (!id.value || !buffer?.data.length) entry = unavailable(node, `Storage buffer ${node.resourceName} or invocation index is unavailable.`);
-			else {
+			if (!id.value || !buffer?.data.length) {
+				entry = unavailable(node, `Storage buffer ${node.resourceName} or invocation index is unavailable.`);
+			} else {
 				const index = Math.min(buffer.data.length - 1, Math.max(0, Math.floor(id.value[0])));
 				entry = ready(node, [buffer.data[index], buffer.data[index], buffer.data[index], buffer.data[index]]);
 			}
 		} else if (["add", "subtract", "multiply", "divide", "minimum", "maximum"].includes(node.type)) {
 			const source = values(node, ["a", "b"]);
-			if (!source) entry = unavailable(node, `${node.type} preview depends on an unavailable input.`);
-			else {
+			if (!source) {
+				entry = unavailable(node, `${node.type} preview depends on an unavailable input.`);
+			} else {
 				const value = source[0].map((component, index) =>
 					node.type === "add"
 						? component + source[1][index]
@@ -212,8 +223,9 @@ export function evaluateComputeNodeGraphPreview(
 				: unavailable(node, `${node.type} preview depends on an unavailable input.`);
 		} else if (node.type === "normalize") {
 			const source = values(node, ["value"]);
-			if (!source) entry = unavailable(node, "Normalize preview depends on an unavailable input.");
-			else {
+			if (!source) {
+				entry = unavailable(node, "Normalize preview depends on an unavailable input.");
+			} else {
 				const length = Math.max(Math.hypot(...source[0]), 0.000001);
 				entry = ready(
 					node,
@@ -222,15 +234,17 @@ export function evaluateComputeNodeGraphPreview(
 			}
 		} else if (node.type === "dot") {
 			const source = values(node, ["a", "b"]);
-			if (!source) entry = unavailable(node, "Dot preview depends on an unavailable input.");
-			else {
+			if (!source) {
+				entry = unavailable(node, "Dot preview depends on an unavailable input.");
+			} else {
 				const dot = source[0].reduce((total, component, index) => total + component * source[1][index], 0);
 				entry = ready(node, [dot, dot, dot, dot]);
 			}
 		} else if (node.type === "length") {
 			const source = values(node, ["value"]);
-			if (!source) entry = unavailable(node, "Length preview depends on an unavailable input.");
-			else {
+			if (!source) {
+				entry = unavailable(node, "Length preview depends on an unavailable input.");
+			} else {
 				const length = Math.hypot(...source[0]);
 				entry = ready(node, [length, length, length, length]);
 			}

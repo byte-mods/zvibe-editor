@@ -147,7 +147,7 @@ export class EditorToolbar extends Component<IEditorToolbarProps> {
 
 							<MenubarSeparator />
 
-							<MenubarItem onClick={() => this.props.editor.setState({ editProject: true })}>Project...</MenubarItem>
+							<MenubarItem onClick={() => this.props.editor.setState({ editProject: true })}>Project Settings...</MenubarItem>
 
 							<MenubarSeparator />
 

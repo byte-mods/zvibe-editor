@@ -6,6 +6,7 @@ import {
 	collectMtlTextureCandidates,
 	groupMaterialTextureCandidates,
 	normalizeMaterialImporterSettings,
+	resolveBabylonMaterialTextureReferencesForLoading,
 } from "../../src/assets/material-importer";
 
 describe("material importer", () => {
@@ -61,5 +62,22 @@ describe("material importer", () => {
 			extractEmbeddedTextures: false,
 			compileNodeMaterial: true,
 		});
+	});
+
+	test("resolves project texture references before Babylon material loading", () => {
+		const data = {
+			albedoTexture: { name: "assets/shared/albedo.png", coordinatesMode: 0 },
+			bumpTexture: { name: "normal.png", samplingMode: 3 },
+			emissiveTexture: { name: "data:image/png;base64,AAAA", samplingMode: 3 },
+			reflectionTexture: { url: "https://example.com/environment.png" },
+		};
+		expect(resolveBabylonMaterialTextureReferencesForLoading("assets/materials/body.material", data, "/project")).toEqual([
+			"/project/assets/materials/normal.png",
+			"/project/assets/shared/albedo.png",
+		]);
+		expect(data.albedoTexture.name).toBe("/project/assets/shared/albedo.png");
+		expect(data.bumpTexture.name).toBe("/project/assets/materials/normal.png");
+		expect(data.emissiveTexture.name).toBe("data:image/png;base64,AAAA");
+		expect(data.reflectionTexture.url).toBe("https://example.com/environment.png");
 	});
 });

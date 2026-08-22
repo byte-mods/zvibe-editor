@@ -1,52 +1,226 @@
 {
+    "clearColor": [
+        0.2,
+        0.2,
+        0.3,
+        1
+    ],
+    "ambientColor": [
+        0,
+        0,
+        0
+    ],
     "environment": {
+        "iblIntensity": 1,
         "environmentIntensity": 1
     },
     "fog": {
-        "fogEnabled": false,
+        "fogEnabled": true,
         "fogMode": 0,
-        "fogStart": 10,
+        "fogStart": 0,
         "fogEnd": 1000,
-        "fogDensity": 0.001,
+        "fogDensity": 0.1,
         "fogColor": [
-            0.640006735140596,
-            0.640006735140596,
-            0.640006735140596
+            0.2,
+            0.2,
+            0.3
         ]
     },
-    "rendering": {
-        "ssrRenderingPipeline": null,
-        "motionBlurPostProcess": null,
-        "ssao2RenderingPipeline": null,
-        "defaultRenderingPipeline": {
-            "samples": 4,
-            "fxaaEnabled": true,
-            "imageProcessingEnabled": true,
-            "exposure": 0.7419531249999998,
-            "contrast": 3.2208691406250005,
-            "fromLinearSpace": true,
-            "toneMappingEnabled": true,
-            "toneMappingType": 1,
-            "ditheringEnabled": false,
-            "ditheringIntensity": 0.00392156862745098,
-            "bloomEnabled": false,
-            "bloomThreshold": 0.9,
-            "bloomWeight": 0.15,
-            "bloomScale": 0.5,
-            "bloomKernel": 64,
-            "sharpenEnabled": false,
-            "sharpenEdgeAmount": 0.3,
-            "sharpenColorAmount": 1,
-            "grainEnabled": false,
-            "grainIntensity": 30,
-            "grainAnimated": false,
-            "depthOfFieldEnabled": false,
-            "depthOfFieldBlurLevel": 2,
-            "lensSize": 512,
-            "fStop": 0.25,
-            "focusDistance": 100000,
-            "focalLength": 50
-        }
+    "physics": {
+        "gravity": [
+            0,
+            -981,
+            0
+        ]
+    },
+    "metadata": {
+        "babylonEditorRenderingGroups": [],
+        "babylonEditorRenderingLayers": [],
+        "babylonEditorProjectScriptExecutionOrders": {},
+        "babylonEditorPhysicsConstraints": [],
+        "babylonEditorIKControllers": [],
+        "babylonEditorLookAtConstraints": [],
+        "babylonEditorSpriteIKControllers": [],
+        "babylonEditorBehaviorTrees": [],
+        "babylonEditorLocalization": {
+            "version": 2,
+            "revision": 0,
+            "defaultLocale": "en",
+            "locales": [
+                {
+                    "id": "en",
+                    "name": "en",
+                    "direction": "auto",
+                    "fallbackLocales": [],
+                    "pseudo": null
+                }
+            ],
+            "tables": [],
+            "assetTables": []
+        },
+        "babylonEditorAnimationEvents": [],
+        "babylonEditorRendererLists": [],
+        "babylonEditorCameraStacks": [],
+        "babylonEditorTerrainStreamingGroups": [],
+        "babylonEditorCloths": [],
+        "babylonEditorDeviceSimulation": {
+            "version": 2,
+            "revision": 0,
+            "enabled": false,
+            "profileId": null,
+            "width": 1179,
+            "height": 2556,
+            "dpi": 460,
+            "devicePixelRatio": 3,
+            "orientation": "portrait",
+            "safeArea": [
+                141,
+                0,
+                102,
+                0
+            ],
+            "platform": "ios",
+            "operatingSystem": "iOS 18",
+            "deviceModel": "Generic iOS Phone",
+            "cpuCores": 6,
+            "memoryMB": 6144,
+            "graphicsApi": "Metal",
+            "touchPoints": 5
+        },
+        "babylonEditorDeviceSimulationProfiles": {
+            "version": 1,
+            "revision": 0,
+            "profiles": []
+        },
+        "babylonEditorTesting": {
+            "version": 2,
+            "revision": 0,
+            "settings": {
+                "defaultTimeoutMs": 30000,
+                "playPreparationTimeoutMs": 120000,
+                "maximumRetainedRuns": 20
+            },
+            "suites": [],
+            "runs": []
+        },
+        "babylonEditorSceneTests": [],
+        "babylonEditorPerformanceBudgets": [],
+        "babylonEditorAudioBuses": [],
+        "babylonEditorAudioMixerSnapshots": [],
+        "babylonEditorAudioReverbZones": [],
+        "babylonEditorVideoPlayers": [],
+        "babylonEditorVfxBudgetProfiles": [],
+        "babylonEditorBuildPipeline": {
+            "version": 2,
+            "revision": 0,
+            "profiles": []
+        },
+        "babylonEditorBuildReports": [],
+        "babylonEditorRendererDataSelections": {
+            "version": 1,
+            "revision": 1,
+            "default": null,
+            "cameras": []
+        },
+        "babylonEditorRenderingProfiles": [],
+        "babylonEditorRenderingVolumes": [],
+        "babylonEditorCustomRenderPasses": [],
+        "babylonEditorRendererFeatureInstances": [],
+        "babylonEditorXR": {
+            "version": 2,
+            "revision": 1,
+            "enabled": false,
+            "session": {
+                "mode": "immersive-vr",
+                "referenceSpaceType": "local-floor",
+                "initializeOnStartup": true,
+                "showEnterExitUI": true,
+                "requiredFeatures": [],
+                "optionalFeatures": []
+            },
+            "origin": {
+                "originNodeId": null,
+                "cameraId": null,
+                "floorMeshIds": [],
+                "worldScale": 100
+            },
+            "interaction": {
+                "pointerSelection": true,
+                "nearInteraction": true,
+                "handTracking": true,
+                "gazeMode": false,
+                "preferredHandedness": "any",
+                "maxPointerDistance": 100,
+                "gazeSelectionTimeMs": 3000
+            },
+            "locomotion": {
+                "teleportation": true,
+                "continuousMove": false,
+                "continuousTurn": false,
+                "movementSpeed": 1,
+                "rotationSpeed": 1,
+                "rotationAngleDegrees": 22.5,
+                "snapPointsOnly": false,
+                "snapPoints": [],
+                "snapRadius": 0.8
+            },
+            "simulation": {
+                "enabled": false,
+                "environmentMeshIds": [],
+                "headset": {
+                    "position": [
+                        0,
+                        1.7,
+                        0
+                    ],
+                    "rotation": [
+                        0,
+                        0,
+                        0
+                    ]
+                },
+                "leftController": {
+                    "position": [
+                        -0.25,
+                        1.35,
+                        0.35
+                    ],
+                    "rotation": [
+                        0,
+                        0,
+                        0
+                    ],
+                    "enabled": true
+                },
+                "rightController": {
+                    "position": [
+                        0.25,
+                        1.35,
+                        0.35
+                    ],
+                    "rotation": [
+                        0,
+                        0,
+                        0
+                    ],
+                    "enabled": true
+                },
+                "maxRayDistance": 100
+            },
+            "interactables": [],
+            "maxTraceEvents": 256
+        },
+        "babylonEditorProjectCodeTesting": {
+            "version": 1,
+            "revision": 0,
+            "packageScript": "test",
+            "coverageScript": "coverage",
+            "timeoutMs": 120000,
+            "maximumOutputBytes": 1048576,
+            "runs": []
+        },
+        "babylonEditorVehicles": [],
+        "babylonEditorNavAgents": []
     },
     "editorCamera": {
         "tags": null,
@@ -62,16 +236,17 @@
         ],
         "checkCollisions": false,
         "applyGravity": false,
+        "updateUpVectorFromRotation": false,
         "rotation": [
-            0.1371668477935948,
-            -0.7565193527108817,
+            0.6154797086703874,
+            -2.356194490192345,
             0
         ],
-        "speed": 200,
+        "speed": 2,
         "position": [
-            461.58465792469366,
-            140.63771402557663,
-            -488.54810769867925
+            375,
+            290,
+            175
         ],
         "upVector": [
             0,
@@ -81,16 +256,16 @@
         "fov": 0.8,
         "projectionPlaneTilt": 0,
         "minZ": 1,
-        "maxZ": 1000000,
-        "inertia": 0.5,
+        "maxZ": 10000,
+        "inertia": 0.9,
         "mode": 0,
         "layerMask": 268435455,
         "fovMode": 0,
         "cameraRigMode": 0,
+        "ignoreCameraMaxZ": false,
         "name": "camera",
         "id": "camera",
         "state": "",
-        "uniqueId": 3,
         "type": "EditorCamera",
         "inputsmgr": {
             "FreeCameraKeyboardMoveInput": {
@@ -126,7 +301,7 @@
                     1,
                     2
                 ],
-                "angularSensibility": 500
+                "angularSensibility": 2000
             },
             "FreeCameraMouseWheelInput": {
                 "tags": null,
@@ -135,11 +310,35 @@
                 "wheelPrecisionX": 3,
                 "wheelPrecisionY": 3,
                 "wheelPrecisionZ": 3
+            },
+            "EditorFreeCameraPanInput": {
+                "tags": null
             }
         },
         "animations": [],
         "ranges": [],
         "isEnabled": true
     },
-    "animationGroups": []
+    "clusteredLight": {
+        "maxRange": 16383,
+        "depthSlices": 16,
+        "verticalTiles": 64,
+        "horizontalTiles": 64,
+        "lights": []
+    },
+    "rendering": [
+        {
+            "cameraId": "camera",
+            "ssao2RenderingPipeline": null,
+            "vlsPostProcess": null,
+            "ssrRenderingPipeline": null,
+            "motionBlurPostProcess": null,
+            "defaultRenderingPipeline": null,
+            "taaRenderingPipeline": null,
+            "customColorPostProcess": null,
+            "iblShadowsRenderPipeline": null
+        }
+    ],
+    "animations": [],
+    "serializationVersion": "1.0.0"
 }

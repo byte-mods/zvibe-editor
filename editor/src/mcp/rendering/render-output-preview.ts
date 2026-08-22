@@ -7,13 +7,18 @@ import { readCustomRenderPassOutputPixels } from "babylonjs-editor-tools";
 
 /** Reads a live texture-backed graph output and returns a bounded PNG plus deterministic pixel diagnostics. */
 export async function captureCustomRenderPassOutput(scene: Scene, data: any): Promise<any> {
-	if (!scene.activeCamera) throw new Error("No active camera is available for render-graph output capture.");
+	if (!scene.activeCamera) {
+		throw new Error("No active camera is available for render-graph output capture.");
+	}
 	const width = data.width ?? 128;
 	const height = data.height ?? 128;
-	if (!Number.isInteger(width) || !Number.isInteger(height) || width < 16 || width > 256 || height < 16 || height > 256)
+	if (!Number.isInteger(width) || !Number.isInteger(height) || width < 16 || width > 256 || height < 16 || height > 256) {
 		throw new Error("Render-output preview width and height must be integers from 16 through 256.");
+	}
 	const sampling: "nearest" | "bilinear" = data.sampling ?? "bilinear";
-	if (sampling !== "nearest" && sampling !== "bilinear") throw new Error("Render-output preview sampling must be nearest or bilinear.");
+	if (sampling !== "nearest" && sampling !== "bilinear") {
+		throw new Error("Render-output preview sampling must be nearest or bilinear.");
+	}
 	const flipY = data.flipY !== false;
 	const includeImage = data.includeImage !== false;
 	const source = await readCustomRenderPassOutputPixels(scene.activeCamera as any, data.output, flipY);
@@ -32,7 +37,9 @@ export async function captureCustomRenderPassOutput(scene: Scene, data: any): Pr
 			minimum[channel] = Math.min(minimum[channel], value);
 			maximum[channel] = Math.max(maximum[channel], value);
 		}
-		if (resized.data[offset + 3] > 0) coveredPixels++;
+		if (resized.data[offset + 3] > 0) {
+			coveredPixels++;
+		}
 	}
 	const pixelCount = resized.info.width * resized.info.height;
 	const png = includeImage

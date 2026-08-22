@@ -5,7 +5,7 @@ import { mkdir, writeFile } from "fs-extra";
 import { isAbstractMesh } from "../tools/guards/nodes";
 import { getBase64SceneScreenshot } from "../tools/scene/screenshot";
 
-import { startProjectDevProcess } from "../project/run";
+import { getProjectDevProcessStatus, startProjectDevProcess, stopProjectDevProcess } from "../project/run";
 import { projectConfiguration } from "../project/configuration";
 
 import { IMCPActionOptions } from "./action";
@@ -38,11 +38,17 @@ export async function getScreenshot(scene: Scene, data: any): Promise<any> {
 
 /** Captures the live editor viewport as a project PNG baseline for visual-regression comparison. */
 export async function captureVisualRegressionBaseline(scene: Scene, data: any): Promise<any> {
-	if (!projectConfiguration.path) throw new Error("No project is currently open.");
-	if (!data.path?.endsWith(".png")) throw new Error("path must be a project-relative .png file.");
+	if (!projectConfiguration.path) {
+		throw new Error("No project is currently open.");
+	}
+	if (!data.path?.endsWith(".png")) {
+		throw new Error("path must be a project-relative .png file.");
+	}
 	const directory = dirname(projectConfiguration.path);
 	const output = isAbsolute(data.path) ? data.path : join(directory, data.path);
-	if (output !== directory && !output.startsWith(`${directory}/`)) throw new Error("Baseline path must stay inside the open project.");
+	if (output !== directory && !output.startsWith(`${directory}/`)) {
+		throw new Error("Baseline path must stay inside the open project.");
+	}
 	const screenshot = await getScreenshot(scene, data);
 	await mkdir(dirname(output), { recursive: true });
 	await writeFile(output, Buffer.from(screenshot.imageBase64, "base64"));
@@ -83,5 +89,17 @@ export function focusNode(scene: Scene, data: any, options: IMCPActionOptions): 
 export async function runProject(_scene: Scene, _data: any, options: IMCPActionOptions): Promise<any> {
 	await startProjectDevProcess(options.editor);
 
-	return { started: true };
+	return { started: true, ...getProjectDevProcessStatus() };
+}
+
+/** Reads the external project development-process lifecycle without changing it. */
+export function getProjectRunStatus(): any {
+	return getProjectDevProcessStatus();
+}
+
+/** Stops the external project development process and releases its terminal. */
+export async function stopProject(): Promise<any> {
+	const before = getProjectDevProcessStatus();
+	await stopProjectDevProcess();
+	return { stopped: before.running || before.busy, ...getProjectDevProcessStatus() };
 }

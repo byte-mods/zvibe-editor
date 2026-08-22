@@ -6,6 +6,7 @@ import { ensureDir, move, pathExists, readFile, readJSON, remove, stat, writeJSO
 import { executeAnimationImporterSource, IAnimationImporterResult, IAnimationImporterSettings, normalizeAnimationImporterSettings } from "babylonjs-editor-tools";
 
 import { projectConfiguration } from "../../project/configuration";
+import { applyImporterArtifactWithAccelerator } from "./import-accelerator";
 import { readAssetMetadata } from "./registry";
 
 const MAX_ANIMATION_SOURCE_BYTES = 64 * 1024 * 1024;
@@ -47,8 +48,8 @@ async function animationImporterFingerprint(path: string, settings: IAnimationIm
 }
 
 function validateExtension(path: string): void {
-	if (![".animation", ".animations", ".animator", ".controller"].includes(extname(path).toLowerCase())) {
-		throw new Error("Animation importer supports .animation, .animations, .animator, and .controller assets.");
+	if (![".animation", ".animations", ".anim", ".animator", ".controller"].includes(extname(path).toLowerCase())) {
+		throw new Error("Animation importer supports Babylon .animation/.animations, Unity .anim, and .animator/.controller assets.");
 	}
 }
 
@@ -67,6 +68,8 @@ export async function processAnimationImporterOutput(sourcePath: string, request
 		sourcePath,
 		outputPath: requestedOutputPath,
 		sourceKind: executed.sourceKind,
+		sourceFormat: executed.sourceFormat,
+		outputFormat: executed.outputFormat,
 		settings,
 		sourceBytes: details.size,
 		clips: executed.clips,
@@ -80,11 +83,22 @@ export async function processAnimationImporterOutput(sourcePath: string, request
 		controllerBlendTreeCount: executed.controllerBlendTreeCount,
 		controllerMotionBindings: executed.controllerMotionBindings,
 		controllerAvatarMaskBindings: executed.controllerAvatarMaskBindings,
+		controllerBehaviourBindings: executed.controllerBehaviourBindings,
+		controllerBehaviourBindingCount: executed.controllerBehaviourBindingCount,
+		controllerCompatibility: executed.controllerCompatibility,
 		controllerUnsupportedFeatures: executed.controllerUnsupportedFeatures,
+		activeStateCurveCount: executed.activeStateCurveCount,
+		compressedRotationCurveCount: executed.compressedRotationCurveCount,
+		objectReferenceCurves: executed.objectReferenceCurves,
 		sourceKeyCount: executed.sourceKeyCount,
 		sampledKeyCount: executed.sampledKeyCount,
 		outputKeyCount: executed.outputKeyCount,
 		reducedKeyCount: Math.max(0, executed.sampledKeyCount - executed.outputKeyCount),
+		removedConstantScaleTrackCount: executed.removedConstantScaleTrackCount,
+		roundTripSafe: executed.roundTripSafe,
+		preservedFeatures: executed.preservedFeatures,
+		approximatedFeatures: executed.approximatedFeatures,
+		unsupportedFeatures: executed.unsupportedFeatures,
 		valid: executed.errors.length === 0,
 		errors: [...new Set(executed.errors)],
 		warnings: [...new Set(executed.warnings)],
@@ -120,6 +134,16 @@ export async function getAnimationImporterArtifactStatus(path: string): Promise<
 }
 
 export async function applyAnimationImporterArtifact(path: string, expectedFingerprint: string): Promise<IAnimationImporterArtifactStatus> {
+	return applyImporterArtifactWithAccelerator({
+		kind: "animation",
+		sourcePath: path,
+		expectedFingerprint,
+		inspect: () => getAnimationImporterArtifactStatus(path),
+		applyLocal: () => applyAnimationImporterArtifactLocally(path, expectedFingerprint),
+	});
+}
+
+async function applyAnimationImporterArtifactLocally(path: string, expectedFingerprint: string): Promise<IAnimationImporterArtifactStatus> {
 	const status = await getAnimationImporterArtifactStatus(path);
 	if (status.fingerprint !== expectedFingerprint) {
 		throw new Error(`Animation importer plan changed. Inspect again and use current fingerprint ${status.fingerprint}.`);

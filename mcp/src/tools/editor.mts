@@ -31,6 +31,18 @@ export function registerEditorTools(server: McpServer): void {
 	);
 
 	server.registerTool(
+		"set_inspector_search",
+		{
+			title: "Set Inspector search",
+			description:
+				"Apply or clear the visible Inspector field filter through the same state used by direct UI input. Search is case-insensitive, normalizes camelCase and path separators, and requires every whitespace-separated term to match a field label, property path, tooltip, or nested section declaration. Pass an empty query to restore every field.",
+			inputSchema: z.object({ query: z.string().max(128).describe("Inspector search text, or an empty string to clear the filter.") }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_inspector_search", args)
+	);
+
+	server.registerTool(
 		"get_scene_diagnostics",
 		{
 			title: "Get scene diagnostics",
@@ -40,13 +52,64 @@ export function registerEditorTools(server: McpServer): void {
 		},
 		async (): Promise<CallToolResult> => callTextTool("get_scene_diagnostics")
 	);
+
+	server.registerTool(
+		"get_render_debug_view",
+		{
+			title: "Get render debug view",
+			description:
+				"Inspect the editor preview's transient overdraw or light-complexity view. Returns the exact revision lease, active mode, backend/shader language, readiness, target size, eligible mesh/light counts, light-count histogram, rendered-frame evidence, and explicit accuracy limitations. Use the returned revision with set_render_debug_view or capture_render_debug_view.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (): Promise<CallToolResult> => callTextTool("get_render_debug_view")
+	);
+
+	server.registerTool(
+		"set_render_debug_view",
+		{
+			title: "Set render debug view",
+			description:
+				"Exact-revision activation, reconfiguration, or disposal of the editor preview's transient renderer diagnostic overlay. Overdraw uses additive material-override fragment submissions with disabled depth and a configurable 4-32 display saturation. Light complexity heat-maps each eligible mesh by the 0-16 enabled Babylon lights accepted by its inclusion/layer filters. This does not modify authored materials or persisted scene data; pass mode disabled to release every transient target, layer, and material.",
+			inputSchema: z
+				.object({
+					expectedRevision: z.number().int().positive().describe("Exact revision returned by get_render_debug_view."),
+					mode: z.enum(["disabled", "overdraw", "light-complexity"]).describe("Transient diagnostic mode to activate, or disabled to release it."),
+					maximumOverdraw: z.number().int().min(4).max(32).optional().describe("Overdraw display saturation count; defaults to the prior value or 8."),
+					maximumLightCount: z.number().int().min(1).max(16).optional().describe("Highest light-count heat-map bucket; defaults to the prior value or 8."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_render_debug_view", args)
+	);
+
+	server.registerTool(
+		"capture_render_debug_view",
+		{
+			title: "Capture render debug view",
+			description:
+				"Render and read the currently active transient overdraw/light-complexity target under an exact revision lease. Returns frame/resource evidence, pixel coverage, RGBA min/max/average, raw-pixel SHA-256, and a bounded PNG preview descriptor. The aspect-preserving source target is capped at 2048 per dimension and 4,194,304 pixels. Set includeImage true only when the PNG base64 is needed; the target remains active and no authored scene data changes.",
+			inputSchema: z
+				.object({
+					expectedRevision: z.number().int().positive().describe("Exact active revision returned by get_render_debug_view."),
+					width: z.number().int().min(16).max(512).optional().describe("Maximum preview PNG width; defaults to 256."),
+					height: z.number().int().min(16).max(512).optional().describe("Maximum preview PNG height; defaults to 256."),
+					includeImage: z.boolean().optional().describe("Include preview.pngBase64 when true; defaults to false for compact agent context."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("capture_render_debug_view", args)
+	);
 	server.registerTool(
 		"get_device_simulation",
 		{
 			title: "Get device simulation",
-			description: "Get the persisted preview device simulator resolution, orientation, DPI, and safe-area profile.",
-			inputSchema: z.object({}),
-			annotations: { readOnlyHint: true },
+			description:
+				"Get the exact persisted Device Simulator revision, selected profile, natural and resolved orientation dimensions/safe area, normalized Application/Screen/SystemInfo values, and explicit non-simulated limitations.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (): Promise<CallToolResult> => callTextTool("get_device_simulation")
 	);
@@ -55,96 +118,36 @@ export function registerEditorTools(server: McpServer): void {
 		{
 			title: "Set device simulation",
 			description:
-				"Configure the editor preview's actual Babylon engine view for a mobile device resolution, orientation, DPI, and safe area. Set enabled false to return to panel-fit rendering.",
-			inputSchema: z.object({
-				enabled: z.boolean().optional(),
-				width: z.number().int().min(160).max(16384).optional(),
-				height: z.number().int().min(160).max(16384).optional(),
-				dpi: z.number().positive().max(2000).optional(),
-				orientation: z.enum(["portrait", "landscape"]).optional(),
-				safeArea: z.array(z.number().nonnegative()).length(4).optional().describe("[top, right, bottom, left] pixels."),
-			}),
-			annotations: { idempotentHint: true },
+				"Exactly configure the actual preview engine view and simulated Application/Screen/SystemInfo environment, optionally applying a built-in/custom profile. Hardware performance remains explicitly unsimulated; set enabled=false to return to panel-fit rendering.",
+			inputSchema: z
+				.object({
+					expectedRevision: z.number().int().min(0).optional(),
+					enabled: z.boolean().optional(),
+					profileId: z
+						.string()
+						.regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+						.nullable()
+						.optional(),
+					width: z.number().int().min(160).max(16384).optional(),
+					height: z.number().int().min(160).max(16384).optional(),
+					dpi: z.number().positive().max(2000).optional(),
+					devicePixelRatio: z.number().positive().max(16).optional(),
+					orientation: z.enum(["portrait", "landscape"]).optional(),
+					safeArea: z.tuple([z.number().nonnegative(), z.number().nonnegative(), z.number().nonnegative(), z.number().nonnegative()]).optional(),
+					platform: z.enum(["android", "ios", "tablet", "desktop-browser"]).optional(),
+					operatingSystem: z.string().min(1).max(120).optional(),
+					deviceModel: z.string().min(1).max(120).optional(),
+					cpuCores: z.number().int().min(1).max(256).optional(),
+					memoryMB: z.number().int().min(128).max(1048576).optional(),
+					graphicsApi: z.string().min(1).max(120).optional(),
+					touchPoints: z.number().int().min(0).max(32).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_device_simulation", args)
 	);
 
-	server.registerTool(
-		"list_profiler_snapshots",
-		{ title: "List profiler snapshots", description: "List persisted renderer/scene diagnostics snapshots.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
-		async (): Promise<CallToolResult> => callTextTool("list_profiler_snapshots")
-	);
-	server.registerTool(
-		"capture_profiler_snapshot",
-		{
-			title: "Capture profiler snapshot",
-			description: "Capture current scene diagnostics under a name; replaces an existing snapshot of the same name.",
-			inputSchema: z.object({ id: z.string().optional(), name: z.string() }),
-		},
-		async (args): Promise<CallToolResult> => callTextTool("capture_profiler_snapshot", args)
-	);
-	server.registerTool(
-		"compare_profiler_snapshots",
-		{
-			title: "Compare profiler snapshots",
-			description: "Compare numeric diagnostics between two named/id profiler snapshots.",
-			inputSchema: z.object({ baseline: z.string(), current: z.string() }),
-			annotations: { readOnlyHint: true },
-		},
-		async (args): Promise<CallToolResult> => callTextTool("compare_profiler_snapshots", args)
-	);
-	server.registerTool(
-		"list_profiler_captures",
-		{
-			title: "List profiler captures",
-			description: "List bounded renderer/scene metric capture sessions with numeric summaries.",
-			inputSchema: z.object({}),
-			annotations: { readOnlyHint: true },
-		},
-		async (): Promise<CallToolResult> => callTextTool("list_profiler_captures")
-	);
-	server.registerTool(
-		"get_profiler_capture",
-		{
-			title: "Get profiler capture",
-			description: "Read a profiler capture's timestamped samples and per-metric min/max/average summary.",
-			inputSchema: z.object({ id: z.string().optional(), name: z.string().optional() }),
-			annotations: { readOnlyHint: true },
-		},
-		async (args): Promise<CallToolResult> => callTextTool("get_profiler_capture", args)
-	);
-	server.registerTool(
-		"start_profiler_capture",
-		{
-			title: "Start profiler capture",
-			description: "Start a bounded preview profiler capture. Samples frame timing, draw calls, active meshes, vertices, and resource counts at a fixed interval.",
-			inputSchema: z.object({
-				id: z.string().optional(),
-				name: z.string().min(1),
-				sampleIntervalMs: z.number().int().min(1).max(10000).optional(),
-				maxSamples: z.number().int().min(1).max(36000).optional(),
-			}),
-		},
-		async (args): Promise<CallToolResult> => callTextTool("start_profiler_capture", args)
-	);
-	server.registerTool(
-		"stop_profiler_capture",
-		{
-			title: "Stop profiler capture",
-			description: "Stop an active profiler capture while retaining its samples and summary.",
-			inputSchema: z.object({ id: z.string().optional(), name: z.string().optional() }),
-		},
-		async (args): Promise<CallToolResult> => callTextTool("stop_profiler_capture", args)
-	);
-	server.registerTool(
-		"delete_profiler_capture",
-		{
-			title: "Delete profiler capture",
-			description: "Delete a profiler capture and its sampled metrics.",
-			inputSchema: z.object({ id: z.string().optional(), name: z.string().optional() }),
-		},
-		async (args): Promise<CallToolResult> => callTextTool("delete_profiler_capture", args)
-	);
 	server.registerTool(
 		"undo_editor",
 		{

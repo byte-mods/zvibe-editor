@@ -159,9 +159,15 @@ describe("executed font importer", () => {
 		const applied = await applyFontImporterArtifact(source, planned.fingerprint);
 		expect(applied).toMatchObject({
 			current: true,
-			result: { renderMode: "msdf", glyphCount: expect.any(Number), pages: [expect.objectContaining({ width: expect.any(Number) })] },
+			result: {
+				renderMode: "msdf",
+				glyphCount: expect.any(Number),
+				sourceFontPath: expect.stringContaining("game.ttf"),
+				pages: [expect.objectContaining({ width: expect.any(Number) })],
+			},
 		});
 		expect(await pathExists(applied.result!.manifestPath)).toBe(true);
+		expect(await readFile(applied.result!.sourceFontPath!)).toEqual(await readFile(source));
 
 		metadata.importer.settings.fontSize = 44;
 		await writeAssetMetadata(source, metadata);

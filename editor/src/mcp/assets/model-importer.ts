@@ -2,13 +2,14 @@ import "babylonjs-loaders";
 
 import { createHash } from "crypto";
 import { createReadStream, existsSync, readFileSync, realpathSync, statSync } from "fs";
-import { basename, dirname, extname, join, relative, resolve } from "path/posix";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "path/posix";
 import { ensureDir, move, pathExists, readFile, readJSON, realpath, remove, stat, writeJSON } from "fs-extra";
 
 import { LoadAssetContainerAsync, Material, NullEngine, Scene, SceneSerializer } from "babylonjs";
 import { convertBlendFileToGlb } from "babylonjs-editor-cli";
 import {
 	blendRequiresExternalConverter,
+	collectBabylonMaterialTextureCandidates,
 	convertAssimpModelFileToGlb,
 	configureSerializedModelGeneratedLods,
 	emptyExecutedModelImport,
@@ -25,17 +26,32 @@ import {
 	planModelMaterialExtraction,
 	planModelMaterialSearch,
 	prepareModelImporterSource,
+	resolveBabylonMaterialTextureReferencesForLoading,
 	resolveModelImporterPlatformSettings,
 } from "babylonjs-editor-tools";
 
 import { projectConfiguration } from "../../project/configuration";
 import { normalizedGlob } from "../../tools/fs";
+import { applyImporterArtifactWithAccelerator } from "./import-accelerator";
 import { getIndexedAssetDependencies, readAssetMetadata } from "./registry";
 
 const MAX_MODEL_SOURCE_BYTES = 256 * 1024 * 1024;
+const MAX_MODEL_EXPENSIVE_OPTIMIZATION_SOURCE_BYTES = 64 * 1024 * 1024;
 const supportedModelExtensions = [".glb", ".gltf", ".babylon", ".fbx", ".obj", ".stl", ".dae", ".3ds", ".ms3d", ".b3d", ".x", ".lwo", ".dxf", ".blend"];
 const legacyModelExtensions = new Set([".fbx", ".dae", ".3ds", ".ms3d", ".b3d", ".x", ".lwo", ".dxf", ".blend"]);
 let assimpRuntimePromise: Promise<any> | null = null;
+
+export function boundModelImporterProcessingSettings(sourceBytes: number, settings: IModelImporterSettings): { settings: IModelImporterSettings; warnings: string[] } {
+	if (sourceBytes <= MAX_MODEL_EXPENSIVE_OPTIMIZATION_SOURCE_BYTES || (!settings.weldVertices && !settings.optimizeMesh)) {
+		return { settings, warnings: [] };
+	}
+	return {
+		settings: { ...settings, weldVertices: false, optimizeMesh: false },
+		warnings: [
+			`Vertex welding and index optimization were skipped because the ${sourceBytes}-byte source exceeds the ${MAX_MODEL_EXPENSIVE_OPTIMIZATION_SOURCE_BYTES}-byte interactive processing limit.`,
+		],
+	};
+}
 
 export interface IModelImporterArtifactStatus {
 	path: string;
@@ -376,6 +392,7 @@ async function loadModelMaterialRemaps(scene: Scene, settings: IModelImporterSet
 		}
 		try {
 			const data = await readJSON(canonical);
+			resolveBabylonMaterialTextureReferencesForLoading(materialPath, data, root);
 			const material = Material.Parse(data, scene, "");
 			if (!material) {
 				continue;
@@ -386,6 +403,21 @@ async function loadModelMaterialRemaps(scene: Scene, settings: IModelImporterSet
 		}
 	}
 	return result;
+}
+
+/** Converts absolute source-project texture URLs into paths relative to the private model artifact. */
+function rebaseSerializedModelTexturePaths(serialized: Record<string, unknown>, sourceRoot: string, outputPath: string): void {
+	for (const candidate of collectBabylonMaterialTextureCandidates(serialized)) {
+		const path = candidate.value.split(/[?#]/, 1)[0];
+		if (!isAbsolute(path)) {
+			continue;
+		}
+		const containment = relative(sourceRoot, path);
+		if (containment === ".." || containment.startsWith("../") || isAbsolute(containment)) {
+			continue;
+		}
+		candidate.setValue?.(relative(dirname(outputPath), path).replace(/\\/g, "/"));
+	}
 }
 
 async function resolveAutomaticMaterialSearch(
@@ -476,6 +508,7 @@ export async function processModelImporterOutput(
 		loaded.addAllToScene();
 		const searched = await resolveAutomaticMaterialSearch(sourcePath, loaded.materials, effectiveSettings);
 		const materialRemapMaterials = await loadModelMaterialRemaps(scene, searched.settings, dependencies);
+		const boundedProcessing = boundModelImporterProcessingSettings(details.size, searched.settings);
 		const executed = await executeModelImporterEntries(
 			{
 				meshes: loaded.meshes,
@@ -489,11 +522,14 @@ export async function processModelImporterOutput(
 				skeletonCount: loaded.skeletons.length,
 				skeletons: loaded.skeletons,
 			},
-			searched.settings
+			boundedProcessing.settings
 		);
+		executed.warnings.push(...boundedProcessing.warnings);
 		await ensureDir(dirname(requestedOutputPath));
 		const serialized = await SceneSerializer.SerializeAsync(scene);
 		configureSerializedModelGeneratedLods(serialized, scene, (meshes) => SceneSerializer.SerializeMesh(meshes));
+		const canonicalOutputPath = join(await realpath(dirname(requestedOutputPath)), basename(requestedOutputPath));
+		rebaseSerializedModelTexturePaths(serialized, await realpath(projectDirectory()), canonicalOutputPath);
 		await writeJSON(requestedOutputPath, serialized, { spaces: "\t" });
 		const errors = [...new Set([...prepared.errors, ...executed.errors])];
 		return {
@@ -567,6 +603,16 @@ export async function getModelImporterArtifactStatus(path: string): Promise<IMod
 }
 
 export async function applyModelImporterArtifact(path: string, expectedFingerprint: string): Promise<IModelImporterArtifactStatus> {
+	return applyImporterArtifactWithAccelerator({
+		kind: "model",
+		sourcePath: path,
+		expectedFingerprint,
+		inspect: () => getModelImporterArtifactStatus(path),
+		applyLocal: () => applyModelImporterArtifactLocally(path, expectedFingerprint),
+	});
+}
+
+async function applyModelImporterArtifactLocally(path: string, expectedFingerprint: string): Promise<IModelImporterArtifactStatus> {
 	const status = await getModelImporterArtifactStatus(path);
 	if (status.fingerprint !== expectedFingerprint) {
 		throw new Error(`Model importer plan changed. Inspect again and use current fingerprint ${status.fingerprint}.`);

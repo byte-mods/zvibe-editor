@@ -11,9 +11,9 @@ import { ColorPicker } from "../../../../ui/color-picker";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../../ui/shadcn/ui/tooltip";
 
 import { registerUndoRedo } from "../../../../tools/undoredo";
-import { getInspectorPropertyValue } from "../../../../tools/property";
+import { getInspectorPropertyValue, notifyInspectorPropertyChanged } from "../../../../tools/property";
 
-import { IEditorInspectorFieldProps } from "./field";
+import { IEditorInspectorFieldProps, matchesInspectorSearch } from "./field";
 import { EditorInspectorNumberField } from "./number";
 import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
@@ -50,6 +50,7 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 				onFinish={(color) => handleColorPickerChange(color)}
 				onChange={(newColor) => {
 					color.set(newColor.r, newColor.g, newColor.b, newColor.a);
+					notifyInspectorPropertyChanged(props.object, props.property);
 					props.onChange?.(color);
 				}}
 			/>
@@ -58,6 +59,7 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 
 	function handleColorPickerChange(newColor: Color) {
 		color.set(newColor.r, newColor.g, newColor.b, newColor.a);
+		notifyInspectorPropertyChanged(props.object, props.property);
 		setValue(color.clone());
 
 		if (color && !oldValue.equals(color as any) && !props.noUndoRedo) {
@@ -81,6 +83,9 @@ export function EditorInspectorColorField(props: IEditorInspectorColorFieldProps
 
 		props.onChange?.(color);
 		prefab.notifyChanged();
+	}
+	if (!matchesInspectorSearch(props.label, props.property, props.tooltip)) {
+		return null;
 	}
 
 	return (

@@ -5,4 +5,21 @@ export { overrideWorkerMethods } from "./tools/worker.mjs";
 
 export { CancellationToken } from "./tools/cancel.mjs";
 
-export { convertBlendFileToGlb, IBlenderConversionOptions, IBlenderConversionResult } from "./blender/converter.mjs";
+export {
+	convertBlendFileToGlb,
+	convertGlbFileToFbx,
+	IBlenderConversionOptions,
+	IBlenderConversionResult,
+	IFbxConversionOptions,
+	IFbxConversionResult,
+} from "./blender/converter.mjs";
+export { convertAlembicFileToCache, IAlembicConversionOptions, IAlembicConversionResult } from "./blender/converter.mjs";
+export {
+	asepriteBuildOutputIsCurrent,
+	exportAsepriteBuildAsset,
+	getAsepriteBuildOutputPaths,
+	inspectAsepriteBuildSource,
+	normalizeAsepriteBuildGuid,
+	removeAsepriteBuildOutput,
+} from "./aseprite/exporter.mjs";
+export type { IAsepriteBuildOutput, IAsepriteBuildOutputManifest, IAsepriteBuildOutputOptions, IAsepriteBuildOutputPaths, IAsepriteBuildSource } from "./aseprite/exporter.mjs";

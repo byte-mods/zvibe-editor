@@ -25,8 +25,25 @@ export function DocumentationSidebarItem(props: IDocumentationSidebarItemProps) 
 
 export function DocumentationSidebar() {
 	return (
-		<div className="fixed top-0 left-0 w-96 overflow-y-auto mt-20 h-[calc(100vh-5rem)] px-5 pb-5 border-r border-r-neutral-950 text-white">
+		<div className="fixed top-0 left-0 z-10 hidden w-80 overflow-y-auto mt-20 h-[calc(100vh-5rem)] px-5 pb-5 border-r border-r-neutral-950 bg-black text-white xl:block">
 			<div className="flex flex-col gap-1">
+				<div className="font-semibold text-xl text-neutral-500 my-3">Developer tutorials</div>
+
+				<DocumentationSidebarItem title="Tutorial hub" href="/documentation/tutorials" />
+				<DocumentationSidebarItem title="Complete IDE tour" href="/documentation/tutorials/ide-tour" />
+				<DocumentationSidebarItem title="Assets & materials" href="/documentation/tutorials/assets-materials" />
+				<DocumentationSidebarItem title="Animation & Animator" href="/documentation/tutorials/animation-animator" />
+				<DocumentationSidebarItem title="TypeScript scripting" href="/documentation/tutorials/scripting-fundamentals" />
+				<DocumentationSidebarItem title="Feature workflow map" href="/documentation/tutorials/feature-workflows" />
+				<DocumentationSidebarItem title="Worldbuilding & physics" href="/documentation/tutorials/worldbuilding-physics" />
+				<DocumentationSidebarItem title="Rendering & VFX" href="/documentation/tutorials/rendering-vfx" />
+				<DocumentationSidebarItem title="Build & publish" href="/documentation/tutorials/build-publish" />
+				<DocumentationSidebarItem title="Racing game" href="/documentation/tutorials/racing-game" />
+				<DocumentationSidebarItem title="Third-person game" href="/documentation/tutorials/third-person-game" />
+				<DocumentationSidebarItem title="2D platformer" href="/documentation/tutorials/2d-platformer" />
+				<DocumentationSidebarItem title="MCP setup" href="/documentation/tutorials/mcp-guide" />
+				<DocumentationSidebarItem title="MCP game workflow" href="/documentation/tutorials/mcp-game-workflow" />
+
 				<div className="font-semibold text-xl text-neutral-500 my-3">Basics</div>
 
 				<DocumentationSidebarItem title="Introduction" href="/documentation" />

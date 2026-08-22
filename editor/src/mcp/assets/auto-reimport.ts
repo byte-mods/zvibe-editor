@@ -363,6 +363,46 @@ async function writeJob(job: IAutoReimportJob): Promise<void> {
 	await writeAtomicJson(statusPath(), job);
 }
 
+/** Removes deleted project paths from persisted Auto Reimport evidence after all previously queued jobs settle. */
+export async function removeDeletedPathsFromAutoReimportStatus(paths: string[]): Promise<boolean> {
+	const deletedPaths = [...new Set(paths.map(projectPath))].sort();
+	return serialize(async () => {
+		if (!(await pathExists(statusPath()))) {
+			return false;
+		}
+		let job: IAutoReimportJob;
+		try {
+			job = await readJSON(statusPath());
+		} catch {
+			return false;
+		}
+		const deleted = (path: string): boolean => deletedPaths.some((candidate) => pathMatches(path, candidate));
+		const results = Array.isArray(job.results)
+			? job.results.filter((result) => !deleted(result.path)).map((result) => ({ ...result, triggers: result.triggers.filter((trigger) => !deleted(trigger)) }))
+			: [];
+		const sourceCopies = Array.isArray(job.sourceCopies) ? job.sourceCopies.filter((copyResult) => !deleted(copyResult.assetPath)) : [];
+		const triggerPaths = job.triggerPaths === null ? null : job.triggerPaths.filter((trigger) => !deleted(trigger));
+		const changed = results.length !== job.results.length || sourceCopies.length !== job.sourceCopies.length || triggerPaths?.length !== job.triggerPaths?.length;
+		if (!changed) {
+			return false;
+		}
+		if (!results.length && !sourceCopies.length && (!triggerPaths || !triggerPaths.length)) {
+			await remove(statusPath());
+			return true;
+		}
+		job.results = results;
+		job.sourceCopies = sourceCopies;
+		job.triggerPaths = triggerPaths;
+		job.appliedCount = results.filter((result) => result.status === "applied").length;
+		job.currentCount = results.filter((result) => result.status === "current").length;
+		job.failedCount =
+			results.filter((result) => result.status === "failed" || result.status === "stalePlan").length +
+			sourceCopies.filter((copyResult) => copyResult.status === "failed").length;
+		await writeJob(job);
+		return true;
+	});
+}
+
 async function executePlan(plan: IAutoReimportPlan, editor?: Editor, sourceCopies: IAutoReimportSourceCopy[] = []): Promise<IAutoReimportJob> {
 	if (plan.blocked) {
 		throw new Error(plan.blockers.join(" "));
@@ -498,7 +538,19 @@ export async function getAutoReimportOriginPaths(): Promise<string[]> {
 	const registry = await ensureAssetRegistry();
 	const origins: string[] = [];
 	for (const entry of registry.entries) {
-		const metadata = await readAssetMetadata(join(projectDirectory(), entry.path));
+		const assetPath = join(projectDirectory(), entry.path);
+		if (!(await pathExists(assetPath))) {
+			continue;
+		}
+		let metadata: Awaited<ReturnType<typeof readAssetMetadata>>;
+		try {
+			metadata = await readAssetMetadata(assetPath);
+		} catch (error) {
+			if (!(await pathExists(assetPath))) {
+				continue;
+			}
+			throw error;
+		}
 		if (metadata.originPath) {
 			origins.push(normalize(metadata.originPath));
 			if (origins.length > MAXIMUM_ORIGIN_WATCHES) {

@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect the weighted 2D Sprite Skin creation contract. Which three ordinary Babylon scene object families back every authored sprite skin?</question>
+      <answer>Mesh, Skeleton, Bone</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect sprite skin geometry constraints. What is the maximum accepted grid segment count on each axis?</question>
+      <answer>64</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the sprite skin bone hierarchy contract. What is the maximum number of bones in one rig?</question>
+      <answer>128</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect replace_sprite_skin_bones. Which two exact values guard a hierarchy replacement against stale external writes?</question>
+      <answer>expectedRevision, expectedFingerprint</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect replace_sprite_skin_bones and the existing mesh skin-weight tools. Does hierarchy replacement regenerate normalized weights while fine painting remains owned by paint_mesh_skin_weights? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the PSD-to-rig plan. Which three PSD layer categories can create or affect the inferred hierarchy?</question>
+      <answer>groupStart, groupEnd, pixel</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect inspect_psd_sprite_skin_rig. Does it modify the scene or project files? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect create_sprite_skin_animation_clip. Which two planar bone properties can its tracks author?</question>
+      <answer>position, rotation</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect a created 2D bone clip. Is it stored as an ordinary editable Babylon AnimationGroup and opened in the full Animation Window? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect all eight dedicated weighted Sprite Skin MCP schemas. Are unknown top-level and nested input fields rejected before editor contact? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+</evaluation>

@@ -644,6 +644,16 @@ export function registerPrefabTools(server: McpServer): void {
 		async (args): Promise<CallToolResult> => callTextTool("open_prefab_stage", args)
 	);
 	server.registerTool(
+		"close_prefab_stage",
+		{
+			title: "Close Prefab Stage",
+			description: "Close the active shared Prefab Stage presentation without changing its asset or scene data.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (): Promise<CallToolResult> => callTextTool("close_prefab_stage", {})
+	);
+	server.registerTool(
 		"inspect_prefab_asset_node_property",
 		{
 			title: "Inspect prefab asset node property",
@@ -801,6 +811,16 @@ export function registerPrefabTools(server: McpServer): void {
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("open_prefab_bulk_overrides", args)
+	);
+	server.registerTool(
+		"close_prefab_bulk_overrides",
+		{
+			title: "Close multi-instance Prefab Overrides",
+			description: "Close the shared multi-instance Prefab Overrides presentation without applying or reverting any prefab data.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (): Promise<CallToolResult> => callTextTool("close_prefab_bulk_overrides", {})
 	);
 	server.registerTool(
 		"inspect_prefab_instance_structure",

@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect the MCP tool metadata, project source-control status, and Smart Lock policy for a project-contained path using read-only calls. Does policy inspection itself contact a Git remote? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect repository integration state and then try the read-only semantic-conflict inspector while no merge or rebase is active. What exact JSON value must operation report for the inspector to remain unavailable?</question>
+      <answer>null</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Read source-control status, preview integration against HEAD, and inspect semantic-conflict eligibility. When projectOwnsWorktree is true, which root must own the active merge or rebase?</question>
+      <answer>project root</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the Smart Lock rule-list and policy-inspection contracts. If multiple enabled rules match the same asset, which matching position determines policy?</question>
+      <answer>first</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the rule-list, create-rule, and update-rule schemas and their bounded policy documentation without mutating state. What is the maximum number of Smart Lock rules in one project?</question>
+      <answer>100</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare source-control remote-ref inspection with Smart Lock policy inspection for a configured remote destination. What exact freshnessScope value identifies a locally cached remote-tracking revision?</question>
+      <answer>knownRemoteTrackingRef</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the semantic conflict and standalone semantic merge tool contracts. Besides a scene JSON manifest, which single file extension is eligible for integrated Git-stage structural resolution?</question>
+      <answer>.prefab</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare the read-only semantic conflict result contract with the apply-and-stage schema. Are both the exact stage fingerprint and exact semantic output hash required before applying? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect collaboration status, Smart Lock policy mutation metadata, and semantic apply metadata. Which collaboration role is required for those policy/apply mutations when enforcement is enabled?</question>
+      <answer>admin</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare lock-list evidence, Smart Lock policy evidence, and release behavior. Which retention value blocks normal release until the acquisition branch is clean and merged?</question>
+      <answer>untilMerged</answer>
+   </qa_pair>
+</evaluation>

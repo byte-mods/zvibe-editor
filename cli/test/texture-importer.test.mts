@@ -1,4 +1,4 @@
-import { ensureDir, mkdtemp, pathExists, readJSON, remove, stat, writeFile, writeJSON } from "fs-extra";
+import { ensureDir, mkdtemp, pathExists, readFile, readJSON, remove, stat, writeFile, writeJSON } from "fs-extra";
 import { tmpdir } from "node:os";
 import { join } from "node:path/posix";
 
@@ -75,6 +75,36 @@ describe("CLI executed texture importer", () => {
 		await writeFile(path, format === "exr" ? encodeOpenExr(image) : encodeRadianceHdr(image));
 	}
 
+	test("copies retained UXML and USS sources byte-exactly into CLI build output", async () => {
+		const project = await mkdtemp(join(tmpdir(), "babylon-cli-retained-ui-"));
+		directories.push(project);
+		const assets = join(project, "assets");
+		const publicDir = join(project, "public", "scene");
+		await ensureDir(assets);
+		const uxml = join(assets, "hud.uxml");
+		const uss = join(assets, "hud.uss");
+		const uxmlSource = `<UXML><Style src="hud.uss"/><Label name="title" text="Ready"/></UXML>`;
+		const ussSource = `.title:hover { color: #73a7ff; }`;
+		await writeFile(uxml, uxmlSource);
+		await writeFile(uss, ussSource);
+		const exportedAssets: string[] = [];
+		const options = {
+			projectDir: project,
+			publicDir,
+			baseAssetsDir: assets,
+			outputAssetsDir: join(publicDir, "assets"),
+			optimize: false,
+			exportedAssets,
+			cache: {},
+			compressedTexturesEnabled: false,
+		};
+		await processAssetFile(uxml, options);
+		await processAssetFile(uss, options);
+		expect(await readFile(join(publicDir, "assets", "hud.uxml"), "utf8")).toBe(uxmlSource);
+		expect(await readFile(join(publicDir, "assets", "hud.uss"), "utf8")).toBe(ussSource);
+		expect(exportedAssets).toEqual(expect.arrayContaining([join(publicDir, "assets", "hud.uxml"), join(publicDir, "assets", "hud.uss")]));
+	});
+
 	test("produces the same resized, alpha-free, mipmapped, readable build output", async () => {
 		const project = await mkdtemp(join(tmpdir(), "babylon-cli-texture-"));
 		directories.push(project);
@@ -105,9 +135,15 @@ describe("CLI executed texture importer", () => {
 			effectiveColorSpace: "linear",
 			output: { width: 128, height: 64, channels: 3 },
 			mipmaps: [
-				{ width: 85, height: 42 },
-				{ width: 42, height: 21 },
+				{ width: 64, height: 32 },
+				{ width: 32, height: 16 },
+				{ width: 16, height: 8 },
+				{ width: 8, height: 4 },
+				{ width: 4, height: 2 },
+				{ width: 2, height: 1 },
+				{ width: 1, height: 1 },
 			],
+			processing: { outputFormat: "png", maxSizeApplied: true, fullMipChain: true },
 		});
 		expect(await pathExists(result.outputPath)).toBe(true);
 		expect((await stat(result.readableBitmapPath!)).size).toBe(128 * 64 * 4);
@@ -141,9 +177,14 @@ describe("CLI executed texture importer", () => {
 		const sidecarPath = join(publicDir, "assets", "build.bmp.bjstexture.json");
 		const sidecar = await readJSON(sidecarPath);
 		expect(sidecar).toMatchObject({
+			version: 2,
 			outputPath: "assets/build.png",
 			textureType: "normalMap",
 			colorSpace: "linear",
+			filterMode: "trilinear",
+			wrapModeU: "repeat",
+			wrapModeV: "repeat",
+			anisoLevel: 1,
 			readableBitmapPath: "assets/build.png.rgba",
 			result: { output: { width: 128, height: 64, channels: 3 } },
 		});
@@ -163,7 +204,7 @@ describe("CLI executed texture importer", () => {
 			.toFile(source);
 		const importer = getDefaultAssetImporterConfiguration(source);
 		importer.settings.platformOverrides = JSON.stringify({
-			web: { enabled: true, maxSize: 64, generateMipmaps: false, compression: "low", readable: false },
+			web: { enabled: true, outputFormat: "webp", maxSize: 64, generateMipmaps: false, compression: "low", readable: false },
 			desktop: { enabled: true, maxSize: 128, generateMipmaps: true, compression: "high", readable: true },
 		});
 		await writeJSON(`${source}.bjsmeta.json`, { version: 1, guid: "texture-platform-guid", importer });
@@ -179,7 +220,11 @@ describe("CLI executed texture importer", () => {
 		};
 		await processAssetFile(source, { ...baseOptions, assetPlatform: "web" });
 		const sidecarPath = join(publicDir, "assets", "platform.png.bjstexture.json");
-		expect(await readJSON(sidecarPath)).toMatchObject({ result: { platform: "web", platformOverrideApplied: true, output: { width: 64, height: 32 }, mipmaps: [] } });
+		expect(await readJSON(sidecarPath)).toMatchObject({
+			outputPath: "assets/platform.webp",
+			result: { platform: "web", platformOverrideApplied: true, processing: { outputFormat: "webp" }, output: { width: 64, height: 32 }, mipmaps: [] },
+		});
+		expect(await pathExists(join(publicDir, "assets", "platform.webp"))).toBe(true);
 		await processAssetFile(source, { ...baseOptions, exportedAssets: [], assetPlatform: "desktop" });
 		expect(await readJSON(sidecarPath)).toMatchObject({
 			result: { platform: "desktop", platformOverrideApplied: true, output: { width: 128, height: 64 }, readablePixelFormat: "rgba8" },

@@ -1,0 +1,8 @@
+[mcp_servers.zvibe-editor]
+command = "node"
+args = ["mcp/server/index.mjs"]
+cwd = "."
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+default_tools_approval_mode = "writes"

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { NullEngine, Scene } from "babylonjs";
 
-vi.mock("babylonjs-editor-tools", () => ({}));
+vi.mock("babylonjs-editor-tools", async (importOriginal) => ({ ...(await importOriginal<typeof import("babylonjs-editor-tools")>()) }));
 
 import { validatePhysicsScene } from "../../src/mcp/physics/constraints";
 import { findPhysicsCollisionLayer, getPhysicsCollisionLayers, setPhysicsCollisionLayers } from "../../src/mcp/scene/scene";
@@ -71,6 +71,14 @@ describe("mcp/physics-diagnostics", () => {
 	});
 
 	test("resolves the implicit Default collision layer for a new scene", () => {
-		expect(findPhysicsCollisionLayer(scene, "Default")).toEqual({ name: "Default", bit: 1, collidesWith: 0xffffffff });
+		expect(findPhysicsCollisionLayer(scene, "Default")).toEqual({ name: "Default", bit: 1, collidesWith: 0xffff });
+	});
+
+	test("normalizes legacy 32-bit collision masks so read output can be written back", () => {
+		const options = { editor: { layout: { inspector: { setEditedObject: vi.fn(), forceUpdate: vi.fn() } } } } as any;
+		scene.metadata = { babylonEditorPhysicsCollisionLayers: { layers: [{ name: "Legacy", bit: 1, collidesWith: 0xffffffff }] } };
+		const read = getPhysicsCollisionLayers(scene);
+		expect(read).toEqual({ layers: [{ name: "Legacy", bit: 1, collidesWith: 0xffff }] });
+		expect(() => setPhysicsCollisionLayers(scene, read, options)).not.toThrow();
 	});
 });

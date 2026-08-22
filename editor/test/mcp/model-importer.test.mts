@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { chmod, mkdir, mkdtemp, pathExists, readFile, readJSON, remove, writeFile, writeJSON } from "fs-extra";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join, relative } from "path";
 
 import {
 	Animation,
@@ -26,7 +26,13 @@ import {
 } from "babylonjs";
 import { configureGeneratedModelLodDeformations, normalizeModelImporterSettings, serializeModelMaterialRemaps } from "babylonjs-editor-tools";
 
-import { applyModelImporterArtifact, getModelImporterArtifactStatus, getModelMaterialExtractionStatus, processModelImporterOutput } from "../../src/mcp/assets/model-importer";
+import {
+	applyModelImporterArtifact,
+	boundModelImporterProcessingSettings,
+	getModelImporterArtifactStatus,
+	getModelMaterialExtractionStatus,
+	processModelImporterOutput,
+} from "../../src/mcp/assets/model-importer";
 import {
 	applyModelImporter,
 	getModelAnimationClips,
@@ -413,6 +419,17 @@ async function skinnedMorphLodBabylonDocument(): Promise<Record<string, unknown>
 }
 
 describe("executed model importer", () => {
+	test("bounds optional optimization work for large interactive sources", () => {
+		const settings = normalizeModelImporterSettings({ weldVertices: true, optimizeMesh: true });
+		const small = boundModelImporterProcessingSettings(64 * 1024 * 1024, settings);
+		const large = boundModelImporterProcessingSettings(64 * 1024 * 1024 + 1, settings);
+
+		expect(small).toEqual({ settings, warnings: [] });
+		expect(large.settings).toMatchObject({ weldVertices: false, optimizeMesh: false });
+		expect(large.settings.scaleFactor).toBe(settings.scaleFactor);
+		expect(large.warnings).toEqual([expect.stringContaining("interactive processing limit")]);
+	});
+
 	let directory: string;
 	let previousProjectPath: string | null;
 
@@ -1020,6 +1037,15 @@ fs.writeFileSync(process.argv[process.argv.length - 1], Buffer.from("${triangleG
 		const rewritten = await readJSON(materialPath);
 		expect(rewritten.diffuseTexture).toMatchObject({ name: "assets/Textures/body-albedo.png", url: "assets/Textures/body-albedo.png" });
 		expect(JSON.stringify(rewritten)).not.toContain("base64String");
+		const importer = await getModelImporterResult({} as Scene, { path: "assets/textured.babylon" });
+		const applied = await applyModelImporter({} as Scene, { path: "assets/textured.babylon", expectedFingerprint: importer.fingerprint, confirm: true }, options);
+		const outputPath = join(directory, applied.result.outputPath);
+		const output = await readJSON(outputPath);
+		const expectedTexturePath = relative(dirname(outputPath), join(directory, "assets", "Textures", "body-albedo.png")).replace(/\\/g, "/");
+		expect(output.materials.find((material: any) => material.name === "Textured Body")?.diffuseTexture).toMatchObject({
+			name: expectedTexturePath,
+			url: expectedTexturePath,
+		});
 		expect(refresh).toHaveBeenCalled();
 	});
 

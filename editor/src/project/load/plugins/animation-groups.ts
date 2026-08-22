@@ -1,5 +1,5 @@
 import { join } from "path/posix";
-import { readJSON } from "fs-extra";
+import { readSerializedJSON as readJSON } from "../../serialization-session";
 
 import { Scene, AnimationGroup } from "babylonjs";
 
@@ -29,6 +29,15 @@ export async function loadAnimationGroups(editor: Editor, animationGroupFiles: s
 							}
 						}
 						return null;
+					}
+					const spriteMatches = options.loadResult.spriteManagers.flatMap((manager) =>
+						(manager.spriteManager?.sprites ?? []).filter(
+							(sprite) =>
+								(sprite as any).id === targetedAnimation.targetId || sprite.name === targetedAnimation.targetId || sprite.name === targetedAnimation.targetName
+						)
+					);
+					if (spriteMatches.length === 1) {
+						return spriteMatches[0];
 					}
 					return findSceneLoadResultNodeById(options.loadResult, targetedAnimation.targetId);
 				});

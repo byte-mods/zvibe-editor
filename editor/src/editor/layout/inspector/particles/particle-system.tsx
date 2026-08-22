@@ -139,7 +139,7 @@ export class EditorParticleSystemInspector extends Component<IEditorInspectorImp
 
 				<EditorInspectorSectionField
 					title="Particle Collision Spheres"
-					tooltip="CPU particle collision volumes. Particles inside a sphere are projected to its surface and reflected using the configured restitution."
+					tooltip="CPU collision volumes. GPU particle systems expose the same persisted controls in their native-GPU Inspector."
 				>
 					{this._isCpuParticleSystem() ? (
 						this._getCollisionSpheresInspector()
@@ -150,7 +150,7 @@ export class EditorParticleSystemInspector extends Component<IEditorInspectorImp
 
 				<EditorInspectorSectionField
 					title="Particle Collision Planes"
-					tooltip="CPU particle collision planes. Particles crossing the plane's normal side are projected back and reflected using the configured restitution."
+					tooltip="CPU collision planes. GPU particle systems expose the same persisted controls in their native-GPU Inspector."
 				>
 					{this._isCpuParticleSystem() ? (
 						this._getCollisionPlanesInspector()
@@ -329,8 +329,11 @@ export class EditorParticleSystemInspector extends Component<IEditorInspectorImp
 			return;
 		}
 		const result = validateParticleSystem(scene, { particleSystemId: this.props.object.id });
-		if (result.valid) toast.success(`Particle system valid${result.warnings.length ? ` (${result.warnings.length} warning${result.warnings.length === 1 ? "" : "s"})` : ""}.`);
-		else toast.error(result.errors.join("\n"));
+		if (result.valid) {
+			toast.success(`Particle system valid${result.warnings.length ? ` (${result.warnings.length} warning${result.warnings.length === 1 ? "" : "s"})` : ""}.`);
+		} else {
+			toast.error(result.errors.join("\n"));
+		}
 	}
 
 	private _getAttractorsInspector(): ReactNode {
@@ -425,7 +428,9 @@ export class EditorParticleSystemInspector extends Component<IEditorInspectorImp
 
 	private _setParticleEvent(index: number, update: any): void {
 		const events = getParticleEvents(this.props.editor.layout.preview.scene, { particleSystemId: this.props.object.id }).events;
-		if (!update.name?.trim() && update.name !== undefined) return;
+		if (!update.name?.trim() && update.name !== undefined) {
+			return;
+		}
 		events[index] = { ...events[index], ...update };
 		this._setParticleEvents(events);
 	}
@@ -513,7 +518,9 @@ export class EditorParticleSystemInspector extends Component<IEditorInspectorImp
 
 	private _addParticleProximityEvent(): void {
 		const target = this.props.editor.layout.preview.scene.particleSystems.find((system) => system.id !== this.props.object.id);
-		if (!target) return;
+		if (!target) {
+			return;
+		}
 		const events = getParticleProximityEvents(this.props.editor.layout.preview.scene, { particleSystemId: this.props.object.id }).events;
 		this._setParticleProximityEvents([...events, { targetParticleSystemId: target.id, radius: 1, count: 10, cooldownMs: 100 }]);
 	}
@@ -541,12 +548,16 @@ export class EditorParticleSystemInspector extends Component<IEditorInspectorImp
 
 	private _setAttractorPosition(index: number, value: string): void {
 		const position = value.split(",").map((part) => Number(part.trim()));
-		if (position.length !== 3 || position.some((coordinate) => !Number.isFinite(coordinate))) return;
+		if (position.length !== 3 || position.some((coordinate) => !Number.isFinite(coordinate))) {
+			return;
+		}
 		this._setAttractor(index, { position });
 	}
 
 	private _setAttractorStrength(index: number, strength: number): void {
-		if (!Number.isFinite(strength)) return;
+		if (!Number.isFinite(strength)) {
+			return;
+		}
 		this._setAttractor(index, { strength });
 	}
 
@@ -639,7 +650,9 @@ export class EditorParticleSystemInspector extends Component<IEditorInspectorImp
 
 	private _setVectorFieldVector(index: number, property: "min" | "max" | "direction", value: string): void {
 		const vector = value.split(",").map((part) => Number(part.trim()));
-		if (vector.length !== 3 || vector.some((coordinate) => !Number.isFinite(coordinate))) return;
+		if (vector.length !== 3 || vector.some((coordinate) => !Number.isFinite(coordinate))) {
+			return;
+		}
 		this._setVectorField(index, { [property]: vector });
 	}
 
@@ -769,12 +782,16 @@ export class EditorParticleSystemInspector extends Component<IEditorInspectorImp
 
 	private _setCollisionPlaneVector(index: number, property: "position" | "normal", value: string): void {
 		const vector = value.split(",").map((part) => Number(part.trim()));
-		if (vector.length !== 3 || vector.some((coordinate) => !Number.isFinite(coordinate)) || (property === "normal" && !vector.some((coordinate) => coordinate !== 0))) return;
+		if (vector.length !== 3 || vector.some((coordinate) => !Number.isFinite(coordinate)) || (property === "normal" && !vector.some((coordinate) => coordinate !== 0))) {
+			return;
+		}
 		this._setCollisionPlane(index, { [property]: vector });
 	}
 
 	private _setCollisionPlaneRestitution(index: number, restitution: number): void {
-		if (!Number.isFinite(restitution) || restitution < 0 || restitution > 1) return;
+		if (!Number.isFinite(restitution) || restitution < 0 || restitution > 1) {
+			return;
+		}
 		this._setCollisionPlane(index, { restitution });
 	}
 
@@ -811,12 +828,16 @@ export class EditorParticleSystemInspector extends Component<IEditorInspectorImp
 
 	private _setCollisionSphereVector(index: number, value: string): void {
 		const center = value.split(",").map((part) => Number(part.trim()));
-		if (center.length !== 3 || center.some((coordinate) => !Number.isFinite(coordinate))) return;
+		if (center.length !== 3 || center.some((coordinate) => !Number.isFinite(coordinate))) {
+			return;
+		}
 		this._setCollisionSphere(index, { center });
 	}
 
 	private _setCollisionSphereNumber(index: number, property: "radius" | "restitution", value: number): void {
-		if (!Number.isFinite(value) || (property === "radius" && value <= 0) || (property === "restitution" && (value < 0 || value > 1))) return;
+		if (!Number.isFinite(value) || (property === "radius" && value <= 0) || (property === "restitution" && (value < 0 || value > 1))) {
+			return;
+		}
 		this._setCollisionSphere(index, { [property]: value });
 	}
 

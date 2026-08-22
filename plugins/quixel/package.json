@@ -9,10 +9,28 @@
 	},
 	"main": "build/index.js",
 	"typings": "declaration/index.d.ts",
-	"license": "(Apache-2.0)",
+	"zvibeEditor": {
+		"apiVersion": 1,
+		"id": "babylon.editor.quixel",
+		"displayName": "Quixel Bridge",
+		"description": "Loopback Quixel Bridge import integration for Zvibe Editor.",
+		"capabilities": [
+			"tests",
+			"editor"
+		],
+		"contributes": {
+			"tests": [
+				{
+					"id": "babylon.editor.quixel.listener",
+					"title": "Quixel Bridge listener"
+				}
+			]
+		}
+	},
+	"license": "Apache-2.0",
 	"devDependencies": {
 		"@types/node": "^22",
-		"babylonjs-editor": "latest",
+		"babylonjs-editor": "1.0.0",
 		"typescript": "5.9.3"
 	},
 	"dependencies": {

@@ -1,4 +1,4 @@
-import { writeJSON } from "fs-extra";
+import { dirname, relative } from "path/posix";
 
 import { Component, ReactNode } from "react";
 
@@ -8,7 +8,10 @@ import { Observer, AnimationGroup, Animation } from "babylonjs";
 import {
 	generateCinematicAnimationGroup,
 	ICinematic,
+	ICinematicDocument,
 	ICinematicTrack,
+	forkCinematicDocument,
+	mergeLegacyCinematic,
 	setDefaultRenderingPipelineRef,
 	setMotionBlurPostProcessRef,
 	setSSAO2RenderingPipelineRef,
@@ -31,6 +34,8 @@ import { getMotionBlurPostProcess } from "../../rendering/motion-blur";
 import { getDefaultRenderingPipeline } from "../../rendering/default-pipeline";
 
 import { serializeCinematic } from "./serialization/serialize";
+import { parseCinematic } from "./serialization/parse";
+import { createCinematicDocumentFile, saveCinematicDocument } from "./serialization/document";
 
 import { restoreSceneState, saveSceneState } from "./tools/state";
 import { syncAnimationGroupsToFrame, syncSoundsToFrame } from "./tools/sync";
@@ -51,6 +56,8 @@ export interface ICinematicEditorProps {
 	editor: Editor;
 	absolutePath: string;
 	cinematic: ICinematic;
+	document: ICinematicDocument;
+	fingerprint: string;
 }
 
 export interface ICinematicEditorState {
@@ -97,6 +104,9 @@ export class CinematicEditor extends Component<ICinematicEditorProps, ICinematic
 	 */
 	public readonly cinematic: ICinematic;
 
+	private _document: ICinematicDocument;
+	private _fingerprint: string;
+
 	private _renderer: CinematicEditorRenderer;
 	private _renderDialog: CinematicEditorRenderDialog;
 
@@ -118,6 +128,8 @@ export class CinematicEditor extends Component<ICinematicEditorProps, ICinematic
 
 		this.editor = props.editor;
 		this.cinematic = props.cinematic;
+		this._document = props.document;
+		this._fingerprint = props.fingerprint;
 
 		this.state = {
 			curvesZoom: 1,
@@ -375,12 +387,16 @@ export class CinematicEditor extends Component<ICinematicEditorProps, ICinematic
 	}
 
 	public async save(): Promise<void> {
-		const data = serializeCinematic(this.cinematic);
-
-		await writeJSON(this.props.absolutePath, data, {
-			spaces: "\t",
-			encoding: "utf-8",
-		});
+		const document = mergeLegacyCinematic(this._document, serializeCinematic(this.cinematic));
+		const saved = await saveCinematicDocument(
+			this.props.absolutePath,
+			document,
+			{ expectedRevision: this._document.revision, expectedFingerprint: this._fingerprint },
+			{ identitySeed: this._identitySeed(this.props.absolutePath) }
+		);
+		this._document = saved.document;
+		this._fingerprint = saved.fingerprint;
+		this._synchronizeLegacyDocument(saved.document);
 
 		toast.success("Cinematic file saved.");
 	}
@@ -395,12 +411,9 @@ export class CinematicEditor extends Component<ICinematicEditorProps, ICinematic
 			return;
 		}
 
-		const data = serializeCinematic(this.cinematic);
-
-		await writeJSON(destination, data, {
-			spaces: "\t",
-			encoding: "utf-8",
-		});
+		const document = mergeLegacyCinematic(this._document, serializeCinematic(this.cinematic));
+		const identitySeed = this._identitySeed(destination);
+		await createCinematicDocumentFile(destination, forkCinematicDocument(document, identitySeed), { identitySeed });
 
 		toast.success("Cinematic file saved.");
 	}
@@ -418,5 +431,22 @@ export class CinematicEditor extends Component<ICinematicEditorProps, ICinematic
 			to,
 			type: this.state.renderType,
 		});
+	}
+
+	/** Derives portable document identity from the open project instead of the machine path. */
+	private _identitySeed(absolutePath: string): string {
+		const projectDirectory = this.editor.state.projectPath ? dirname(this.editor.state.projectPath) : dirname(this.props.absolutePath);
+		return relative(projectDirectory, absolutePath).replace(/\\/g, "/");
+	}
+
+	/** Refreshes original panel objects after save so generated stable IDs survive later edits. */
+	private _synchronizeLegacyDocument(document: ICinematicDocument): void {
+		const parsed = parseCinematic(document, this.editor.layout.preview.scene);
+		this.cinematic.name = parsed.name;
+		this.cinematic.framesPerSecond = parsed.framesPerSecond;
+		this.cinematic.outputFramesPerSecond = parsed.outputFramesPerSecond;
+		this.cinematic.tracks.splice(0, this.cinematic.tracks.length, ...parsed.tracks);
+		this.disposeTemporaryAnimationGroup();
+		this.setState({ hoverTrack: null, selectedTrack: null });
 	}
 }

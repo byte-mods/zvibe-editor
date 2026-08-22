@@ -10,7 +10,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
-import { IEditorInspectorFieldProps } from "./field";
+import { IEditorInspectorFieldProps, matchesInspectorSearch } from "./field";
 import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorListFieldItem {
@@ -142,6 +142,9 @@ export function EditorInspectorListField(props: IEditorInspectorListFieldProps) 
 				</PopoverContent>
 			</Popover>
 		);
+	}
+	if (!matchesInspectorSearch(props.label, props.property, props.tooltip)) {
+		return null;
 	}
 
 	return (

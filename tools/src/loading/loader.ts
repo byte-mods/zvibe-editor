@@ -4,6 +4,7 @@ import { Constants } from "@babylonjs/core/Engines/constants";
 import { AppendSceneAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { SceneLoaderFlags } from "@babylonjs/core/Loading/sceneLoaderFlags";
 import { ClusteredLightContainer } from "@babylonjs/core/Lights/Clustered/clusteredLightContainer";
+import { Tools } from "@babylonjs/core/Misc/tools";
 
 import { isMesh } from "../tools/guards";
 import { applyMeshesLODQuality, configureMeshDistanceOrScreenCoverage } from "../tools/mesh";
@@ -22,30 +23,50 @@ import { configureOptimizedModelRigExposedTransforms } from "../assets/model-rig
 import { configureGeneratedModelLodDeformations } from "../assets/model-lods";
 import { configureCloths } from "./cloth";
 import { configureAnimationEvents } from "./animation-events";
+import { configureUnityAnimationClipRuntime } from "./unity-animation-clip-runtime";
 import { configurePhysics2D } from "./physics2d";
 import { configureNavAgents } from "./nav-agents";
 import { configureLocalization } from "./localization";
 import { configureAddressables } from "./addressables";
+import { configureAdaptivePerformance } from "./adaptive-performance";
+import { configureMobileSystemRuntime } from "./mobile-system-runtime";
+import { configureGrpcTransport } from "./grpc-transport";
 import { configureBehaviorTrees } from "./behavior-trees";
+import { configureMlTrainingRuntime } from "../ai/ml-training";
 import { configureInputActions } from "./input-actions";
+import { configureTouchControls } from "./touch-controls";
 import { configureAudioMixer } from "./audio-mixer";
 import { configureAnimators } from "./animator";
 import { configureSplineFollowers } from "./splines";
 import { configureVirtualCameras } from "./virtual-cameras";
 import { configureCameraImpulses } from "./camera-impulses";
 import { configureTerrainStreaming } from "./terrain-streaming";
+import { configureOcclusionCulling } from "./occlusion-culling";
 import { configureParticleCollisions } from "./particle-collisions";
+import { configureParticleCollisionEvents } from "./particle-collision-events";
+import { configureParticleInteractions } from "./particle-interactions";
 import { configureParticleVectorFields } from "./particle-vector-fields";
 import { configureParticleTextureVectorFields } from "./particle-texture-vector-fields";
 import { configureParticleProximityEvents } from "./particle-proximity-events";
 import { configureVisualScriptGraphs } from "./visual-scripting";
 import { configureXR } from "./xr";
 import { configureVideoPlayers } from "./videos";
+import { configureAlembicPlayers } from "./alembic";
 import { configureAnimatedTiles } from "./animated-tiles";
 import { applyRenderingConfigurations } from "./rendering";
 import { configureRenderingVolumes } from "./rendering-volumes";
+import { configureActiveRenderingProfile } from "./rendering-profiles";
+import { configureRendererDataSelections } from "./renderer-data";
+import { configureSubsurfaceScattering } from "../rendering/subsurface-scattering";
+import { configureCameraStacks } from "./camera-stacks";
+import { configureRendererLists } from "../rendering/renderer-lists";
 import { configureCustomRenderPassGraph } from "../rendering/custom-render-pass-graph";
+import { configureOnTileRendering } from "../rendering/on-tile-rendering";
 import { configureLightingScenarios } from "./lighting-scenarios";
+import { configureLightProbeVolumes } from "./light-probes";
+import { configureReflectionProbes } from "./reflection-probes";
+import { configureDeviceLabFromLocation } from "./device-lab";
+import { configureShaderVariantCollection } from "./shader-variant-collection";
 
 import { _applyScriptsForObjects } from "./script/apply";
 import { _preloadScriptsAssets } from "./script/preload";
@@ -56,9 +77,13 @@ import { registerShadowGeneratorParser } from "./shadows";
 import { registerMorphTargetManagerParser } from "./morph-target-manager";
 
 import { configureLights } from "./light";
+import { configureLightCookies } from "./light-cookies";
 import { registerSpriteMapParser } from "./sprite-map";
 import { configureTransformNodes } from "./transform-node";
 import { configureGameObjectComponents } from "./game-object-components";
+import { configureLighting2D } from "./lighting-2d";
+import { configureNetworking, getSceneNetworkingConfiguration } from "./networking";
+import { configureAuthoredECSRuntime } from "../ecs/runtime";
 import { registerSpriteManagerParser } from "./sprite-manager";
 import { registerNodeParticleSystemSetParser } from "./node-particle-system-set";
 
@@ -127,6 +152,23 @@ export type SceneLoaderOptions = {
 	 * @default false
 	 */
 	skipAssetsPreload?: boolean;
+
+	/**
+	 * Loads a gameplay-complete scene without window/GPU-only render products.
+	 * Used by isolated Multiplayer Play clients running on a NullEngine. The
+	 * serialized source file is never changed.
+	 * @default false
+	 */
+	headless?: boolean;
+
+	/**
+	 * Transient connection override used by isolated editor Play clients. It is
+	 * never written back to scene metadata or exported project configuration.
+	 */
+	networking?: {
+		autoConnect?: boolean;
+		endpoint?: string | null;
+	};
 };
 
 declare module "@babylonjs/core/scene" {
@@ -166,6 +208,29 @@ async function waitForWaitingItems(scene: Scene, onProgress: (value: number) => 
 	}
 }
 
+async function createHeadlessSceneSource(rootUrl: string, sceneFilename: string): Promise<string> {
+	const source = sceneFilename.startsWith("data:") || /^(?:blob:|https?:\/\/|file:)/i.test(sceneFilename) ? sceneFilename : `${rootUrl}${sceneFilename}`;
+	const text = source.startsWith("data:") ? await (await fetch(source)).text() : await Tools.LoadFileAsync(source, false);
+	if (typeof text !== "string") {
+		throw new Error("Headless scene loading requires a UTF-8 serialized Babylon scene.");
+	}
+	const serialized = JSON.parse(text) as Record<string, unknown>;
+	if (!serialized || typeof serialized !== "object" || Array.isArray(serialized)) {
+		throw new Error("Headless scene loading requires a serialized Babylon scene object.");
+	}
+
+	// Shadow generators require a render-target implementation and can fail
+	// before their associated light is available on a NullEngine. Multiplayer
+	// simulation retains lights/materials and every gameplay system, but does
+	// not allocate window/GPU-only render products for isolated clients.
+	serialized.shadowGenerators = [];
+	serialized.reflectionProbes = [];
+	serialized.renderTargetTextures = [];
+	delete serialized.environmentTexture;
+
+	return `data:${JSON.stringify(serialized)}`;
+}
+
 export async function loadScene(rootUrl: any, sceneFilename: string, scene: Scene, scriptsMap: ScriptMap, options?: SceneLoaderOptions) {
 	scene.loadingQuality = options?.quality ?? "high";
 
@@ -189,14 +254,20 @@ export async function loadScene(rootUrl: any, sceneFilename: string, scene: Scen
 	sceneConfigurationMap.set(scene, configuration);
 
 	// Append to the given scene
-	await AppendSceneAsync(`${rootUrl}${sceneFilename}`, scene, {
+	const source = options?.headless ? await createHeadlessSceneSource(String(rootUrl), sceneFilename) : `${rootUrl}${sceneFilename}`;
+	await AppendSceneAsync(source, scene, {
+		rootUrl: options?.headless ? String(rootUrl) : undefined,
 		pluginExtension: ".babylon",
 		onProgress: (event) => {
 			const progress = Math.min((event.loaded / event.total) * 0.5);
 			options?.onProgress?.(progress);
 		},
 	});
+	configureLightCookies(scene, rootUrl);
 	await configureImportedTextures(scene, rootUrl);
+	// GUI/script asset preloading can resolve localized strings and Addressable-backed assets.
+	configureAddressables(scene, rootUrl);
+	configureLocalization(scene, rootUrl);
 
 	// Wait until scene is ready.
 	await waitForWaitingItems(scene, (progress) => {
@@ -219,8 +290,10 @@ export async function loadScene(rootUrl: any, sceneFilename: string, scene: Scen
 	}
 
 	// Configure clustered lights
-	const clusteredLightContainer = configureLights(scene, configuration.clusteredLightContainer);
-	configuration.clusteredLightContainer = clusteredLightContainer;
+	if (!options?.headless) {
+		const clusteredLightContainer = configureLights(scene, configuration.clusteredLightContainer, rootUrl);
+		configuration.clusteredLightContainer = clusteredLightContainer;
+	}
 
 	// Wait until scene is ready.
 	await waitForWaitingItems(scene, (progress) => {
@@ -232,10 +305,12 @@ export async function loadScene(rootUrl: any, sceneFilename: string, scene: Scen
 	configureMeshDistanceOrScreenCoverage(scene);
 	applyMeshesLODQuality(scene.loadingLodsQuality, scene);
 
-	configureShadowMapRenderListPredicate(scene);
-	configureShadowMapRefreshRate(scene);
+	if (!options?.headless) {
+		configureShadowMapRenderListPredicate(scene);
+		configureShadowMapRefreshRate(scene);
+	}
 
-	if (scene.metadata?.rendering) {
+	if (!options?.headless && scene.metadata?.rendering) {
 		applyRenderingConfigurations(scene, scene.metadata.rendering);
 
 		if (scene.activeCamera) {
@@ -261,32 +336,65 @@ export async function loadScene(rootUrl: any, sceneFilename: string, scene: Scen
 	configureGeneratedModelLodDeformations(scene);
 	configureCloths(scene);
 	configurePhysics2D(scene);
-	configureNavAgents(scene);
-	configureLocalization(scene);
-	configureAddressables(scene, rootUrl);
+	await configureNavAgents(scene, rootUrl);
 	configureBehaviorTrees(scene);
+	configureMlTrainingRuntime(scene);
 	configureInputActions(scene);
+	if (!options?.headless) {
+		configureTouchControls(scene);
+	}
 	configureAudioMixer(scene);
-	configureLightingScenarios(scene);
+	if (!options?.headless) {
+		configureLightingScenarios(scene);
+		configureLightProbeVolumes(scene);
+		configureReflectionProbes(scene);
+	}
 	configureAnimators(scene);
 	configureAnimationEvents(scene);
+	configureUnityAnimationClipRuntime(scene, rootUrl);
 	configureSplineFollowers(scene);
 	configureVirtualCameras(scene);
 	configureCameraImpulses(scene);
-	configureTerrainStreaming(scene);
+	configureTerrainStreaming(scene, rootUrl);
+	configureOcclusionCulling(scene);
 	configureParticleCollisions(scene);
+	configureParticleCollisionEvents(scene);
+	configureParticleInteractions(scene);
 	configureParticleVectorFields(scene);
 	configureParticleTextureVectorFields(scene);
 	configureParticleProximityEvents(scene);
 	configureVisualScriptGraphs(scene);
-	configureRenderingVolumes(scene, rootUrl);
-	configureCustomRenderPassGraph(scene, rootUrl);
+	if (!options?.headless) {
+		configureRendererLists(scene);
+		configureCameraStacks(scene);
+		configureRenderingVolumes(scene, rootUrl);
+		configureActiveRenderingProfile(scene, rootUrl);
+		configureAdaptivePerformance(scene);
+		configureMobileSystemRuntime(scene);
+		configureSubsurfaceScattering(scene, rootUrl);
+		configureRendererDataSelections(scene);
+		configureCustomRenderPassGraph(scene, rootUrl);
+		configureOnTileRendering(scene, rootUrl);
+	}
 	configureAnimatedTiles(scene);
-	await configureVideoPlayers(scene, rootUrl);
-	void configureXR(scene);
+	await configureAlembicPlayers(scene, rootUrl);
+	if (!options?.headless) {
+		await configureVideoPlayers(scene, rootUrl);
+		await configureXR(scene);
+		configureDeviceLabFromLocation(scene);
+		await configureShaderVariantCollection(scene);
+	}
 
 	configureTransformNodes(scene);
 	configureGameObjectComponents(scene);
+	configureLighting2D(scene);
+	const networkingConfiguration = getSceneNetworkingConfiguration(scene, false);
+	if (options?.networking) {
+		networkingConfiguration.transport = { ...networkingConfiguration.transport, ...options.networking };
+	}
+	configureNetworking(scene, { configuration: networkingConfiguration });
+	configureGrpcTransport(scene);
+	configureAuthoredECSRuntime(scene);
 	_applyScriptsForObjects(
 		scene,
 		[scene, ...scene.transformNodes, ...scene.meshes, ...scene.lights, ...scene.cameras, ...(scene.spriteManagers?.flatMap((spriteManager) => spriteManager.sprites) ?? [])],

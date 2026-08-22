@@ -1,6 +1,9 @@
 import { join, basename, extname } from "node:path/posix";
+import { createHash } from "node:crypto";
 
 import fs, { pathExists } from "fs-extra";
+
+import { configureTerrainStreamingExport, ITerrainStreamingExportArtifact } from "babylonjs-editor-tools";
 
 import { isSameArray } from "../tools/array.mjs";
 import { readSceneDirectories } from "../tools/scene.mjs";
@@ -12,6 +15,70 @@ import { getExtractedTextureOutputPath } from "./assets/texture.mjs";
 import { extractNodeParticleSystemSetTextures, extractParticleSystemTextures } from "./assets/particle-system.mjs";
 
 import { configureMeshBinaryInfo } from "./geometry.mjs";
+
+const EDITABLE_SOURCE_MODEL = "unity-editable-source-generated-export-v1";
+const EDITOR_ONLY_MESH_METADATA_KEYS = [
+	"babylonEditorEditableMeshSource",
+	"babylonEditorMeshSelection",
+	"babylonEditorUvLayout",
+	"babylonEditorSmoothingGroups",
+	"babylonEditorVertexColors",
+];
+
+export interface IGeometrySource {
+	sourceFile: string;
+	outputFile: string;
+	buffer: Buffer;
+}
+
+export async function resolveGeometrySource(sceneFile: string, mesh: any): Promise<IGeometrySource> {
+	const sourceName = basename(mesh.delayLoadingFile);
+	const sourceFile = join("geometries", sourceName);
+	const manifest = mesh.metadata?.babylonEditorEditableMeshSource;
+	const generated = manifest?.lastGenerated;
+	const generatedFile = typeof generated?.file === "string" ? generated.file : "";
+	const generatedName = basename(generatedFile);
+	const validGeneratedFile = generatedFile === join("generatedGeometries", generatedName) && extname(generatedName).toLowerCase() === ".babylonbinarymeshdata";
+	const validManifest =
+		manifest?.version === 1 &&
+		manifest.model === EDITABLE_SOURCE_MODEL &&
+		Number.isInteger(manifest.revision) &&
+		manifest.revision > 0 &&
+		Number.isInteger(manifest.exportSettingsRevision) &&
+		manifest.exportSettingsRevision > 0 &&
+		typeof manifest.sourceFingerprint === "string" &&
+		generated?.sourceFingerprint === manifest.sourceFingerprint &&
+		generated?.exportSettingsRevision === manifest.exportSettingsRevision &&
+		generated?.settings?.optimize === manifest.exportSettings?.optimize &&
+		generated?.binaryInfo &&
+		typeof generated.binaryInfo === "object" &&
+		validGeneratedFile;
+	if (validManifest) {
+		const absoluteGeneratedFile = join(sceneFile, generatedFile);
+		if (await pathExists(absoluteGeneratedFile)) {
+			mesh._binaryInfo = structuredClone(generated.binaryInfo);
+			mesh.metadata ??= {};
+			EDITOR_ONLY_MESH_METADATA_KEYS.forEach((key) => delete mesh.metadata[key]);
+			mesh.metadata.babylonEditorGeneratedGeometry = {
+				version: 1,
+				model: EDITABLE_SOURCE_MODEL,
+				compilationModel: generated.compilationModel,
+				sourceRevision: manifest.revision,
+				exportSettingsRevision: manifest.exportSettingsRevision,
+				sourceFingerprint: generated.sourceFingerprint,
+				generatedFingerprint: generated.generatedFingerprint,
+				settings: structuredClone(generated.settings),
+				source: structuredClone(generated.source),
+				generated: structuredClone(generated.generated),
+				removedUnusedOrDuplicateVertices: generated.removedUnusedOrDuplicateVertices,
+				optimizationApplied: generated.optimizationApplied,
+				optimizationBlockers: structuredClone(generated.optimizationBlockers ?? []),
+			};
+			return { sourceFile: generatedFile, outputFile: generatedName, buffer: await fs.readFile(absoluteGeneratedFile) };
+		}
+	}
+	return { sourceFile, outputFile: sourceName, buffer: await fs.readFile(join(sceneFile, sourceFile)) };
+}
 
 export interface ICreateBabylonSceneOptions {
 	buildTime: number;
@@ -48,6 +115,8 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 	interface _ICollectedGeometry {
 		mesh: any;
 		buffer: Buffer;
+		sourceFile: string;
+		outputFile: string;
 	}
 
 	const collectedGeometries: _ICollectedGeometry[] = [];
@@ -64,16 +133,17 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 		await Promise.all(
 			mergedDecals.map(async (mesh) => {
 				if (mesh.delayLoadingFile) {
+					const geometrySource = await resolveGeometrySource(options.sceneFile, mesh);
 					collectedGeometries.push({
 						mesh,
-						buffer: await fs.readFile(join(options.sceneFile, "geometries", basename(mesh.delayLoadingFile))),
+						...geometrySource,
 					});
 
 					if (options.mergeGeometries) {
-						geometriesPath ??= join(options.sceneName, basename(mesh.delayLoadingFile));
+						geometriesPath ??= join(options.sceneName, geometrySource.outputFile);
 						mesh.delayLoadingFile = geometriesPath;
 					} else {
-						mesh.delayLoadingFile = join(options.sceneName, basename(mesh.delayLoadingFile));
+						mesh.delayLoadingFile = join(options.sceneName, geometrySource.outputFile);
 					}
 				}
 
@@ -98,17 +168,17 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 
 			if (mesh.delayLoadingFile) {
 				if (!isDecal) {
+					const geometrySource = await resolveGeometrySource(options.sceneFile, mesh);
 					collectedGeometries.push({
 						mesh,
-						buffer: await fs.readFile(join(options.sceneFile, "geometries", basename(mesh.delayLoadingFile))),
+						...geometrySource,
 					});
-				}
-
-				if (options.mergeGeometries) {
-					geometriesPath ??= join(options.sceneName, basename(mesh.delayLoadingFile));
-					mesh.delayLoadingFile = geometriesPath;
-				} else {
-					mesh.delayLoadingFile = join(options.sceneName, basename(mesh.delayLoadingFile));
+					if (options.mergeGeometries) {
+						geometriesPath ??= join(options.sceneName, geometrySource.outputFile);
+						mesh.delayLoadingFile = geometriesPath;
+					} else {
+						mesh.delayLoadingFile = join(options.sceneName, geometrySource.outputFile);
+					}
 				}
 			}
 
@@ -168,16 +238,17 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 						}
 
 						if (lodMesh.delayLoadingFile) {
+							const geometrySource = await resolveGeometrySource(options.sceneFile, lodMesh);
 							collectedGeometries.push({
 								mesh: lodMesh,
-								buffer: await fs.readFile(join(options.sceneFile, "geometries", basename(lodMesh.delayLoadingFile))),
+								...geometrySource,
 							});
 
 							if (options.mergeGeometries) {
-								geometriesPath ??= join(options.sceneName, basename(lodMesh.delayLoadingFile));
+								geometriesPath ??= join(options.sceneName, geometrySource.outputFile);
 								lodMesh.delayLoadingFile = geometriesPath;
 							} else {
-								lodMesh.delayLoadingFile = join(options.sceneName, basename(lodMesh.delayLoadingFile));
+								lodMesh.delayLoadingFile = join(options.sceneName, geometrySource.outputFile);
 							}
 						}
 
@@ -576,6 +647,8 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 		})
 	);
 
+	const runtimeMetadata = { ...(options.config.metadata ?? {}) };
+	delete runtimeMetadata.babylonEditorProfilerState;
 	const scene = {
 		autoClear: true,
 		clearColor: options.config.clearColor,
@@ -597,7 +670,7 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 		physicsEngine: "HavokPlugin",
 
 		metadata: {
-			...options.config.metadata,
+			...runtimeMetadata,
 			rendering: options.config.rendering,
 			clusteredLight: options.config.clusteredLight,
 		},
@@ -682,7 +755,7 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 	const usedFiles = await collectUsedAssetsForScene(scene, options.publicDir);
 	usedFiles.push(`${options.sceneName}.babylon`);
 
-	const geometryFiles = usedFiles.filter((file) => extname(file).toLowerCase() === ".babylonbinarymeshdata").map((file) => basename(file));
+	const geometryFiles = [...new Map(collectedGeometries.map((geometry) => [geometry.outputFile, { sourceFile: geometry.sourceFile, outputFile: geometry.outputFile }])).values()];
 
 	const sameArrays = new Map<Buffer, any[]>();
 
@@ -750,6 +823,23 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 			}
 		}
 	}
+	const totalGeometryLength = finalGeometryBuffers.reduce((accumulator, buffer) => accumulator + buffer.length, 0);
+	const mergedGeometryBuffer = options.mergeGeometries ? Buffer.concat(finalGeometryBuffers, totalGeometryLength) : null;
+	const terrainStreamingArtifacts: ITerrainStreamingExportArtifact[] = collectedGeometries.map((geometry) => {
+		const outputFile = basename(geometry.mesh.delayLoadingFile);
+		const source = options.mergeGeometries ? mergedGeometryBuffer : collectedGeometries.find((candidate) => candidate.outputFile === outputFile)?.buffer;
+		if (!source) {
+			throw new Error(`Terrain streaming could not resolve exported geometry "${outputFile}".`);
+		}
+		return {
+			terrainId: geometry.mesh.id,
+			url: geometry.mesh.delayLoadingFile,
+			sha256: createHash("sha256").update(source).digest("hex"),
+			byteLength: source.byteLength,
+			binaryInfo: structuredClone(geometry.mesh._binaryInfo),
+		};
+	});
+	configureTerrainStreamingExport(scene, terrainStreamingArtifacts);
 
 	// Write final scene file.
 	const sceneDestination = join(options.publicDir, `${options.sceneName}.babylon`);
@@ -761,14 +851,12 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 	options.exportedAssets.push(sceneDestination);
 
 	// Write final geometry file
-	if (geometriesPath) {
-		const totalLength = finalGeometryBuffers.reduce((acc, buffer) => acc + buffer.length, 0);
-
+	if (geometriesPath && mergedGeometryBuffer) {
 		const geometriesFolder = join(options.publicDir, options.sceneName);
 		await fs.ensureDir(geometriesFolder);
 
 		const geometriesDestination = join(geometriesFolder, basename(geometriesPath));
-		await fs.writeFile(geometriesDestination, Buffer.concat(finalGeometryBuffers, totalLength));
+		await fs.writeFile(geometriesDestination, mergedGeometryBuffer);
 
 		options.exportedAssets.push(geometriesDestination);
 	}

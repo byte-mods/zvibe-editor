@@ -10,6 +10,7 @@ import { processAssetFile } from "../../src/project/export/assets";
 import { projectConfiguration } from "../../src/project/configuration";
 import { readAssetMetadata, refreshAssetRegistryPaths, writeAssetMetadata } from "../../src/mcp/assets/registry";
 import { Animation, Vector3 } from "babylonjs";
+import { normalizeScriptableAudioGeneratorGraph, serializeVideoImporterPlatformOverrides } from "babylonjs-editor-tools";
 
 function makeWav(): Buffer {
 	const sampleRate = 48000;
@@ -34,6 +35,25 @@ function makeWav(): Buffer {
 	header.write("data", 36);
 	header.writeUInt32LE(data.length, 40);
 	return Buffer.concat([header, data]);
+}
+
+function audioGeneratorGraph(clipPath: string): Record<string, unknown> {
+	return {
+		version: 1,
+		revision: 1,
+		name: "Build Generator",
+		sampleRate: 48000,
+		channels: 2,
+		durationSeconds: 0.1,
+		streaming: false,
+		seed: 1,
+		outputNodeId: "output",
+		nodes: [
+			{ id: "clip", name: "Clip", type: "audioClip", position: [0, 0], enabled: true, data: { path: clipPath, loop: false, gain: 1, startSeconds: 0 } },
+			{ id: "output", name: "Output", type: "output", position: [300, 0], enabled: true, data: {} },
+		],
+		edges: [{ id: "clip-output", sourceNodeId: "clip", targetNodeId: "output", order: 0, gain: 1 }],
+	};
 }
 
 function createVideo(path: string): void {
@@ -145,6 +165,22 @@ describe("build-aware asset importers", () => {
 		expect(await readFile(`${source}.bjsmeta.json`, "utf-8")).toContain('"includeInBuild": false');
 	});
 
+	test("copies retained UXML and USS sources byte-exactly into editor build output", async () => {
+		const uxml = join(root, "assets", "hud.uxml");
+		const uss = join(root, "assets", "hud.uss");
+		const uxmlSource = `<UXML><Style src="hud.uss"/><Label name="title" text="Ready"/></UXML>`;
+		const ussSource = `.title:hover { color: #73a7ff; }`;
+		await writeFile(uxml, uxmlSource);
+		await writeFile(uss, ussSource);
+		const exportedAssets: string[] = [];
+		const options = { optimize: false, scenePath: join(root, "build"), projectDir: root, exportedAssets, cache: {} };
+		await processAssetFile(editor, uxml, options);
+		await processAssetFile(editor, uss, options);
+		expect(await readFile(join(root, "build", "assets", "hud.uxml"), "utf8")).toBe(uxmlSource);
+		expect(await readFile(join(root, "build", "assets", "hud.uss"), "utf8")).toBe(ussSource);
+		expect(exportedAssets).toEqual(expect.arrayContaining([join(root, "build", "assets", "hud.uxml"), join(root, "build", "assets", "hud.uss")]));
+	});
+
 	test.runIf(mediaToolsAvailable)("executes audio settings into build output and emits runtime load metadata", async () => {
 		const audioSource = join(root, "assets", "tone.wav");
 		const audioOutput = join(root, "build", "assets", "tone.wav");
@@ -170,30 +206,99 @@ describe("build-aware asset importers", () => {
 		expect(exportedAssets).toEqual([audioOutput, `${audioOutput}.bjsaudio.json`]);
 	});
 
+	test("validates and canonically exports Audio Generator graphs with clip-aware cache invalidation", async () => {
+		const audioSource = join(root, "assets", "tone.wav");
+		const generatorSource = join(root, "assets", "music.audio-generator.json");
+		const generatorOutput = join(root, "build", "assets", "music.audio-generator.json");
+		await writeFile(audioSource, makeWav());
+		await writeFile(generatorSource, JSON.stringify(audioGeneratorGraph("assets/tone.wav")));
+		const exportedAssets: string[] = [];
+		const cache: Record<string, string> = {};
+		await processAssetFile(editor, generatorSource, { optimize: false, scenePath: join(root, "build"), projectDir: root, exportedAssets, cache });
+		expect(JSON.parse(await readFile(generatorOutput, "utf-8"))).toEqual(normalizeScriptableAudioGeneratorGraph(audioGeneratorGraph("assets/tone.wav")));
+		expect((await readFile(generatorOutput, "utf-8")).startsWith('{\n\t"version"')).toBe(true);
+		expect(exportedAssets).toEqual([generatorOutput]);
+		const initial = cache["assets/music.audio-generator.json"];
+
+		const changed = makeWav();
+		changed[changed.length - 1] ^= 0xff;
+		await writeFile(audioSource, changed);
+		await processAssetFile(editor, generatorSource, { optimize: false, scenePath: join(root, "build"), projectDir: root, exportedAssets: [], cache });
+		expect(cache["assets/music.audio-generator.json"]).not.toBe(initial);
+	});
+
+	test("rejects Audio Generator builds when a referenced clip is excluded", async () => {
+		const audioSource = join(root, "assets", "excluded.wav");
+		const generatorSource = join(root, "assets", "blocked.audio-generator.json");
+		await writeFile(audioSource, makeWav());
+		await writeFile(generatorSource, JSON.stringify(audioGeneratorGraph("assets/excluded.wav")));
+		const metadata = await readAssetMetadata(audioSource);
+		metadata.importer.settings.includeInBuild = false;
+		await writeAssetMetadata(audioSource, metadata);
+		await expect(
+			processAssetFile(editor, generatorSource, { optimize: false, scenePath: join(root, "build"), projectDir: root, exportedAssets: [], cache: {} })
+		).rejects.toThrow(/excluded from the build/);
+	});
+
 	test.runIf(mediaToolsAvailable)("executes video settings into a portable runtime artifact and redirect sidecar", async () => {
 		const videoSource = join(root, "assets", "clip.mp4");
 		const videoOutput = join(root, "build", "assets", "clip.webm");
 		const runtimePath = join(root, "build", "assets", "clip.mp4.bjsvideo.json");
 		createVideo(videoSource);
 		const metadata = await readAssetMetadata(videoSource);
-		metadata.importer.settings = { ...metadata.importer.settings, transcode: "webm", quality: 0.7, maxWidth: 320, maxHeight: 180, includeAudio: false };
+		metadata.importer.settings = {
+			...metadata.importer.settings,
+			platformOverrides: serializeVideoImporterPlatformOverrides({
+				web: {
+					enabled: true,
+					transcode: "webm",
+					videoCodec: "vp9",
+					encoder: "software",
+					quality: 0.7,
+					maxWidth: 320,
+					maxHeight: 180,
+					includeAudio: false,
+					colorDefinition: "rec709",
+				},
+			}),
+		};
 		await writeAssetMetadata(videoSource, metadata);
 		const exportedAssets: string[] = [];
-		await processAssetFile(editor, videoSource, { optimize: false, scenePath: join(root, "build"), projectDir: root, exportedAssets, cache: {} });
+		const cache: Record<string, string> = {};
+		await processAssetFile(editor, videoSource, { optimize: false, assetPlatform: "web", scenePath: join(root, "build"), projectDir: root, exportedAssets, cache });
 		expect(await pathExists(videoOutput)).toBe(true);
 		const runtimeMetadata = JSON.parse(await readFile(runtimePath, "utf-8"));
 		expect(runtimeMetadata).toMatchObject({
-			version: 1,
+			version: 2,
 			outputPath: "assets/clip.webm",
+			platform: "web",
+			compatibility: { status: "supported", videoCodec: "vp9" },
+			encoder: { backend: "software", ffmpegName: "libvpx-vp9", hardware: false },
 			result: {
 				sourcePath: "assets/clip.mp4",
 				outputPath: "assets/clip.webm",
 				transcoded: true,
-				output: { width: 320, height: 180, videoCodec: "vp9", audioCodec: null },
+				output: { width: 320, height: 180, videoCodec: "vp9", audioCodec: null, colorSpace: "bt709", colorRange: "tv" },
 			},
 		});
 		expect(JSON.stringify(runtimeMetadata)).not.toContain(root);
 		expect(exportedAssets).toEqual([videoOutput, runtimePath]);
+
+		await writeFile(videoSource, "invalid video");
+		await expect(
+			processAssetFile(editor, videoSource, { optimize: false, assetPlatform: "web", scenePath: join(root, "build"), projectDir: root, exportedAssets: [], cache })
+		).rejects.toThrow();
+		expect(await pathExists(videoOutput)).toBe(true);
+		expect(JSON.parse(await readFile(runtimePath, "utf-8"))).toMatchObject({ platform: "web", outputPath: "assets/clip.webm" });
+		createVideo(videoSource);
+
+		exportedAssets.length = 0;
+		const desktopOutput = join(root, "build", "assets", "clip.mp4");
+		await processAssetFile(editor, videoSource, { optimize: false, assetPlatform: "desktop", scenePath: join(root, "build"), projectDir: root, exportedAssets, cache });
+		expect(await pathExists(videoOutput)).toBe(false);
+		expect(await pathExists(desktopOutput)).toBe(true);
+		expect(JSON.parse(await readFile(runtimePath, "utf-8"))).toMatchObject({ version: 2, platform: "desktop", outputPath: "assets/clip.mp4", result: { transcoded: false } });
+		expect(exportedAssets).toEqual([desktopOutput, runtimePath]);
 	});
 
 	test("executes MSDF font settings into portable atlas, metrics, and redirect artifacts", async () => {
@@ -217,7 +322,8 @@ describe("build-aware asset importers", () => {
 		const exportedAssets: string[] = [];
 		const cache: Record<string, string> = {};
 		await processAssetFile(editor, fontSource, { optimize: false, scenePath: join(root, "build"), projectDir: root, exportedAssets, cache });
-		expect(await pathExists(fontOutput)).toBe(false);
+		expect(await pathExists(fontOutput)).toBe(true);
+		expect(await readFile(fontOutput)).toEqual(await readFile(fontSource));
 		expect(await pathExists(manifestPath)).toBe(true);
 		expect(await pathExists(atlasPath)).toBe(true);
 		const runtimeMetadata = JSON.parse(await readFile(runtimePath, "utf-8"));
@@ -226,15 +332,17 @@ describe("build-aware asset importers", () => {
 			renderMode: "msdf",
 			manifestPath: "assets/game.font.json",
 			dynamicFontPath: null,
+			sourceFontPath: "assets/game.ttf",
 			result: {
 				sourcePath: "assets/game.ttf",
 				outputDirectory: "assets",
 				manifestPath: "assets/game.font.json",
+				sourceFontPath: "assets/game.ttf",
 				pages: [expect.objectContaining({ path: "assets/game.font-0.png" })],
 			},
 		});
 		expect(JSON.stringify(runtimeMetadata)).not.toContain(root);
-		expect(exportedAssets).toEqual([manifestPath, atlasPath, runtimePath]);
+		expect(exportedAssets).toEqual([fontOutput, manifestPath, atlasPath, runtimePath]);
 
 		const firstManifest = await readFile(manifestPath, "utf-8");
 		await processAssetFile(editor, fontSource, { optimize: false, scenePath: join(root, "build"), projectDir: root, exportedAssets: [], cache });

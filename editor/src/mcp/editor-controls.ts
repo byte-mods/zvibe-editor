@@ -6,7 +6,29 @@ import { execNodePty } from "../tools/node-pty";
 
 import { IMCPActionOptions } from "./action";
 
-const editorTabs = ["graph", "preview", "assets-browser", "console", "terminal", "inspector", "animations", "marketplace"] as const;
+const editorTabs = [
+	"graph",
+	"preview",
+	"assets-browser",
+	"console",
+	"terminal",
+	"inspector",
+	"animations",
+	"marketplace",
+	"profiler",
+	"entities",
+	"lighting-search",
+	"script-debugger",
+	"project-auditor",
+	"runtime-ai",
+	"ml-training",
+	"generative-assets",
+	"services",
+	"occlusion-culling",
+	"networking",
+	"mobile",
+	"console-server",
+] as const;
 
 export function getGizmoSettings(_scene: Scene, _data: any, options: IMCPActionOptions): any {
 	const preview = options.editor.layout.preview;

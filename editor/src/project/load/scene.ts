@@ -1,5 +1,5 @@
 import { join, basename } from "path/posix";
-import { readJSON, readdir } from "fs-extra";
+import { readdir } from "fs-extra";
 
 import { AnimationGroup, SceneLoaderFlags, Animation } from "babylonjs";
 
@@ -27,13 +27,32 @@ import { loadMeshes } from "./plugins/meshes";
 import { restorePhysicsConstraints } from "../../mcp/physics/constraints";
 import { restoreVehicles } from "../../mcp/physics/vehicles";
 import { restoreIKControllers, restoreLookAtConstraints, restoreSpriteIKControllers } from "../../mcp/rigging/ik";
-import { configureHumanoidMuscleLimits, configureRigLayers } from "babylonjs-editor-tools";
+import {
+	configureHumanoidMuscleLimits,
+	configureUnityAnimationClipRuntime,
+	configureCameraStacks,
+	configureLightingScenarios,
+	configureLighting2D,
+	configureLightProbeVolumes,
+	configureParticleCollisionEvents,
+	configureParticleCollisions,
+	configureParticleInteractions,
+	configureParticleTextureVectorFields,
+	configureRendererLists,
+	configureRigLayers,
+	configureSubsurfaceScattering,
+	configureVideoPlayers,
+	configureShaderVariantCollection,
+} from "babylonjs-editor-tools";
+import { getProjectAssetsRootUrl } from "../configuration";
+import { readSerializedJSON } from "../serialization-session";
 import { restoreCloths } from "../../mcp/cloth/cloth";
 import { restorePhysics2D } from "../../mcp/physics2d/physics2d";
 import { restoreNavAgents } from "../../mcp/navmesh/navmesh";
 import { restoreVisualScriptGraphs } from "../../mcp/visual-scripting/graphs";
 import { restoreBehaviorTrees } from "../../mcp/ai/behavior-trees";
 import { restoreAnimationEvents } from "../../mcp/animations/animations";
+import { applyRenderingProfile } from "../../mcp/rendering/profiles";
 import { loadLights } from "./plugins/lights";
 import { loadCameras } from "./plugins/cameras";
 import { loadSkeletons } from "./plugins/skeletons";
@@ -46,6 +65,8 @@ import { loadAnimationGroups } from "./plugins/animation-groups";
 import { loadMorphTargetManagers } from "./plugins/morph-targets";
 import { loadShadowGenerators } from "./plugins/shadow-generators";
 import { loadNodeParticleSystemSets } from "./plugins/node-particle-system-sets";
+import { configureEditorLocalization } from "../../mcp/localization/localization";
+import { configureEditorAlembicPlayers } from "../../mcp/assets/alembic";
 import {
 	captureAddedSceneResources,
 	createSceneLoadResult,
@@ -187,7 +208,7 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 		SceneLoaderFlags.ForceFullSceneLoadingForIncremental = true;
 
 		const assetsCache = loadSavedAssetsCache();
-		const config = await readJSON(join(scenePath, "config.json"), "utf-8");
+		const config = await readSerializedJSON(join(scenePath, "config.json"), "utf-8");
 		loadResult.configuration = config;
 
 		if (applySceneConfiguration) {
@@ -222,25 +243,38 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 		configureHumanoidMuscleLimits(scene as any);
 		restoreCloths(scene);
 		restorePhysics2D(scene);
-		restoreNavAgents(scene);
+		await restoreNavAgents(scene);
 		restoreVisualScriptGraphs(scene);
 		restoreBehaviorTrees(scene);
 		await loadMorphTargetManagers(editor, morphTargetManagerFiles, scene, pluginLoadOptions);
 		await loadLights(editor, lightsFiles, scene, pluginLoadOptions);
 		await loadCameras(editor, cameraFiles, scene, pluginLoadOptions);
+		const alembic = await configureEditorAlembicPlayers(scene, editor);
+		alembic.errors.forEach((error) => editor.layout.console.warn(`Alembic player ${error.id}: ${error.message}`));
+		await configureVideoPlayers(scene as any, getProjectAssetsRootUrl() ?? "");
 
 		if (!options?.asLink) {
 			await loadShadowGenerators(editor, shadowGeneratorFiles, scene, pluginLoadOptions);
 		}
 
+		// Localized GUI bindings resolve while .gui assets are instantiated.
+		await configureEditorLocalization(scene);
 		await loadGuis(editor, guiFiles, pluginLoadOptions);
 		await loadSoundNodes(editor, soundNodeFiles, scene, pluginLoadOptions);
 		await loadParticleSystems(editor, particleSystemFiles, scene, pluginLoadOptions);
-		await loadAnimationGroups(editor, animationGroupFiles, scene, pluginLoadOptions);
-		restoreAnimationEvents(scene);
+		configureParticleCollisions(scene as any);
+		configureParticleCollisionEvents(scene as any);
+		configureParticleInteractions(scene as any);
+		configureParticleTextureVectorFields(scene as any);
 		await loadSpriteMaps(editor, spriteMapFiles, scene, pluginLoadOptions);
 		await loadSpriteManagers(editor, spriteManagerFiles, scene, pluginLoadOptions);
+		await loadAnimationGroups(editor, animationGroupFiles, scene, pluginLoadOptions);
+		restoreAnimationEvents(scene);
+		configureUnityAnimationClipRuntime(scene as any, getProjectAssetsRootUrl() ?? "");
 		await loadNodeParticleSystemSets(editor, nodeParticleSystemSetFiles, scene, pluginLoadOptions);
+		configureLighting2D(scene as any);
+		configureLightingScenarios(scene as any);
+		configureLightProbeVolumes(scene as any);
 
 		// Configure lights
 		loadResult.lights.forEach((light) => {
@@ -284,7 +318,7 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 
 		for (const file of sceneLinkFiles) {
 			try {
-				const data = await readJSON(join(scenePath, "sceneLinks", file), "utf-8");
+				const data = await readSerializedJSON(join(scenePath, "sceneLinks", file), "utf-8");
 
 				if (options?.asLink && data.metadata?.doNotSerialize) {
 					continue;
@@ -343,7 +377,28 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 
 			registerSceneCameraRenderingConfigurations(config, loadResult.cameras);
 			if (applySceneConfiguration) {
+				const subsurfaceRuntime = configureSubsurfaceScattering(scene as any, `${projectPath}/`);
+				if (subsurfaceRuntime.errors.length) {
+					editor.layout.console.warn(`Failed to restore subsurface scattering: ${subsurfaceRuntime.errors.join(" ")}`);
+				}
 				applyEditorCameraRenderingConfiguration(editor, config);
+				const activeRenderingProfileId = scene.metadata?.babylonEditorActiveRenderingProfileId;
+				if (typeof activeRenderingProfileId === "string") {
+					try {
+						applyRenderingProfile(scene, { id: activeRenderingProfileId, nodeId: editor.layout.preview.camera.id, activateProject: true }, { editor });
+					} catch (error) {
+						editor.layout.console.warn(`Failed to restore active rendering profile: ${error instanceof Error ? error.message : String(error)}`);
+					}
+				}
+				try {
+					configureRendererLists(scene as any);
+				} catch (error) {
+					editor.layout.console.warn(`Failed to restore renderer lists/layers: ${error instanceof Error ? error.message : String(error)}`);
+				}
+				const cameraStackRuntime = configureCameraStacks(scene as any);
+				if (!cameraStackRuntime.valid) {
+					editor.layout.console.warn(`Failed to restore active camera stack: ${cameraStackRuntime.error}`);
+				}
 			}
 		}
 
@@ -368,6 +423,7 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 		}, 150);
 
 		if (!options?.asLink) {
+			await configureShaderVariantCollection(scene as any);
 			progress.setName("Compiling materials...");
 			await forceCompileAllSceneMaterials(scene);
 		}

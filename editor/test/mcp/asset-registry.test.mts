@@ -12,8 +12,10 @@ import {
 	getIndexedAssetDependencies,
 	listAssetDependencyScanners,
 	queryAssetRegistry,
+	readAssetMetadata,
 	rebuildAssetRegistry,
 	refreshAssetRegistryPaths,
+	writeAssetMetadata,
 } from "../../src/mcp/assets/registry";
 import { formatAssetDependencyGraph } from "../../src/mcp/assets/dependency-graph";
 import {
@@ -457,6 +459,15 @@ describe("persistent asset registry", () => {
 		await remove(texturePath);
 		await refreshAssetRegistryPaths([texturePath]);
 		expect(await getAssetRegistryStatus()).toMatchObject({ entryCount: 1, duplicateGuidCount: 0 });
+	});
+
+	test("never creates an orphan metadata sidecar for a missing asset", async () => {
+		const missingPath = join(projectDirectory, "assets", "deleted.rendererdata.json");
+		const sidecarPath = `${missingPath}.bjsmeta.json`;
+
+		await expect(readAssetMetadata(missingPath)).rejects.toMatchObject({ code: "ENOENT" });
+		await expect(writeAssetMetadata(missingPath, { guid: "must-not-be-written" })).rejects.toMatchObject({ code: "ENOENT" });
+		expect(await pathExists(sidecarPath)).toBe(false);
 	});
 
 	test("atomically migrates a stale registry version before processing a watcher refresh", async () => {

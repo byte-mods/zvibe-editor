@@ -1,4 +1,5 @@
 import { dirname, join } from "path/posix";
+import { readFile } from "fs-extra";
 
 import {
 	Scene,
@@ -13,7 +14,10 @@ import {
 	serialize,
 	IStaticSoundStopOptions,
 	IStaticSoundPlayOptions,
+	LastCreatedAudioEngine,
 } from "babylonjs";
+
+import { createScriptableAudioSoundAsync, decodeScriptableAudioClip, isScriptableAudioGeneratorPath, ScriptableAudioSound } from "babylonjs-editor-tools";
 
 import { projectConfiguration } from "../../project/configuration";
 
@@ -23,7 +27,7 @@ export class SoundNode extends TransformNode {
 	/**
 	 * Defines the reference to the sound associated with this node.
 	 */
-	public sound: StaticSound | null = null;
+	public sound: StaticSound | ScriptableAudioSound | null = null;
 
 	@serialize()
 	public soundRelativePath: string | null = null;
@@ -58,15 +62,37 @@ export class SoundNode extends TransformNode {
 
 		this.soundRelativePath = absolutePath.replace(join(dirname(projectConfiguration.path), "/"), "");
 
-		this.sound = await CreateSoundAsync(this.soundRelativePath, absolutePath, {
-			spatialAutoUpdate: true,
-		});
+		if (isScriptableAudioGeneratorPath(absolutePath)) {
+			const { readScriptableAudioAsset } = await import("../../mcp/assets/scriptable-audio-assets");
+			const asset = await readScriptableAudioAsset(absolutePath);
+			const engine = LastCreatedAudioEngine();
+			if (!engine) {
+				throw new Error("Audio Generator preview requires an initialized Babylon AudioV2 engine.");
+			}
+			const context = (engine as typeof engine & { _audioContext?: AudioContext })._audioContext;
+			if (!context) {
+				throw new Error("Audio Generator preview requires a live Web Audio context.");
+			}
+			const root = dirname(projectConfiguration.path);
+			this.sound = await createScriptableAudioSoundAsync(this.soundRelativePath, asset.graph, {
+				engine: engine as never,
+				spatialAutoUpdate: true,
+				loadAudioClip: async (path) => {
+					const bytes = await readFile(join(root, path));
+					return decodeScriptableAudioClip(context, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+				},
+			});
+		} else {
+			this.sound = await CreateSoundAsync(this.soundRelativePath, absolutePath, {
+				spatialAutoUpdate: true,
+			});
+		}
 
 		this.sound.volume = this._volume;
 		this.sound._isSpatial = this._spatial;
 
 		if (this.sound.spatial) {
-			this.sound.spatial.attach(this);
+			this.sound.spatial.attach(this as never);
 			this.sound.spatial.maxDistance = this._maxDistance;
 			this.sound.spatial.panningModel = this._panningModel;
 			this.sound.spatial.distanceModel = this._distanceModel;
@@ -106,7 +132,7 @@ export class SoundNode extends TransformNode {
 			this.sound._isSpatial = value;
 
 			if (value && this.sound.spatial) {
-				this.sound.spatial.attach(this);
+				this.sound.spatial.attach(this as never);
 				this.sound.spatial.maxDistance = this._maxDistance;
 				this.sound.spatial.distanceModel = this._distanceModel;
 			}

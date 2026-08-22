@@ -1,6 +1,6 @@
 import { basename } from "path/posix";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AiFillPicture } from "react-icons/ai";
 
 import { Divider } from "@blueprintjs/core";
@@ -18,10 +18,22 @@ import {
 	IPsdSmartFilterInfo,
 	PsdLayerSheetColor,
 } from "babylonjs-editor-tools";
-import { openProjectImage, requiresDecodedProjectImage } from "../../../../tools/assets/image";
+import { openProjectImage } from "../../../../tools/assets/image";
+import {
+	getTextureChannelPreviewState,
+	onTextureChannelPreviewStateChangedObservable,
+	setTextureChannelPreviewState,
+	TEXTURE_CHANNEL_PREVIEW_CHANNELS,
+	TEXTURE_CHANNEL_PREVIEW_DISPLAY_MODES,
+	TEXTURE_CHANNEL_PREVIEW_MAXIMUM_DIMENSION,
+	TextureChannelPreviewChannel,
+	TextureChannelPreviewDisplayMode,
+	transformTextureChannelPreviewPixels,
+} from "../../../../mcp/assets/texture-channel-preview";
 import {
 	applyPsdLayerExtraction,
 	getPsdLayerExtractionStatus,
+	IPsdDisplacementMapBindingRequest,
 	IPsdLayerExtractionStatus,
 	IPsdShapeBlurKernelBindingRequest,
 	IPsdSmartObjectExternalBindingRequest,
@@ -145,6 +157,81 @@ function smartFilterParameterLabel(filter: IPsdSmartFilterInfo): string {
 	if (filter.deInterlace) {
 		return `${filter.type} eliminate ${filter.deInterlace.eliminate}/${filter.deInterlace.newFieldsBy}`;
 	}
+	if (filter.customConvolution) {
+		return `${filter.type} scale ${filter.customConvolution.scale}/offset ${filter.customConvolution.offset}/matrix ${filter.customConvolution.matrix.join(",")}`;
+	}
+	if (filter.offset) {
+		return `${filter.type} horizontal ${filter.offset.horizontalPixels}px/vertical ${filter.offset.verticalPixels}px/${filter.offset.undefinedAreas}`;
+	}
+	if (filter.displace) {
+		const binding = filter.displace.mapBinding;
+		return `${filter.type} horizontal ${filter.displace.horizontalScalePercent}%/vertical ${filter.displace.verticalScalePercent}%/${filter.displace.displacementMap}/${filter.displace.undefinedAreas}/stored ${filter.displace.displacementFile.signature}:${filter.displace.displacementFile.path}/${binding ? `bound ${binding.width}×${binding.height} ${binding.colorMode} ${binding.sourcePath} SHA-256 ${binding.sourceHash}` : "map binding required"}`;
+	}
+	if (filter.pinch) {
+		return `${filter.type} amount ${filter.pinch.amountPercent}%/${filter.pinch.amountPercent > 0 ? "inward" : filter.pinch.amountPercent < 0 ? "outward" : "identity"}`;
+	}
+	if (filter.polarCoordinates) {
+		return `${filter.type} ${filter.polarCoordinates.conversion}`;
+	}
+	if (filter.ripple) {
+		return `${filter.type} ${filter.ripple.amountPercent}% ${filter.ripple.size}`;
+	}
+	if (filter.shear) {
+		return `${filter.type} points ${filter.shear.curvePoints.map((point) => `${point.x},${point.y}`).join(";")}/range ${filter.shear.curveStartIndex}-${filter.shear.curveEndIndex}/${filter.shear.undefinedAreas}`;
+	}
+	if (filter.spherize) {
+		return `${filter.type} ${filter.spherize.amountPercent}% ${filter.spherize.mode}`;
+	}
+	if (filter.twirl) {
+		const direction = filter.twirl.angleDegrees > 0 ? "clockwise" : filter.twirl.angleDegrees < 0 ? "counterclockwise" : "identity";
+		return `${filter.type} ${filter.twirl.angleDegrees}° ${direction}`;
+	}
+	if (filter.wave) {
+		return `${filter.type} ${filter.wave.type} ${filter.wave.numberOfGenerators} generator(s), wavelength ${filter.wave.wavelength.minimum}-${filter.wave.wavelength.maximum}px, amplitude ${filter.wave.amplitude.minimum}-${filter.wave.amplitude.maximum}px, scale ${filter.wave.scale.horizontalPercent}%×${filter.wave.scale.verticalPercent}%, seed ${filter.wave.randomSeed}, ${filter.wave.undefinedAreas}`;
+	}
+	if (filter.zigzag) {
+		return `${filter.type} ${filter.zigzag.amountPercent}% ${filter.zigzag.style}, ${filter.zigzag.ridges} ridge(s)`;
+	}
+	if (filter.hsbHsl) {
+		return `HSB/HSL ${filter.hsbHsl.inputMode.toUpperCase()} → ${filter.hsbHsl.rowOrder.toUpperCase()}`;
+	}
+	if (filter.perspectiveWarp) {
+		return `${filter.type} ${filter.perspectiveWarp.quads.length} plane(s), ${filter.perspectiveWarp.vertices.length} vertices, ${filter.perspectiveWarp.connectedEdgeCount} connected edge(s), source ${filter.perspectiveWarp.vertices.map((point) => `${point.x},${point.y}`).join("/")} → warped ${filter.perspectiveWarp.warpedVertices.map((point) => `${point.x},${point.y}`).join("/")}, quads ${filter.perspectiveWarp.quads.map((quad) => quad.join(",")).join(";")}`;
+	}
+	if (filter.curves) {
+		return `${filter.type} ${filter.curves.presetKind}, ${
+			filter.curves.adjustments
+				.map((adjustment) =>
+					adjustment.mode === "curve"
+						? `${adjustment.channels.join("+")} curve ${adjustment.points.map((point) => `${point.input}→${point.output}${point.curved ? " smooth" : " corner"}`).join("/")}`
+						: `${adjustment.channels.join("+")} mapping[${adjustment.values.join(",")}]`
+				)
+				.join("; ") || "identity"
+		}`;
+	}
+	if (filter.brightnessContrast) {
+		return `Brightness/Contrast brightness ${filter.brightnessContrast.brightness}, contrast ${filter.brightnessContrast.contrast}, ${filter.brightnessContrast.useLegacy ? "legacy" : "modern proportional/nonlinear"}`;
+	}
+	if (filter.liquify) {
+		return `${filter.type} mesh v${filter.liquify.meshVersion}/${filter.liquify.meshWidth}×${filter.liquify.meshHeight} cells→${filter.liquify.imageWidth}×${filter.liquify.imageHeight}px/${filter.liquify.nonzeroDisplacementCount} of ${filter.liquify.displacementCount} displaced/min ${filter.liquify.minimumDisplacement.x},${filter.liquify.minimumDisplacement.y}/max ${filter.liquify.maximumDisplacement.x},${filter.liquify.maximumDisplacement.y}/${filter.liquify.displacementEncoding}/${filter.liquify.meshByteLength} bytes/${filter.liquify.rlePacketCount === null ? `${filter.liquify.trailingPaddingBytes}-byte padding` : `${filter.liquify.rlePacketCount} RLE packets`}/reserved ${filter.liquify.reservedHeaderWords.join(",") || "none"}`;
+	}
+	if (filter.oilPaint) {
+		const legacy = filter.oilPaint.legacyPlugin;
+		return `${filter.type} ${filter.oilPaint.descriptorVariant}/stylization ${filter.oilPaint.stylization}/cleanliness ${filter.oilPaint.cleanliness}/scale ${filter.oilPaint.brushScale}/bristle detail ${filter.oilPaint.bristleDetail}/lighting ${filter.oilPaint.lightingOn ? "on" : "off"}/angle ${filter.oilPaint.lightDirectionDegrees}°/shine ${filter.oilPaint.shine}${legacy ? `/kernel ${legacy.kernelName}/GPU ${legacy.gpuEnabled ? "on" : "off"}/path ${legacy.filterPath}/parameters ${legacy.parameters.map((parameter) => `${parameter.suffix}:${parameter.name}[${parameter.parameterType}]=${parameter.value}`).join(",")}` : ""}`;
+	}
+	if (filter.puppetWarp) {
+		const shapes = filter.puppetWarp.shapes
+			.map((shape, index) => {
+				const pathCount = shape.boundaryPath.pathComponents.reduce((sum, component) => sum + component.paths.length, 0);
+				const pointCount = shape.boundaryPath.pathComponents.reduce(
+					(sum, component) => sum + component.paths.reduce((pathSum, path) => pathSum + path.points.length, 0),
+					0
+				);
+				return `shape ${index + 1} ${shape.originalVertices.length} vertices/${shape.triangleIndices.length / 3} triangles/${shape.pinPositions.length} pins/selected ${shape.selectedPins.join(",") || "none"}/pin rotations ${shape.pinRotationsDegrees.join(",") || "none"}°/pin depths ${shape.pinDepths.join(",") || "none"}/overlays ${shape.pinOverlays.map((value) => (value ? "on" : "off")).join(",") || "none"}/quality ${shape.meshQuality}/expansion ${shape.meshExpansion}/rigidity ${shape.meshRigidity}/resolution ${shape.imageResolution}/mesh v${shape.meshVersionMajor}.${shape.meshVersionMinor}/boundary ${shape.boundaryPath.pathComponents.length} components/${pathCount} paths/${pointCount} points`;
+			})
+			.join(" | ");
+		return `${filter.type} ${filter.puppetWarp.rigidType ? "rigid" : "normal"}/bounds ${filter.puppetWarp.bounds.map((point) => `${point.x},${point.y}`).join("/")}/${shapes}/${filter.puppetWarp.vertexEncoding}/${filter.puppetWarp.indexEncoding}`;
+	}
 	if (filter.fibers) {
 		return `${filter.type} variance ${filter.fibers.variance}/strength ${filter.fibers.strength}/seed ${filter.fibers.randomSeed}/FG ${filter.foregroundColor?.slice(0, 3).join(",") ?? "missing"}/BG ${filter.backgroundColor?.slice(0, 3).join(",") ?? "missing"}`;
 	}
@@ -255,6 +342,7 @@ function PsdLayerExtractor(props: { path: string; onAssetsChanged?: () => void }
 	const [renderExternalSmartObjects, setRenderExternalSmartObjects] = useState(false);
 	const [smartObjectExternalBindings, setSmartObjectExternalBindings] = useState<Record<number, IPsdSmartObjectExternalBindingRequest>>({});
 	const [shapeBlurKernelBindings, setShapeBlurKernelBindings] = useState<Record<string, IPsdShapeBlurKernelBindingRequest>>({});
+	const [displacementMapBindings, setDisplacementMapBindings] = useState<Record<string, IPsdDisplacementMapBindingRequest>>({});
 	const [smartObjectReplacementSources, setSmartObjectReplacementSources] = useState<Record<string, IPsdSmartObjectPayloadReplacementRequest>>({});
 	const [replacementDestinationPath, setReplacementDestinationPath] = useState("");
 	const [replacementStatus, setReplacementStatus] = useState<IPsdSmartObjectPayloadReplacementStatus | null>(null);
@@ -285,6 +373,9 @@ function PsdLayerExtractor(props: { path: string; onAssetsChanged?: () => void }
 			: undefined,
 		shapeBlurKernelBindings: Object.values(shapeBlurKernelBindings).filter((binding) => binding.sourcePath.trim()).length
 			? Object.values(shapeBlurKernelBindings).filter((binding) => binding.sourcePath.trim())
+			: undefined,
+		displacementMapBindings: Object.values(displacementMapBindings).filter((binding) => binding.sourcePath.trim()).length
+			? Object.values(displacementMapBindings).filter((binding) => binding.sourcePath.trim())
 			: undefined,
 		layerIndices: layerIndices ?? undefined,
 		textRenders: Object.values(textRenders).length ? Object.values(textRenders) : undefined,
@@ -324,6 +415,7 @@ function PsdLayerExtractor(props: { path: string; onAssetsChanged?: () => void }
 	};
 	useEffect(() => {
 		setShapeBlurKernelBindings({});
+		setDisplacementMapBindings({});
 		setSmartObjectReplacementSources({});
 		setReplacementDestinationPath("");
 		setReplacementStatus(null);
@@ -393,6 +485,19 @@ function PsdLayerExtractor(props: { path: string; onAssetsChanged?: () => void }
 		});
 		setPlanDirty(true);
 	};
+	const updateDisplacementMapBinding = (layerIndex: number, filterIndex: number, sourcePath: string | null): void => {
+		const key = `${layerIndex}:${filterIndex}`;
+		setDisplacementMapBindings((current) => {
+			const next = { ...current };
+			if (sourcePath === null) {
+				delete next[key];
+			} else {
+				next[key] = { layerIndex, filterIndex, sourcePath };
+			}
+			return next;
+		});
+		setPlanDirty(true);
+	};
 	const replacementOptions = () => ({
 		destinationPath: replacementDestinationPath.trim() || undefined,
 		replacements: Object.values(smartObjectReplacementSources).filter((request) => request.sourcePath.trim()),
@@ -452,6 +557,11 @@ function PsdLayerExtractor(props: { path: string; onAssetsChanged?: () => void }
 				.map((filter) => [filter.shapeBlur!.customShape.id, filter.shapeBlur!.customShape] as const)
 		).values(),
 	];
+	const displaceFilters = (status?.document.layers ?? []).flatMap((layer) =>
+		(layer.smartObject?.smartFilters ?? [])
+			.filter((filter) => filter.type === "displace" && filter.displace)
+			.map((filter) => ({ layerIndex: layer.index, layerName: layer.name, filter }))
+	);
 	return (
 		<div className="flex flex-col gap-2 rounded-lg bg-secondary dark:bg-secondary/35 p-3 text-sm">
 			<div className="font-semibold">PSD Sprite Layers</div>
@@ -564,12 +674,14 @@ function PsdLayerExtractor(props: { path: string; onAssetsChanged?: () => void }
 			{renderEmbeddedSmartObjects && (
 				<div className="text-xs text-muted-foreground">
 					Uses each contributing raster layer’s exact embedded PSD-v1 merged composite, authored corner transform, premultiplied bilinear sampling, and existing masks.
-					Exact tensor and piecewise quilt custom Bezier envelopes execute. Forty-five ordered smart-filter types execute before placement: Add Noise, Dust & Scratches,
+					Exact tensor and piecewise quilt custom Bezier envelopes execute. Sixty-three ordered smart-filter types execute before placement: Add Noise, Dust & Scratches,
 					Reduce Noise, Color Halftone, Crystallize, Mezzotint, Mosaic, Pointillize, Clouds, Difference Clouds, Diffuse, Emboss, Extrude, Tiles, Trace Contour, Wind,
-					De-Interlace, Fibers, Lens Flare, Average, Blur, Blur More, Box Blur, Gaussian Blur, Median, Maximum, Minimum, High Pass, Motion Blur, Radial Blur, Despeckle,
-					Facet, Fragment, Sharpen, Sharpen Edges, Sharpen More, Find Edges, Solarize, NTSC Colors, Smart Sharpen, Unsharp Mask, Smart Blur, Surface Blur, Heart Card
-					Shape Blur, and Invert. All use explicit bounded algorithm evidence, 20 supported Photoshop blend modes, and bounded document-space FEid/FXid filter-mask
-					coverage; standard preset, tensor, and quilt warps execute, while unknown warps, unsupported filters, malformed masks, and unsupported blends block explicitly.
+					De-Interlace, Custom, Offset, Displace, Pinch, Polar Coordinates, Ripple, Shear, Spherize, Twirl, Wave, ZigZag, HSB/HSL, Perspective Warp, Curves,
+					Brightness/Contrast, Liquify, Oil Paint, Puppet Warp, Fibers, Lens Flare, Average, Blur, Blur More, Box Blur, Gaussian Blur, Median, Maximum, Minimum, High
+					Pass, Motion Blur, Radial Blur, Despeckle, Facet, Fragment, Sharpen, Sharpen Edges, Sharpen More, Find Edges, Solarize, NTSC Colors, Smart Sharpen, Unsharp
+					Mask, Smart Blur, Surface Blur, Heart Card Shape Blur, and Invert. All use explicit bounded algorithm evidence, 20 supported Photoshop blend modes, and bounded
+					document-space FEid/FXid filter-mask coverage; standard preset, tensor, and quilt warps execute, while unknown warps, unsupported filters, malformed masks, and
+					unsupported blends block explicitly.
 				</div>
 			)}
 			{unresolvedShapeBlurPresets.length > 0 && (
@@ -636,6 +748,69 @@ function PsdLayerExtractor(props: { path: string; onAssetsChanged?: () => void }
 									<div className="break-all text-emerald-400">
 										Bound {evidence.width}×{evidence.height} {evidence.effectiveCoverageSource} coverage {evidence.coverageMinimum}-{evidence.coverageMaximum} ·
 										nonzero {evidence.nonZeroSampleCount} · SHA-256 {evidence.sourceHash} · {evidence.executionModel}
+									</div>
+								)}
+							</div>
+						);
+					})}
+				</div>
+			)}
+			{displaceFilters.length > 0 && (
+				<div className="flex flex-col gap-2 rounded border border-border p-2 text-xs">
+					<div className="font-medium">Displace maps</div>
+					<div className="text-muted-foreground">
+						Bind each Displace filter to one flattened PSD/PSB contained by this project. The stored Photoshop path is shown only as evidence and is never followed. RGB
+						maps use red horizontally and green vertically; Grayscale maps use the same channel for both axes. Exact map bytes and decode evidence enter the extraction
+						lease.
+					</div>
+					{displaceFilters.map(({ layerIndex, layerName, filter }) => {
+						const key = `${layerIndex}:${filter.index}`;
+						const binding = displacementMapBindings[key];
+						const evidence = status?.displacementMapBindings.find((candidate) => candidate.layerIndex === layerIndex && candidate.filterIndex === filter.index);
+						return (
+							<div key={key} className="flex flex-col gap-1 rounded bg-background/40 p-2">
+								<div className="break-all font-medium">
+									{layerName} · layer {layerIndex} · filter {filter.index}
+								</div>
+								<div className="break-all text-muted-foreground">
+									{filter.displace!.horizontalScalePercent}% horizontal · {filter.displace!.verticalScalePercent}% vertical · {filter.displace!.displacementMap} ·{" "}
+									{filter.displace!.undefinedAreas} · stored {filter.displace!.displacementFile.signature}:{filter.displace!.displacementFile.path}
+								</div>
+								<div className="grid grid-cols-[1fr_auto_auto] gap-1">
+									<input
+										className="h-7 rounded bg-input px-1"
+										placeholder="assets/maps/displacement.psd"
+										value={binding?.sourcePath ?? ""}
+										onChange={(event) => updateDisplacementMapBinding(layerIndex, filter.index, event.target.value)}
+									/>
+									<button
+										type="button"
+										className="h-7 rounded border border-border px-2"
+										onClick={() => {
+											const selected = openSingleFileDialog({
+												title: `Bind Displace map for ${layerName}`,
+												filters: [{ name: "Photoshop displacement maps", extensions: ["psd", "psb"] }],
+											});
+											if (selected) {
+												updateDisplacementMapBinding(layerIndex, filter.index, selected);
+											}
+										}}
+									>
+										Choose…
+									</button>
+									<button
+										type="button"
+										className="h-7 px-2 underline"
+										disabled={!binding}
+										onClick={() => updateDisplacementMapBinding(layerIndex, filter.index, null)}
+									>
+										Clear
+									</button>
+								</div>
+								{evidence && (
+									<div className="break-all text-emerald-400">
+										Bound {evidence.width}×{evidence.height} {evidence.format.toUpperCase()} v{evidence.documentVersion} · {evidence.depth}-bit{" "}
+										{evidence.colorMode} · {evidence.channelMapping} · {evidence.sourceBytes} bytes · SHA-256 {evidence.sourceHash} · {evidence.executionModel}
 									</div>
 								)}
 							</div>
@@ -2324,7 +2499,10 @@ export function EditorInspectorImageComponent(props: IEditorInspectorImageCompon
 	const [width, setWidth] = useState(0);
 	const [height, setHeight] = useState(0);
 	const source = props.importedCurrent && props.importedPath ? props.importedPath : props.object.absolutePath;
-	const [previewSource, setPreviewSource] = useState(source);
+	const canvasRef = useRef<HTMLCanvasElement>(null);
+	const [previewState, setPreviewState] = useState(() => getTextureChannelPreviewState(props.object.absolutePath));
+	const [previewPixels, setPreviewPixels] = useState<{ pixels: Uint8Array; width: number; height: number } | null>(null);
+	const [previewError, setPreviewError] = useState<string | null>(null);
 	const overrides = parsedOverrides(props.settings?.platformOverrides);
 	const updateOverride = (platform: "web" | "desktop", patch: Partial<ITextureImporterPlatformOverride>): void => {
 		const current = overrides[platform] ?? { enabled: false };
@@ -2338,34 +2516,85 @@ export function EditorInspectorImageComponent(props: IEditorInspectorImageCompon
 
 	useEffect(() => {
 		let disposed = false;
-		let objectUrl: string | null = null;
 		setWidth(0);
 		setHeight(0);
-		if (!requiresDecodedProjectImage(source)) {
-			setPreviewSource(source);
-			return () => undefined;
-		}
+		setPreviewPixels(null);
+		setPreviewError(null);
 		void (async () => {
 			try {
-				const buffer = await (await openProjectImage(source)).png().toBuffer();
+				const image = (await openProjectImage(source, { animated: false, limitInputPixels: 67_108_864 })).rotate();
+				const metadata = await image.metadata();
+				const output = await image
+					.clone()
+					.resize({
+						width: TEXTURE_CHANNEL_PREVIEW_MAXIMUM_DIMENSION,
+						height: TEXTURE_CHANNEL_PREVIEW_MAXIMUM_DIMENSION,
+						fit: "inside",
+						withoutEnlargement: true,
+					})
+					.ensureAlpha()
+					.raw()
+					.toBuffer({ resolveWithObject: true });
 				if (disposed) {
 					return;
 				}
-				objectUrl = URL.createObjectURL(new Blob([new Uint8Array(buffer)], { type: "image/png" }));
-				setPreviewSource(objectUrl);
-			} catch {
+				const swapsDimensions = metadata.orientation !== undefined && [5, 6, 7, 8].includes(metadata.orientation);
+				setWidth((swapsDimensions ? metadata.height : metadata.width) ?? output.info.width);
+				setHeight((swapsDimensions ? metadata.width : metadata.height) ?? output.info.height);
+				setPreviewPixels({ pixels: new Uint8Array(output.data), width: output.info.width, height: output.info.height });
+			} catch (error) {
 				if (!disposed) {
-					setPreviewSource("");
+					setPreviewError(error instanceof Error ? error.message : String(error));
 				}
 			}
 		})();
 		return () => {
 			disposed = true;
-			if (objectUrl) {
-				URL.revokeObjectURL(objectUrl);
-			}
 		};
 	}, [source]);
+
+	useEffect(() => {
+		setPreviewState(getTextureChannelPreviewState(props.object.absolutePath));
+		const observer = onTextureChannelPreviewStateChangedObservable.add(() => {
+			const current = getTextureChannelPreviewState(props.object.absolutePath);
+			setPreviewState((previous) =>
+				previous.revision === current.revision && previous.channel === current.channel && previous.displayMode === current.displayMode ? previous : current
+			);
+		});
+		return () => {
+			onTextureChannelPreviewStateChangedObservable.remove(observer);
+		};
+	}, [props.object.absolutePath]);
+
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) {
+			return;
+		}
+		const context = canvas.getContext("2d");
+		if (!context) {
+			setPreviewError("The browser did not provide a 2D canvas context for the texture preview.");
+			return;
+		}
+		if (!previewPixels) {
+			canvas.width = 1;
+			canvas.height = 1;
+			context.clearRect(0, 0, 1, 1);
+			return;
+		}
+		canvas.width = previewPixels.width;
+		canvas.height = previewPixels.height;
+		const transformed = transformTextureChannelPreviewPixels(previewPixels.pixels, previewState.channel, previewState.displayMode);
+		const imageData = new ImageData(previewPixels.width, previewPixels.height);
+		imageData.data.set(transformed);
+		context.putImageData(imageData, 0, 0);
+	}, [previewPixels, previewState]);
+
+	const updatePreview = (patch: { channel?: TextureChannelPreviewChannel; displayMode?: TextureChannelPreviewDisplayMode }): void => {
+		const current = getTextureChannelPreviewState(props.object.absolutePath);
+		setPreviewState(setTextureChannelPreviewState(props.object.absolutePath, patch, current.revision).state);
+	};
+	const effectiveDisplayMode = previewState.channel === "rgba" ? "original" : previewState.channel === "alpha" ? "grayscale" : previewState.displayMode;
 
 	return (
 		<div className="flex flex-col gap-2">
@@ -2395,6 +2624,20 @@ export function EditorInspectorImageComponent(props: IEditorInspectorImageCompon
 								</div>
 								{value.enabled && (
 									<>
+										<label className="grid grid-cols-[1fr_140px] items-center gap-2">
+											<span>Output Format</span>
+											<select
+												className="h-8 rounded border border-border bg-input px-2"
+												value={value.outputFormat ?? String(props.settings?.outputFormat ?? "automatic")}
+												onChange={(event) =>
+													updateOverride(platform, { outputFormat: event.target.value as ITextureImporterPlatformOverride["outputFormat"] })
+												}
+											>
+												{["automatic", "png", "jpeg", "webp"].map((format) => (
+													<option key={format}>{format}</option>
+												))}
+											</select>
+										</label>
 										<label className="grid grid-cols-[1fr_140px] items-center gap-2">
 											<span>Max Size</span>
 											<select
@@ -2464,20 +2707,50 @@ export function EditorInspectorImageComponent(props: IEditorInspectorImageCompon
 				</div>
 			)}
 			<div className="px-5 text-xs text-muted-foreground">{props.importedCurrent ? "Imported preview artifact" : "Original source preview"}</div>
+			<div className="flex flex-col gap-2 px-5" data-testid="texture-channel-preview-controls">
+				<div className="flex flex-wrap gap-1" aria-label="Texture preview channel">
+					{TEXTURE_CHANNEL_PREVIEW_CHANNELS.map((channel) => (
+						<button
+							key={channel}
+							type="button"
+							aria-pressed={previewState.channel === channel}
+							className={`h-7 min-w-9 rounded border px-2 text-xs uppercase ${previewState.channel === channel ? "border-primary bg-primary text-primary-foreground" : "border-border bg-input"}`}
+							onClick={() => updatePreview({ channel })}
+						>
+							{channel === "rgba" ? "RGBA" : channel[0]}
+						</button>
+					))}
+				</div>
+				<div className="flex flex-wrap gap-1" aria-label="Texture preview display mode">
+					{TEXTURE_CHANNEL_PREVIEW_DISPLAY_MODES.map((displayMode) => (
+						<button
+							key={displayMode}
+							type="button"
+							aria-pressed={previewState.displayMode === displayMode}
+							className={`h-7 rounded border px-2 text-xs capitalize ${previewState.displayMode === displayMode ? "border-primary bg-primary text-primary-foreground" : "border-border bg-input"}`}
+							onClick={() => updatePreview({ displayMode })}
+						>
+							{displayMode}
+						</button>
+					))}
+				</div>
+				<div className="text-xs text-muted-foreground">Single-channel previews default to grayscale. Colorized mode tints R/G/B; alpha stays grayscale.</div>
+			</div>
 
-			<div className="w-full aspect-square p-5 rounded-lg bg-secondary dark:bg-secondary/35">
-				<img
-					key={previewSource}
-					alt=""
-					draggable={false}
-					src={previewSource}
-					className="w-full aspect-square object-contain"
-					onLoad={(ev) => {
-						setWidth(ev.currentTarget.naturalWidth);
-						setHeight(ev.currentTarget.naturalHeight);
-					}}
+			<div className="flex w-full aspect-square items-center justify-center p-5 rounded-lg bg-secondary dark:bg-secondary/35">
+				<canvas
+					ref={canvasRef}
+					aria-label="Texture channel preview"
+					className="max-h-full max-w-full object-contain"
+					data-preview-channel={previewState.channel}
+					data-preview-display-mode={previewState.displayMode}
+					data-preview-effective-display-mode={effectiveDisplayMode}
+					data-preview-revision={previewState.revision}
+					data-preview-width={previewPixels?.width ?? 0}
+					data-preview-height={previewPixels?.height ?? 0}
 				/>
 			</div>
+			{previewError && <div className="px-5 text-xs text-red-400 break-all">Preview unavailable: {previewError}</div>}
 
 			<div className="bg-secondary dark:bg-secondary/35 p-5 rounded-lg">
 				<Table>
@@ -2504,17 +2777,68 @@ export function EditorInspectorImageComponent(props: IEditorInspectorImageCompon
 								</TableRow>
 								<TableRow>
 									<TableCell className="font-medium">Sampling</TableCell>
-									<TableCell>{props.result.effectiveColorSpace}</TableCell>
+									<TableCell>
+										{props.result.effectiveColorSpace} · {props.result.settings.filterMode} · aniso {props.result.settings.anisoLevel}
+									</TableCell>
+								</TableRow>
+								<TableRow>
+									<TableCell className="font-medium">Addressing</TableCell>
+									<TableCell>
+										U {props.result.settings.wrapModeU} · V {props.result.settings.wrapModeV}
+									</TableCell>
 								</TableRow>
 								<TableRow>
 									<TableCell className="font-medium">Output</TableCell>
 									<TableCell>
-										{props.result.output.format.toUpperCase()} · {props.result.output.channels} channel(s)
+										{props.result.output.width}×{props.result.output.height} · {props.result.output.format.toUpperCase()} · {props.result.output.channels}{" "}
+										channel(s)
+									</TableCell>
+								</TableRow>
+								<TableRow>
+									<TableCell className="font-medium">Resize policy</TableCell>
+									<TableCell>
+										{props.result.processing.maxSizeApplied ? "Max Size applied" : "Within Max Size"} ·{" "}
+										{props.result.processing.nonPowerOfTwoApplied ? props.result.settings.nonPowerOfTwo : "NPOT unchanged"}
 									</TableCell>
 								</TableRow>
 								<TableRow>
 									<TableCell className="font-medium">Mip levels</TableCell>
-									<TableCell>{props.result.mipmaps.length}</TableCell>
+									<TableCell>
+										{props.result.mipmaps.length} · {props.result.settings.mipmapFilter} ·{" "}
+										{props.result.processing.fullMipChain ? "complete chain" : "incomplete chain"}
+										{props.result.processing.mipmapCoveragePreserved ? " · alpha coverage preserved" : ""}
+									</TableCell>
+								</TableRow>
+								<TableRow>
+									<TableCell className="font-medium">Alpha</TableCell>
+									<TableCell>
+										{props.result.settings.alphaSource}
+										{props.result.processing.transparentColorsDilated ? " · transparent colors dilated" : ""}
+									</TableCell>
+								</TableRow>
+								{props.result.settings.textureType === "normalMap" && (
+									<TableRow>
+										<TableCell className="font-medium">Normal map</TableCell>
+										<TableCell>
+											{props.result.settings.normalMapSource}
+											{props.result.processing.normalMapGenerated ? " · generated at strength " + props.result.settings.normalMapStrength : " · authored RGB"}
+										</TableCell>
+									</TableRow>
+								)}
+								{props.result.sprite && (
+									<TableRow>
+										<TableCell className="font-medium">Sprite</TableCell>
+										<TableCell>
+											{props.result.sprite.pixelsPerUnit} PPU · {props.result.sprite.meshType} · {props.result.sprite.bounds.width}×
+											{props.result.sprite.bounds.height} bounds · {props.result.sprite.extrude}px extrude
+										</TableCell>
+									</TableRow>
+								)}
+								<TableRow>
+									<TableCell className="font-medium">Build target</TableCell>
+									<TableCell>
+										{props.result.platform} · {props.result.platformOverrideApplied ? "override applied" : "default settings"}
+									</TableCell>
 								</TableRow>
 								<TableRow>
 									<TableCell className="font-medium">CPU Readable</TableCell>

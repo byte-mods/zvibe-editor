@@ -3,257 +3,334 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import { callTextTool } from "./helpers.mjs";
+import {
+	applyPhysics2DForceSchema,
+	applyPhysics2DTorqueSchema,
+	createPhysics2DEffectorSchema,
+	createPhysics2DJointSchema,
+	createPhysics2DMaterialSchema,
+	createPhysics2DWorldSchema,
+	deletePhysics2DWorldSchema,
+	deletePhysics2DResourceSchema,
+	physics2DCreateOrUpdateRevision,
+	physics2DPolygonContour,
+	physics2DRevision,
+	getPhysics2DDebugRenderingSchema,
+	setPhysics2DBodySchema,
+	setPhysics2DEffectorSchema,
+	setPhysics2DJointSchema,
+	setPhysics2DMaterialSchema,
+	setPhysics2DRuntimeVelocitySchema,
+	setPhysics2DSettingsSchema,
+	setPhysics2DWorldSchema,
+} from "./physics2d-schemas.mjs";
 
-const collider = z.discriminatedUnion("shape", [
-	z.object({ shape: z.literal("box"), size: z.array(z.number().positive()).length(2) }),
-	z.object({ shape: z.literal("circle"), radius: z.number().positive() }),
-	z.object({
-		shape: z.literal("polygon"),
-		points: z
-			.array(z.array(z.number().finite()).length(2))
-			.min(3)
-			.max(64)
-			.describe(
-				"Simple convex or concave, consistently wound local [x, y] vertices in centimeters. Concave outlines are decomposed into persisted convex triangle parts; holes and self-intersections are unsupported."
-			),
-	}),
-]);
-const vector2 = z.array(z.number()).length(2);
+const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+const create = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+const update = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
+const runtime = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+const empty = z.object({}).strict();
 
-/** Registers 2D body/collider simulation tools. */
+/** Registers complete Unity-style 2D authoring and live simulation tools. */
 export function registerPhysics2DTools(server: McpServer): void {
 	server.registerTool(
 		"get_physics2d_settings",
-		{ title: "Get 2D physics settings", description: "Get persisted 2D solver iteration settings.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
+		{
+			title: "Get Physics 2D settings",
+			description: "Read the versioned exact revision and independent velocity/position solver iteration counts shared by editor preview and exported games.",
+			inputSchema: empty,
+			annotations: readOnly,
+		},
 		async (): Promise<CallToolResult> => callTextTool("get_physics2d_settings", {})
 	);
 	server.registerTool(
 		"set_physics2d_settings",
 		{
-			title: "Set 2D physics settings",
-			description: "Set persisted 2D solver iterations used in editor preview and exported runtime.",
-			inputSchema: z.object({ solverIterations: z.number().int().min(1).max(16) }),
-			annotations: { idempotentHint: true },
+			title: "Set Physics 2D settings",
+			description: "Atomically update split Physics 2D solver iterations under the exact revision returned by get_physics2d_settings.",
+			inputSchema: setPhysics2DSettingsSchema,
+			annotations: update,
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_physics2d_settings", args)
 	);
 	server.registerTool(
-		"list_physics2d_effectors",
+		"create_physics2d_world",
 		{
-			title: "List 2D effectors",
-			description: "List node-bound Point, Area, Surface, and one-way Platform effectors.",
-			inputSchema: z.object({}),
-			annotations: { readOnlyHint: true },
-		},
-		async (): Promise<CallToolResult> => callTextTool("list_physics2d_effectors", {})
-	);
-	server.registerTool(
-		"create_physics2d_effector",
-		{
-			title: "Create 2D effector",
+			title: "Create Physics 2D world",
 			description:
-				"Create a node-bound Point, Area, Surface, or Platform effector. Platform requires a static 2D body on the same node and resolves collisions only from platformAngle's outward side.",
-			inputSchema: z.object({
-				id: z.string().optional(),
-				nodeId: z.string(),
-				type: z.enum(["point", "area", "surface", "platform"]).optional(),
-				radius: z.number().positive().optional(),
-				force: z.number().finite().optional(),
-				falloff: z.number().nonnegative().optional(),
-				forceAngle: z.number().finite().optional().describe("Area force direction in degrees; 0 points along +X."),
-				surfaceThickness: z.number().positive().optional().describe("Surface ring thickness in centimeters."),
-				platformAngle: z.number().finite().optional().describe("Platform outward collision side in degrees; 90 is upward."),
-				enabled: z.boolean().optional(),
-			}),
+				"Create one of at most eight scene-owned worlds with per-world solver, plane, transform-write/tween, contact-filter, drawing, and camera policies under the exact settings revision.",
+			inputSchema: createPhysics2DWorldSchema,
+			annotations: create,
 		},
-		async (args): Promise<CallToolResult> => callTextTool("create_physics2d_effector", args)
+		async (args): Promise<CallToolResult> => callTextTool("create_physics2d_world", args)
 	);
 	server.registerTool(
-		"set_physics2d_effector",
+		"set_physics2d_world",
 		{
-			title: "Set 2D effector",
-			description: "Update an effector's Point/Area/Surface/Platform type, node, force settings, Surface thickness, Platform side angle, or enabled state.",
-			inputSchema: z.object({
-				id: z.string(),
-				nodeId: z.string().optional(),
-				type: z.enum(["point", "area", "surface", "platform"]).optional(),
-				radius: z.number().positive().optional(),
-				force: z.number().finite().optional(),
-				falloff: z.number().nonnegative().optional(),
-				forceAngle: z.number().finite().optional(),
-				surfaceThickness: z.number().positive().optional(),
-				platformAngle: z.number().finite().optional(),
-				enabled: z.boolean().optional(),
-			}),
-			annotations: { idempotentHint: true },
+			title: "Set Physics 2D world",
+			description:
+				"Atomically update one existing Physics 2D world's bounded solver, custom plane, transform, filtering, drawing, or multi-camera policy under the exact scene-settings revision.",
+			inputSchema: setPhysics2DWorldSchema,
+			annotations: update,
 		},
-		async (args): Promise<CallToolResult> => callTextTool("set_physics2d_effector", args)
+		async (args): Promise<CallToolResult> => callTextTool("set_physics2d_world", args)
 	);
 	server.registerTool(
-		"delete_physics2d_effector",
+		"delete_physics2d_world",
 		{
-			title: "Delete 2D effector",
-			description: "Delete an authored 2D Point, Area, Surface, or Platform effector without deleting its scene node.",
-			inputSchema: z.object({ id: z.string() }),
+			title: "Delete Physics 2D world",
+			description: "Delete one exact-settings-revision unused non-default Physics 2D world. Reassign every owned body first.",
+			inputSchema: deletePhysics2DWorldSchema,
+			annotations: update,
 		},
-		async (args): Promise<CallToolResult> => callTextTool("delete_physics2d_effector", args)
+		async (args): Promise<CallToolResult> => callTextTool("delete_physics2d_world", args)
 	);
+	server.registerTool(
+		"get_physics2d_debug_rendering",
+		{
+			title: "Get Physics 2D debug rendering",
+			description:
+				"Read a bounded paginated per-camera body/joint draw snapshot, release-build availability, and caller-supplied custom elements ordered after automatic scene drawing.",
+			inputSchema: getPhysics2DDebugRenderingSchema,
+			annotations: readOnly,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_physics2d_debug_rendering", args)
+	);
+
 	server.registerTool(
 		"list_physics2d_materials",
 		{
-			title: "List 2D physics materials",
-			description: "List reusable 2D physics materials with friction and restitution.",
-			inputSchema: z.object({}),
-			annotations: { readOnlyHint: true },
+			title: "List Physics Material 2D resources",
+			description: "List reusable versioned Physics Material 2D resources with exact revisions, friction, restitution, ids, and names.",
+			inputSchema: empty,
+			annotations: readOnly,
 		},
 		async (): Promise<CallToolResult> => callTextTool("list_physics2d_materials", {})
 	);
 	server.registerTool(
 		"create_physics2d_material",
 		{
-			title: "Create 2D physics material",
-			description: "Create a reusable 2D material. Friction affects tangential collision response; restitution controls bounce. Both range from 0 to 1.",
-			inputSchema: z.object({
-				id: z.string().optional(),
-				name: z.string().min(1),
-				friction: z.number().min(0).max(1).optional(),
-				restitution: z.number().min(0).max(1).optional(),
-			}),
+			title: "Create Physics Material 2D",
+			description: "Create a reusable versioned Physics Material 2D resource. Friction and restitution are each bounded from 0 through 1.",
+			inputSchema: createPhysics2DMaterialSchema,
+			annotations: create,
 		},
 		async (args): Promise<CallToolResult> => callTextTool("create_physics2d_material", args)
 	);
 	server.registerTool(
 		"set_physics2d_material",
 		{
-			title: "Set 2D physics material",
-			description: "Update the name, friction, or restitution of a reusable 2D physics material.",
-			inputSchema: z.object({
-				id: z.string(),
-				name: z.string().min(1).optional(),
-				friction: z.number().min(0).max(1).optional(),
-				restitution: z.number().min(0).max(1).optional(),
-			}),
-			annotations: { idempotentHint: true },
+			title: "Set Physics Material 2D",
+			description: "Atomically rename or update friction/restitution under the exact material revision returned by list_physics2d_materials.",
+			inputSchema: setPhysics2DMaterialSchema,
+			annotations: update,
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_physics2d_material", args)
 	);
 	server.registerTool(
 		"delete_physics2d_material",
-		{ title: "Delete 2D physics material", description: "Delete an unused 2D physics material. Reassign bodies first.", inputSchema: z.object({ id: z.string() }) },
+		{
+			title: "Delete Physics Material 2D",
+			description: "Delete one exact-revision unassigned Physics Material 2D resource. Bodies must be reassigned first.",
+			inputSchema: deletePhysics2DResourceSchema,
+			annotations: update,
+		},
 		async (args): Promise<CallToolResult> => callTextTool("delete_physics2d_material", args)
 	);
-	server.registerTool(
-		"list_physics2d_joints",
-		{
-			title: "List 2D joints",
-			description: "List persisted distance, fixed, and pivot-hinge 2D joints, including hinge limits and motor settings.",
-			inputSchema: z.object({}),
-			annotations: { readOnlyHint: true },
-		},
-		async (): Promise<CallToolResult> => callTextTool("list_physics2d_joints", {})
-	);
-	server.registerTool(
-		"create_physics2d_joint",
-		{
-			title: "Create 2D joint",
-			description:
-				"Create a persisted distance, fixed, or pivot-hinge joint between two nodes that already have 2D physics bodies. A hinge maintains one shared local pivot, optional relative angular limits, and an optional motor speed with a solver authority cap.",
-			inputSchema: z.object({
-				id: z.string().optional(),
-				type: z.enum(["distance", "fixed", "hinge"]).optional(),
-				firstNodeId: z.string(),
-				secondNodeId: z.string(),
-				distance: z.number().nonnegative().optional(),
-				anchor: vector2.optional().describe("World-space pivot [x, y] for a hinge; defaults to the midpoint between bodies."),
-				minAngle: z.number().optional().describe("Minimum relative hinge angle in radians, measured from the creation pose."),
-				maxAngle: z.number().optional().describe("Maximum relative hinge angle in radians, measured from the creation pose."),
-				motorSpeed: z.number().finite().optional().describe("Target hinge relative rotation speed in radians per second. Omit to disable the motor."),
-				maxMotorTorque: z.number().finite().nonnegative().optional().describe("Non-negative motor authority cap used by the lightweight solver; defaults to 10000."),
-			}),
-		},
-		async (args): Promise<CallToolResult> => callTextTool("create_physics2d_joint", args)
-	);
-	server.registerTool(
-		"set_physics2d_joint",
-		{
-			title: "Set 2D joint",
-			description: "Update a distance joint's distance or a hinge's angular limits and optional motor speed/authority without recreating the joint.",
-			inputSchema: z.object({
-				id: z.string(),
-				distance: z.number().nonnegative().optional(),
-				minAngle: z.number().finite().optional(),
-				maxAngle: z.number().finite().optional(),
-				motorSpeed: z.number().finite().optional(),
-				maxMotorTorque: z.number().finite().nonnegative().optional(),
-			}),
-			annotations: { idempotentHint: true },
-		},
-		async (args): Promise<CallToolResult> => callTextTool("set_physics2d_joint", args)
-	);
-	server.registerTool(
-		"delete_physics2d_joint",
-		{ title: "Delete 2D joint", description: "Delete a 2D joint without deleting its bodies.", inputSchema: z.object({ id: z.string() }) },
-		async (args): Promise<CallToolResult> => callTextTool("delete_physics2d_joint", args)
-	);
+
 	server.registerTool(
 		"list_physics2d_bodies",
 		{
-			title: "List 2D physics bodies",
-			description: "List persisted 2D bodies/colliders, live velocities, and the previous-frame collision count.",
-			inputSchema: z.object({}),
-			annotations: { readOnlyHint: true },
+			title: "List Rigidbody 2D and Collider 2D state",
+			description:
+				"List complete versioned bodies and all five collider families, live velocities, mass/inertia/center state, constraints, materials, contacts/triggers, layer overrides, and shared simulation evidence.",
+			inputSchema: empty,
+			annotations: readOnly,
 		},
 		async (): Promise<CallToolResult> => callTextTool("list_physics2d_bodies", {})
 	);
 	server.registerTool(
 		"set_physics2d_body",
 		{
-			title: "Set 2D physics body",
+			title: "Set Rigidbody 2D and Collider 2D",
 			description:
-				"Attach or update a lightweight 2D body and box/circle/simple-polygon collider on a mesh or transform node. Concave polygon outlines are decomposed into collision-safe convex parts; holes and self-intersections are unsupported. It simulates in the node's local X/Y plane; values use centimeters and seconds.",
-			inputSchema: z.object({
-				nodeId: z.string(),
-				bodyType: z.enum(["dynamic", "static"]).optional(),
-				collider: collider.optional(),
-				gravity: vector2.optional(),
-				gravityScale: z.number().nonnegative().optional(),
-				linearDamping: z.number().min(0).max(0.999).optional(),
-				materialId: z.string().nullable().optional().describe("Optional reusable 2D physics material id. Pass null to clear the material assignment."),
-				friction: z.number().min(0).max(1).optional().describe("Per-body friction override; omit to use the assigned material."),
-				restitution: z.number().min(0).max(1).optional(),
-				velocity: vector2.optional(),
-				isTrigger: z.boolean().optional().describe("Report overlaps without applying physical separation or impulse."),
-				enabled: z.boolean().optional(),
-			}),
+				"Create with expectedRevision:0 or exact-revision update a complete dynamic, kinematic, or static X/Y-plane body with Box, Circle, Capsule, Polygon, or Edge collider. Units are centimeters, seconds, kilograms, and radians.",
+			inputSchema: setPhysics2DBodySchema,
+			annotations: update,
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_physics2d_body", args)
 	);
 	server.registerTool(
+		"remove_physics2d_body",
+		{
+			title: "Remove Rigidbody 2D",
+			description: "Remove one exact-revision Rigidbody 2D and its collider while preserving the scene node.",
+			inputSchema: z.object({ nodeId: z.string().trim().min(1).max(256), expectedRevision: physics2DRevision }).strict(),
+			annotations: update,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("remove_physics2d_body", args)
+	);
+
+	server.registerTool(
+		"get_physics2d_polygon_collider",
+		{
+			title: "Get compound Polygon Collider 2D",
+			description: "Read one polygon collider's exact revision, stable disconnected contours, holes, canonical winding, area evidence, and derived convex collision parts.",
+			inputSchema: z.object({ nodeId: z.string().trim().min(1).max(256) }).strict(),
+			annotations: readOnly,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_physics2d_polygon_collider", args)
+	);
+	server.registerTool(
+		"set_physics2d_polygon_collider",
+		{
+			title: "Set compound Polygon Collider 2D",
+			description:
+				"Create with expectedRevision:0 or atomically replace an exact-revision compound Polygon Collider 2D with disconnected islands and holes. The editor validates rings and derives bounded convex parts.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().trim().min(1).max(256),
+					expectedRevision: physics2DCreateOrUpdateRevision,
+					contours: z.array(physics2DPolygonContour).min(1).max(16).describe("At most 512 vertices total across outer rings and holes."),
+				})
+				.strict(),
+			annotations: update,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_physics2d_polygon_collider", args)
+	);
+	server.registerTool(
 		"generate_physics2d_polygon_collider",
 		{
-			title: "Generate 2D polygon collider from image alpha",
+			title: "Generate Polygon Collider 2D from image alpha",
 			description:
-				"Sample a project raster image's opaque pixels into a deterministic convex hull or largest traced concave outline for a scene node. Concave output is decomposed into collision-safe parts; holes and disconnected islands are not preserved.",
-			inputSchema: z.object({
-				nodeId: z.string(),
-				imagePath: z.string().describe("Project-relative PNG/JPG/WebP/BMP/SVG raster asset path."),
-				size: vector2.optional().describe("Collider width and height in centimeters. Defaults to [100, 100]."),
-				alphaThreshold: z.number().int().min(1).max(255).optional().describe("Opaque alpha threshold from 1 to 255. Defaults to 1."),
-				outline: z.enum(["convex", "concave"]).optional().describe("Use convex (default) for a hull, or concave to trace the largest simple opaque silhouette boundary."),
-				maxVertices: z
-					.number()
-					.int()
-					.min(3)
-					.max(64)
-					.optional()
-					.describe("Maximum persisted collider vertices. Defaults to 32; concave tracing increases its sampling stride to stay within the limit."),
-			}),
+				"Create with expectedRevision:0 or exact-revision replace a convex, concave, or compound alpha silhouette from a project raster image, preserving holes and disconnected islands when requested.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().trim().min(1).max(256),
+					expectedRevision: physics2DCreateOrUpdateRevision,
+					imagePath: z.string().trim().min(1).max(2048),
+					size: z.array(z.number().positive().max(1_000_000)).length(2).optional(),
+					alphaThreshold: z.number().int().min(0).max(255).optional(),
+					outline: z.enum(["convex", "concave", "compound"]).optional(),
+					maxVertices: z.number().int().min(3).max(512).optional(),
+				})
+				.strict(),
+			annotations: update,
 		},
 		async (args): Promise<CallToolResult> => callTextTool("generate_physics2d_polygon_collider", args)
 	);
+
 	server.registerTool(
-		"remove_physics2d_body",
-		{ title: "Remove 2D physics body", description: "Remove a 2D body/collider while keeping its scene node.", inputSchema: z.object({ nodeId: z.string() }) },
-		async (args): Promise<CallToolResult> => callTextTool("remove_physics2d_body", args)
+		"list_physics2d_joints",
+		{
+			title: "List Joint 2D resources",
+			description:
+				"List all nine versioned Joint 2D families with exact revisions, body/world connections, anchors, break behavior, limits, motors, targets, offsets, and suspension.",
+			inputSchema: empty,
+			annotations: readOnly,
+		},
+		async (): Promise<CallToolResult> => callTextTool("list_physics2d_joints", {})
+	);
+	server.registerTool(
+		"create_physics2d_joint",
+		{
+			title: "Create Joint 2D",
+			description: "Create a Distance, Fixed, Friction, Hinge, Relative, Slider, Spring, Target, or Wheel Joint 2D between authored bodies or the fixed world.",
+			inputSchema: createPhysics2DJointSchema,
+			annotations: create,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("create_physics2d_joint", args)
+	);
+	server.registerTool(
+		"set_physics2d_joint",
+		{
+			title: "Set Joint 2D",
+			description: "Atomically update one named Joint 2D family under its exact revision; the family is immutable and cross-family fields reject.",
+			inputSchema: setPhysics2DJointSchema,
+			annotations: update,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_physics2d_joint", args)
+	);
+	server.registerTool(
+		"delete_physics2d_joint",
+		{
+			title: "Delete Joint 2D",
+			description: "Delete one exact-revision Joint 2D while preserving both bodies and scene nodes.",
+			inputSchema: deletePhysics2DResourceSchema,
+			annotations: update,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("delete_physics2d_joint", args)
+	);
+
+	server.registerTool(
+		"list_physics2d_effectors",
+		{
+			title: "List Effector 2D resources",
+			description: "List all versioned Point, Area, Surface, Platform, and Buoyancy Effector 2D resources with exact revisions and complete family-specific controls.",
+			inputSchema: empty,
+			annotations: readOnly,
+		},
+		async (): Promise<CallToolResult> => callTextTool("list_physics2d_effectors", {})
+	);
+	server.registerTool(
+		"create_physics2d_effector",
+		{
+			title: "Create Effector 2D",
+			description: "Create a Point, Area, Surface, Platform, or Buoyancy Effector 2D. Platform and Buoyancy require a static owner body.",
+			inputSchema: createPhysics2DEffectorSchema,
+			annotations: create,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("create_physics2d_effector", args)
+	);
+	server.registerTool(
+		"set_physics2d_effector",
+		{
+			title: "Set Effector 2D",
+			description: "Atomically update or switch an Effector 2D family under its exact revision; unknown and cross-family fields reject.",
+			inputSchema: setPhysics2DEffectorSchema,
+			annotations: update,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_physics2d_effector", args)
+	);
+	server.registerTool(
+		"delete_physics2d_effector",
+		{
+			title: "Delete Effector 2D",
+			description: "Delete one exact-revision Effector 2D while preserving its owner body and scene node.",
+			inputSchema: deletePhysics2DResourceSchema,
+			annotations: update,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("delete_physics2d_effector", args)
+	);
+
+	server.registerTool(
+		"apply_physics2d_force",
+		{
+			title: "Apply Physics 2D force or impulse",
+			description: "Apply a bounded force or impulse to an exact-revision live dynamic body, optionally at a world-space point. Persisted authoring data is unchanged.",
+			inputSchema: applyPhysics2DForceSchema,
+			annotations: runtime,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("apply_physics2d_force", args)
+	);
+	server.registerTool(
+		"apply_physics2d_torque",
+		{
+			title: "Apply Physics 2D torque or angular impulse",
+			description: "Apply bounded torque or angular impulse to an exact-revision live dynamic body. Persisted authoring data is unchanged.",
+			inputSchema: applyPhysics2DTorqueSchema,
+			annotations: runtime,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("apply_physics2d_torque", args)
+	);
+	server.registerTool(
+		"set_physics2d_runtime_velocity",
+		{
+			title: "Set Physics 2D runtime velocity",
+			description: "Replace transient linear and/or angular velocity on an exact-revision live body without changing persisted authoring defaults.",
+			inputSchema: setPhysics2DRuntimeVelocitySchema,
+			annotations: runtime,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_physics2d_runtime_velocity", args)
 	);
 }

@@ -19,7 +19,6 @@ import { configureImportedTexture } from "../../preview/import/import";
 import { Editor } from "../../../main";
 
 import { EditorInspectorColorField } from "../fields/color";
-import { EditorInspectorBlockField } from "../fields/block";
 import { EditorInspectorStringField } from "../fields/string";
 import { EditorInspectorNumberField } from "../fields/number";
 import { EditorInspectorSwitchField } from "../fields/switch";
@@ -30,6 +29,7 @@ import { EditorAlphaModeField } from "./components/alpha";
 import { EditorDetailMapInspector } from "./components/detail";
 import { EditorTransparencyModeField } from "./components/transparency";
 import { EditorMaterialInspectorUtilsComponent } from "./components/utils";
+import { EditorSubsurfaceMaterialInspector } from "./components/subsurface";
 
 export interface IEditorPBRMaterialInspectorProps {
 	mesh?: AbstractMesh;
@@ -37,19 +37,7 @@ export interface IEditorPBRMaterialInspectorProps {
 	editor: Editor;
 }
 
-export interface IEditorPBRMaterialInspectorState {
-	subSurfaceEnabled: boolean;
-}
-
-export class EditorPBRMaterialInspector extends Component<IEditorPBRMaterialInspectorProps, IEditorPBRMaterialInspectorState> {
-	public constructor(props: IEditorPBRMaterialInspectorProps) {
-		super(props);
-
-		this.state = {
-			subSurfaceEnabled: this.props.material.subSurface.isRefractionEnabled || this.props.material.subSurface.isTranslucencyEnabled,
-		};
-	}
-
+export class EditorPBRMaterialInspector extends Component<IEditorPBRMaterialInspectorProps> {
 	public render(): ReactNode {
 		const scene = this.props.material.getScene();
 
@@ -265,64 +253,7 @@ export class EditorPBRMaterialInspector extends Component<IEditorPBRMaterialInsp
 
 				<EditorDetailMapInspector material={this.props.material} />
 
-				<EditorInspectorSectionField title="Sub Surface">
-					<EditorInspectorSwitchField
-						noUndoRedo
-						object={this.state}
-						property="subSurfaceEnabled"
-						label="Enabled"
-						onChange={(v) => this._handleSubSurfaceEnabledChange(v)}
-					/>
-
-					{this.state.subSurfaceEnabled && (
-						<>
-							<EditorInspectorColorField label={<div className="w-14">Tint</div>} object={this.props.material.subSurface} property="tintColor" />
-
-							<EditorInspectorTextureField scene={scene} object={this.props.material.subSurface} property="thicknessTexture" title="Thickness Texture">
-								<EditorInspectorSwitchField
-									label="Use Mask From Thickness Texture"
-									object={this.props.material.subSurface}
-									property="useMaskFromThicknessTexture"
-								/>
-								<EditorInspectorNumberField label="Minimum Thickness" object={this.props.material.subSurface} property="minimumThickness" min={0} />
-								<EditorInspectorNumberField label="Maximum Thickness" object={this.props.material.subSurface} property="maximumThickness" min={0} />
-							</EditorInspectorTextureField>
-
-							<EditorInspectorBlockField>
-								<div className="font-semibold text-base text-center">Refraction</div>
-								<EditorInspectorSwitchField
-									label="Enabled"
-									object={this.props.material.subSurface}
-									property="isRefractionEnabled"
-									onChange={() => this.forceUpdate()}
-								/>
-
-								{this.props.material.subSurface.isRefractionEnabled && (
-									<>
-										<EditorInspectorNumberField label="Intensity" object={this.props.material.subSurface} property="refractionIntensity" min={0} />
-										<EditorInspectorNumberField label="Index of Refraction" object={this.props.material.subSurface} property="indexOfRefraction" min={0} />
-									</>
-								)}
-							</EditorInspectorBlockField>
-
-							<EditorInspectorBlockField>
-								<div className="font-semibold text-base text-center">Translucency</div>
-								<EditorInspectorSwitchField
-									label="Enabled"
-									object={this.props.material.subSurface}
-									property="isTranslucencyEnabled"
-									onChange={() => this.forceUpdate()}
-								/>
-
-								{this.props.material.subSurface.isTranslucencyEnabled && (
-									<>
-										<EditorInspectorNumberField label="Intensity" object={this.props.material.subSurface} property="translucencyIntensity" min={0} />
-									</>
-								)}
-							</EditorInspectorBlockField>
-						</>
-					)}
-				</EditorInspectorSectionField>
+				<EditorSubsurfaceMaterialInspector editor={this.props.editor} material={this.props.material} />
 
 				<EditorInspectorSectionField title="Iridescence">
 					<EditorInspectorSwitchField label="Enabled" object={this.props.material.iridescence} property="isEnabled" onChange={() => this.forceUpdate()} />
@@ -391,17 +322,6 @@ export class EditorPBRMaterialInspector extends Component<IEditorPBRMaterialInsp
 				</EditorInspectorSectionField>
 			</>
 		);
-	}
-
-	private _handleSubSurfaceEnabledChange(v: boolean): void {
-		if (!v) {
-			this.props.material.subSurface.isRefractionEnabled = false;
-			this.props.material.subSurface.isTranslucencyEnabled = false;
-		}
-
-		this.setState({
-			subSurfaceEnabled: v,
-		});
 	}
 
 	private _getMaterialTexturesOptimizations(): ReactNode {

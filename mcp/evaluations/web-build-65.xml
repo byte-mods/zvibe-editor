@@ -1,0 +1,42 @@
+<evaluation>
+	<qa_pair>
+		<question>Inspect a new Web Build Profile. Is WebAssembly 2023 enabled by default? Respond True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect a new Web Build Profile. Is verified ESM modular stripping enabled by default? Respond True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the default Web toolchain boundary. Which toolchain selection is active?</question>
+		<answer>typescript-bundler</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the default Web toolchain boundary. Does the portable TypeScript/JavaScript build invoke Emscripten? Respond True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the optional external Emscripten adapter. Which exact version must its executable report?</question>
+		<answer>4.0.19</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the Web image-codec boundary. Which runtime owns PNG and JPEG decoding?</question>
+		<answer>The browser</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect generated Web build evidence. What is the output manifest filename?</question>
+		<answer>zvibe-web-build-manifest.json</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect a Web module plan. How is a module with a project marker classified?</question>
+		<answer>retain</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect exact Web output verification. What lease must the caller provide in addition to the Build Pipeline revision?</question>
+		<answer>the exact plan fingerprint</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect WebAssembly artifact verification. Which JavaScript API checks current-host binary validity?</question>
+		<answer>WebAssembly.validate</answer>
+	</qa_pair>
+</evaluation>

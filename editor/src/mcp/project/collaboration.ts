@@ -78,6 +78,8 @@ interface IProjectCollaborationStore {
 }
 
 const collaborationEndpoints = new Set([
+	"get_project_collaboration_capabilities",
+	"validate_project_collaboration_readiness",
 	"get_project_collaboration_status",
 	"configure_project_collaboration",
 	"list_project_collaboration_members",
@@ -91,7 +93,7 @@ const collaborationEndpoints = new Set([
 ]);
 
 const readOnlyEndpointPrefixes = ["get_", "list_", "compare_", "validate_", "find_", "evaluate_", "inspect_", "preview_"];
-const additionalReadOnlyEndpoints = new Set(["resolve_localization_entry", "pseudo_localize_entry"]);
+const additionalReadOnlyEndpoints = new Set(["resolve_localization_entry", "pseudo_localize_entry", "resolve_localized_asset", "preload_localized_assets"]);
 
 function projectDirectory(options: IMCPActionOptions): string {
 	if (!options.editor.state.projectPath) {

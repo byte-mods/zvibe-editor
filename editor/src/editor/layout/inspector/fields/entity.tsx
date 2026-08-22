@@ -14,7 +14,7 @@ import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { isAnyParticleSystem } from "../../../../tools/guards/particles";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
-import { IEditorInspectorFieldProps } from "./field";
+import { IEditorInspectorFieldProps, matchesInspectorSearch } from "./field";
 import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorSceneEntityFieldProps<T = Node | IParticleSystem> extends IEditorInspectorFieldProps {
@@ -103,6 +103,9 @@ export function EditorInspectorSceneEntityField<T extends Node | IParticleSystem
 			oldValue: value,
 			newValue: node,
 		});
+	}
+	if (!matchesInspectorSearch(props.label, props.property, props.tooltip)) {
+		return null;
 	}
 
 	return (

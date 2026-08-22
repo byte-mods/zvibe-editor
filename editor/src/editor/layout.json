@@ -81,6 +81,110 @@
 							},
 							{
 								"type": "tab",
+								"id": "profiler",
+								"name": "Profiler",
+								"component": "profiler",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "entities",
+								"name": "Entities",
+								"component": "entities",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "lighting-search",
+								"name": "Lighting Search",
+								"component": "lighting-search",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "script-debugger",
+								"name": "Script Debugger",
+								"component": "script-debugger",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "project-auditor",
+								"name": "Project Auditor",
+								"component": "project-auditor",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "runtime-ai",
+								"name": "Runtime AI",
+								"component": "runtime-ai",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "ml-training",
+								"name": "ML Training",
+								"component": "ml-training",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "generative-assets",
+								"name": "Generative Assets",
+								"component": "generative-assets",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "services",
+								"name": "Services",
+								"component": "services",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "occlusion-culling",
+								"name": "Occlusion Culling",
+								"component": "occlusion-culling",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "networking",
+								"name": "Networking",
+								"component": "networking",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "mobile",
+								"name": "Mobile",
+								"component": "mobile",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "console-server",
+								"name": "Console & Server",
+								"component": "console-server",
+								"enableClose": false,
+								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
 								"id": "terminal",
 								"name": "Terminal",
 								"component": "terminal",

@@ -1,6 +1,6 @@
 import { Scene } from "babylonjs";
 
-import { openPrefabBulkOverrides, PrefabBulkOverridesSelector } from "../../editor/layout/inspector/mesh/prefab-bulk-overrides";
+import { closePrefabBulkOverrides, openPrefabBulkOverrides, PrefabBulkOverridesSelector } from "../../editor/layout/inspector/mesh/prefab-bulk-overrides";
 import { IMCPActionOptions } from "../action";
 import { inspectPrefabInstancesOverrides } from "./prefabs";
 
@@ -20,4 +20,9 @@ export async function openPrefabBulkOverridesAction(scene: Scene, data: any, opt
 		batchFingerprint: inspection.batchFingerprint,
 		selector,
 	};
+}
+
+/** Closes the shared multi-instance Overrides presentation without changing prefab data. */
+export function closePrefabBulkOverridesAction(_scene: Scene, _data: any, _options: IMCPActionOptions): any {
+	return { closed: closePrefabBulkOverrides() };
 }

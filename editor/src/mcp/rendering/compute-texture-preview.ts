@@ -16,25 +16,37 @@ import { listCustomRenderPasses } from "./custom-passes";
 const supportedExtensions = new Set([".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".tif", ".tiff", ".webp"]);
 
 function projectDirectory(): string {
-	if (!projectConfiguration.path) throw new Error("No project is currently open.");
+	if (!projectConfiguration.path) {
+		throw new Error("No project is currently open.");
+	}
 	return dirname(projectConfiguration.path);
 }
 
 function projectTexturePath(path: string): { absolutePath: string; relativePath: string } {
-	if (!path?.trim() || isAbsolute(path)) throw new Error("Texture preview paths must be non-empty and project-relative.");
+	if (!path?.trim() || isAbsolute(path)) {
+		throw new Error("Texture preview paths must be non-empty and project-relative.");
+	}
 	const root = projectDirectory();
 	const absolutePath = normalize(join(root, path));
-	if (absolutePath !== root && !absolutePath.startsWith(`${root}/`)) throw new Error("Texture preview paths must stay inside the open project directory.");
+	if (absolutePath !== root && !absolutePath.startsWith(`${root}/`)) {
+		throw new Error("Texture preview paths must stay inside the open project directory.");
+	}
 	const extension = extname(absolutePath).toLowerCase();
-	if (!supportedExtensions.has(extension)) throw new Error(`Texture preview does not support ${extension || "extensionless"} files.`);
+	if (!supportedExtensions.has(extension)) {
+		throw new Error(`Texture preview does not support ${extension || "extensionless"} files.`);
+	}
 	return { absolutePath, relativePath: relative(root, absolutePath) };
 }
 
 function computePass(scene: Scene, data: any): ICustomRenderPassDefinition {
 	const passes = listCustomRenderPasses(scene).passes as ICustomRenderPassDefinition[];
 	const pass = passes.find((candidate) => candidate.id === data.id || candidate.name === data.name);
-	if (!pass) throw new Error("Compute pass not found. Provide id (preferred) or name.");
-	if (pass.passType !== "compute") throw new Error(`Custom render pass "${pass.name}" is not a compute pass.`);
+	if (!pass) {
+		throw new Error("Compute pass not found. Provide id (preferred) or name.");
+	}
+	if (pass.passType !== "compute") {
+		throw new Error(`Custom render pass "${pass.name}" is not a compute pass.`);
+	}
 	return pass;
 }
 
@@ -47,16 +59,26 @@ async function thumbnail(
 	includeImage: boolean
 ): Promise<any> {
 	const input = node.resourceName ? pass.inputs[node.resourceName] : undefined;
-	if (!input) throw new Error(`Texture input binding "${node.resourceName}" was not found.`);
-	if (input.source !== "texture" || !input.path) throw new Error(`Texture input "${node.resourceName}" is a live ${input.source} resource and has no project image to decode.`);
+	if (!input) {
+		throw new Error(`Texture input binding "${node.resourceName}" was not found.`);
+	}
+	if (input.source !== "texture" || !input.path) {
+		throw new Error(`Texture input "${node.resourceName}" is a live ${input.source} resource and has no project image to decode.`);
+	}
 	const path = projectTexturePath(input.path);
-	if (!(await pathExists(path.absolutePath))) throw new Error(`Project texture was not found: ${path.relativePath}`);
+	if (!(await pathExists(path.absolutePath))) {
+		throw new Error(`Project texture was not found: ${path.relativePath}`);
+	}
 	const realRoot = await realpath(projectDirectory());
 	const realSource = await realpath(path.absolutePath);
-	if (realSource !== realRoot && !realSource.startsWith(`${realRoot}/`)) throw new Error("Texture preview paths must resolve inside the open project directory.");
+	if (realSource !== realRoot && !realSource.startsWith(`${realRoot}/`)) {
+		throw new Error("Texture preview paths must resolve inside the open project directory.");
+	}
 	const source = sharp(realSource, { animated: false, limitInputPixels: 67_108_864 }).rotate();
 	const metadata = await source.metadata();
-	if (!metadata.width || !metadata.height) throw new Error(`Project texture has no decodable dimensions: ${path.relativePath}`);
+	if (!metadata.width || !metadata.height) {
+		throw new Error(`Project texture has no decodable dimensions: ${path.relativePath}`);
+	}
 	const resized = await source
 		.resize({ width, height, fit: "inside", withoutEnlargement: false, kernel: sampling === "nearest" ? sharp.kernel.nearest : sharp.kernel.lanczos3 })
 		.ensureAlpha()
@@ -75,7 +97,9 @@ async function thumbnail(
 			minimum[channel] = Math.min(minimum[channel], value);
 			maximum[channel] = Math.max(maximum[channel], value);
 		}
-		if (pixels[offset + 3] > 0) coveredPixels++;
+		if (pixels[offset + 3] > 0) {
+			coveredPixels++;
+		}
 	}
 	const png = includeImage
 		? await sharp(pixels, { raw: { width: resized.info.width, height: resized.info.height, channels: 4 } })
@@ -107,17 +131,24 @@ async function thumbnail(
 export async function getCustomComputeTextureNodePreviews(scene: Scene, data: any): Promise<any> {
 	const pass = computePass(scene, data);
 	const graph = getCustomComputeNodeGraph(scene, { id: pass.id }).graph;
-	if (!graph) throw new Error(`Compute pass "${pass.name}" has no node graph.`);
+	if (!graph) {
+		throw new Error(`Compute pass "${pass.name}" has no node graph.`);
+	}
 	const width = data.width ?? 96;
 	const height = data.height ?? 96;
-	if (!Number.isInteger(width) || !Number.isInteger(height) || width < 16 || width > 128 || height < 16 || height > 128)
+	if (!Number.isInteger(width) || !Number.isInteger(height) || width < 16 || width > 128 || height < 16 || height > 128) {
 		throw new Error("Texture thumbnail width and height must be integers from 16 through 128.");
+	}
 	const sampling: "nearest" | "bilinear" = data.sampling ?? (pass.samplingMode === "nearest" ? "nearest" : "bilinear");
-	if (sampling !== "nearest" && sampling !== "bilinear") throw new Error("Texture thumbnail sampling must be nearest or bilinear.");
+	if (sampling !== "nearest" && sampling !== "bilinear") {
+		throw new Error("Texture thumbnail sampling must be nearest or bilinear.");
+	}
 	const includeImage = data.includeImage !== false;
 	const requested = data.nodeIds ? new Set<string>(data.nodeIds) : null;
 	const nodes = graph.nodes.filter((node: IComputeNodeGraphNode) => node.type === "texture-load" && (!requested || requested.has(node.id)));
-	if (nodes.length > 32) throw new Error("Texture thumbnail requests support at most 32 texture-load nodes at once; provide nodeIds to narrow the request.");
+	if (nodes.length > 32) {
+		throw new Error("Texture thumbnail requests support at most 32 texture-load nodes at once; provide nodeIds to narrow the request.");
+	}
 	const entries = await Promise.all(
 		nodes.map(async (node: IComputeNodeGraphNode) => {
 			try {

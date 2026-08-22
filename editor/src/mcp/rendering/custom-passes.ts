@@ -1,12 +1,17 @@
 import { Scene, Tools } from "babylonjs";
 import {
 	applyCustomRenderPassGraph,
+	captureCustomRenderPassFrame,
+	configureCustomRenderPassFrameIsolation,
 	configureCustomRenderPassGpuProfiling,
+	defaultCustomRenderPassInjectionPoint,
 	defaultCustomRenderPassComputeShader,
 	defaultCustomRenderPassFragmentShader,
 	disposeCustomRenderPassGraph,
 	getCustomRenderPassDiagnostics,
 	getCustomRenderPassGpuProfile,
+	getCustomRenderPassFrameIsolation,
+	getCustomRenderPassFrameSnapshot,
 	getCustomRenderPassComputeTargets,
 	getCustomRenderPassMultiRenderTargets,
 	getCustomRenderPassSceneRasterTargets,
@@ -21,9 +26,27 @@ import {
 
 import { getProjectAssetsRootUrl } from "../../project/configuration";
 import { IMCPActionOptions } from "../action";
+import { getCustomRenderGraphAssetAssignment } from "./render-graph-assets";
 
 function defaultRasterSettings(): any {
-	return { cameraId: null, meshIds: [], clearColor: [0, 0, 0, 0], renderParticles: false, renderSprites: false, useCameraPostProcesses: false, refreshRate: "everyFrame" };
+	return {
+		rendererListId: null,
+		cameraId: null,
+		meshIds: [],
+		includeDescendants: false,
+		layerMask: null,
+		materialId: null,
+		clearColor: [0, 0, 0, 0],
+		clearMode: "colorDepth",
+		depthTest: true,
+		depthWrite: true,
+		cullMode: "back",
+		blendMode: "opaque",
+		renderParticles: false,
+		renderSprites: false,
+		useCameraPostProcesses: false,
+		refreshRate: "everyFrame",
+	};
 }
 
 function defaultComputeSettings(): any {
@@ -63,6 +86,8 @@ function passes(scene: Scene): ICustomRenderPassDefinition[] {
 	const values = (scene.metadata.babylonEditorCustomRenderPasses ??= []) as ICustomRenderPassDefinition[];
 	values.forEach((pass, index) => {
 		pass.passType ??= "shader";
+		pass.injectionPoint ??= defaultCustomRenderPassInjectionPoint(pass.passType);
+		pass.rendererFeature ??= null;
 		pass.copySource ??= { source: "screen" };
 		pass.rasterSettings = {
 			...defaultRasterSettings(),
@@ -89,16 +114,29 @@ function passes(scene: Scene): ICustomRenderPassDefinition[] {
 
 function resolvePass(scene: Scene, data: any): ICustomRenderPassDefinition {
 	const value = passes(scene).find((pass) => pass.id === data.id || pass.name === data.name);
-	if (!value) throw new Error("Custom render pass not found. Provide id (preferred) or name.");
+	if (!value) {
+		throw new Error("Custom render pass not found. Provide id (preferred) or name.");
+	}
 	return value;
+}
+
+function assertEditableBasePass(value: ICustomRenderPassDefinition): void {
+	if (value.rendererFeature) {
+		throw new Error(
+			`Custom render pass "${value.name}" is owned by renderer-feature instance ${value.rendererFeature.instanceId}. Update or refresh that instance, or edit its source asset instead.`
+		);
+	}
 }
 
 function refresh(scene: Scene, options: IMCPActionOptions): { applied: boolean; error: string | null } {
 	let result = { applied: false, error: null as string | null };
 	if (scene.activeCamera) {
 		try {
-			if (passes(scene).length) applyCustomRenderPassGraph(scene as any, scene.activeCamera as any, passes(scene), getProjectAssetsRootUrl() ?? "");
-			else disposeCustomRenderPassGraph(scene.activeCamera as any);
+			if (passes(scene).length) {
+				applyCustomRenderPassGraph(scene as any, scene.activeCamera as any, passes(scene), getProjectAssetsRootUrl() ?? "");
+			} else {
+				disposeCustomRenderPassGraph(scene.activeCamera as any);
+			}
 			result = { applied: true, error: null };
 		} catch (error) {
 			result = { applied: false, error: error instanceof Error ? error.message : String(error) };
@@ -112,7 +150,26 @@ function refresh(scene: Scene, options: IMCPActionOptions): { applied: boolean; 
 export function listCustomRenderPasses(scene: Scene): any {
 	const values = passes(scene);
 	const schedule = getCustomRenderPassSchedule(values);
-	return { passes: structuredClone(values), executionOrder: schedule.executionOrder, schedule: structuredClone(schedule) };
+	const camera = scene.activeCamera;
+	const snapshot = camera ? getCustomRenderPassFrameSnapshot(camera as any) : null;
+	return {
+		passes: structuredClone(values),
+		executionOrder: schedule.executionOrder,
+		schedule: structuredClone(schedule),
+		frameDebugger: {
+			isolationPassId: camera ? getCustomRenderPassFrameIsolation(camera as any) : null,
+			lastCapture: snapshot
+				? {
+						captureId: snapshot.captureId,
+						frameId: snapshot.frameId,
+						capturedAt: snapshot.capturedAt,
+						activePassCount: snapshot.activePassCount,
+						resourceCount: snapshot.resourceCount,
+					}
+				: null,
+		},
+		renderGraphAsset: getCustomRenderGraphAssetAssignment(scene),
+	};
 }
 
 /** Creates one arbitrary full-screen fragment pass in the persisted dependency graph. */
@@ -122,6 +179,8 @@ export function createCustomRenderPass(scene: Scene, data: any, options: IMCPAct
 		id: Tools.RandomId(),
 		name: data.name,
 		passType: data.passType ?? "shader",
+		injectionPoint: data.injectionPoint ?? defaultCustomRenderPassInjectionPoint(data.passType ?? "shader"),
+		rendererFeature: null,
 		copySource: structuredClone(data.copySource ?? { source: "screen" }),
 		rasterSettings: { ...defaultRasterSettings(), ...structuredClone(data.rasterSettings ?? {}) },
 		computeSettings: normalizeComputeSettings(data.computeSettings),
@@ -139,7 +198,9 @@ export function createCustomRenderPass(scene: Scene, data: any, options: IMCPAct
 		ratio: data.ratio ?? 1,
 		samplingMode: data.samplingMode ?? "bilinear",
 	};
-	if (values.some((pass) => pass.name === value.name)) throw new Error(`Custom render pass "${value.name}" already exists.`);
+	if (values.some((pass) => pass.name === value.name)) {
+		throw new Error(`Custom render pass "${value.name}" already exists.`);
+	}
 	sortCustomRenderPassGraph([...values, value]);
 	values.push(value);
 	const preview = refresh(scene, options);
@@ -150,10 +211,14 @@ export function createCustomRenderPass(scene: Scene, data: any, options: IMCPAct
 export function setCustomRenderPass(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const values = passes(scene);
 	const value = resolvePass(scene, data);
+	assertEditableBasePass(value);
 	const next = {
 		...value,
 		...data,
 		id: value.id,
+		injectionPoint:
+			data.injectionPoint ?? (data.passType !== undefined && data.passType !== value.passType ? defaultCustomRenderPassInjectionPoint(data.passType) : value.injectionPoint),
+		rendererFeature: structuredClone(value.rendererFeature),
 		dependencies: structuredClone(data.dependencies ?? value.dependencies),
 		uniforms: structuredClone(data.uniforms ?? value.uniforms),
 		inputs: structuredClone(data.inputs ?? value.inputs),
@@ -167,17 +232,25 @@ export function setCustomRenderPass(scene: Scene, data: any, options: IMCPAction
 		computeSettings: normalizeComputeSettings({ ...value.computeSettings, ...structuredClone(data.computeSettings ?? {}) }),
 		additionalOutputs: structuredClone(data.additionalOutputs ?? value.additionalOutputs),
 	};
-	if (data.name !== undefined && values.some((pass) => pass !== value && pass.name === data.name)) throw new Error(`Custom render pass "${data.name}" already exists.`);
+	if (data.name !== undefined && values.some((pass) => pass !== value && pass.name === data.name)) {
+		throw new Error(`Custom render pass "${data.name}" already exists.`);
+	}
 	const previousOutputNames = [value.output, ...value.additionalOutputs.map((output) => output.name)];
 	const nextOutputNames = [next.output, ...next.additionalOutputs.map((output) => output.name)];
 	const renamedOutputs = new Map<string, string>();
 	previousOutputNames.forEach((name, index) => {
 		const nextName = nextOutputNames[index];
-		if (name && nextName && name !== nextName) renamedOutputs.set(name, nextName);
+		if (name && nextName && name !== nextName) {
+			renamedOutputs.set(name, nextName);
+		}
 	});
 	const candidates = values.map((pass) => {
-		if (pass === value) return next;
-		if (!renamedOutputs.size) return pass;
+		if (pass === value) {
+			return next;
+		}
+		if (!renamedOutputs.size) {
+			return pass;
+		}
 		return {
 			...pass,
 			copySource:
@@ -215,12 +288,14 @@ export function setCustomRenderPass(scene: Scene, data: any, options: IMCPAction
 export function deleteCustomRenderPass(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const values = passes(scene);
 	const value = resolvePass(scene, data);
+	assertEditableBasePass(value);
 	const outputNames = new Set([value.output, ...value.additionalOutputs.map((output) => output.name)].filter(Boolean));
 	values.splice(values.indexOf(value), 1);
 	for (const pass of values) {
 		pass.dependencies = pass.dependencies.filter((dependency) => dependency !== value.id);
-		if (pass.passType === "copy" && pass.copySource.source === "pass" && pass.copySource.output && outputNames.has(pass.copySource.output))
+		if (pass.passType === "copy" && pass.copySource.source === "pass" && pass.copySource.output && outputNames.has(pass.copySource.output)) {
 			pass.copySource = { source: "screen" };
+		}
 		pass.inputs = Object.fromEntries(Object.entries(pass.inputs).filter(([, input]) => input.source !== "pass" || !input.output || !outputNames.has(input.output)));
 	}
 	const preview = refresh(scene, options);
@@ -229,7 +304,9 @@ export function deleteCustomRenderPass(scene: Scene, data: any, options: IMCPAct
 
 /** Rebuilds the active camera's pass chain and reports the dependency-resolved execution order. */
 export function evaluateCustomRenderPassGraph(scene: Scene, _data: any, options: IMCPActionOptions): any {
-	if (!scene.activeCamera) throw new Error("No active camera. Set an active camera before evaluating custom render passes.");
+	if (!scene.activeCamera) {
+		throw new Error("No active camera. Set an active camera before evaluating custom render passes.");
+	}
 	const ordered = applyCustomRenderPassGraph(scene as any, scene.activeCamera as any, passes(scene), getProjectAssetsRootUrl() ?? "");
 	const schedule = getCustomRenderPassSchedule(passes(scene));
 	options.editor.layout.inspector.forceUpdate();
@@ -249,7 +326,9 @@ export function getCustomRenderPassGraphSchedule(scene: Scene): any {
 
 /** Reports live readiness and shader compiler errors for the active camera's attached passes. */
 export function getCustomRenderPassGraphDiagnostics(scene: Scene): any {
-	if (!scene.activeCamera) throw new Error("No active camera. Set an active camera before reading custom render-pass diagnostics.");
+	if (!scene.activeCamera) {
+		throw new Error("No active camera. Set an active camera before reading custom render-pass diagnostics.");
+	}
 	const diagnostics = getCustomRenderPassDiagnostics(scene.activeCamera as any);
 	const runtimeError = getCustomRenderPassRuntimeError(scene.activeCamera as any);
 	return {
@@ -263,9 +342,102 @@ export function getCustomRenderPassGraphDiagnostics(scene: Scene): any {
 	};
 }
 
+function frameDebuggerPage(scene: Scene, data: any, capture: boolean): any {
+	if (!scene.activeCamera) {
+		throw new Error("No active camera. Set an active camera before using the custom render-graph frame debugger.");
+	}
+	const snapshot = capture ? captureCustomRenderPassFrame(scene.activeCamera as any) : getCustomRenderPassFrameSnapshot(scene.activeCamera as any);
+	if (!snapshot) {
+		return {
+			captured: false,
+			isolationPassId: getCustomRenderPassFrameIsolation(scene.activeCamera as any),
+			message: "No frame has been captured. Evaluate the graph, render a frame, then call capture_custom_render_pass_frame.",
+			passes: [],
+			resources: [],
+		};
+	}
+	const filteredPasses = snapshot.passes.filter((pass) => {
+		if (data.passType && pass.passType !== data.passType) {
+			return false;
+		}
+		if (data.status === "active" && !pass.active) {
+			return false;
+		}
+		if (data.status === "culled" && pass.active) {
+			return false;
+		}
+		if (data.status === "error" && !pass.error) {
+			return false;
+		}
+		return true;
+	});
+	const filteredResources = snapshot.resources.filter((resource) => {
+		if (data.resourceName && resource.name !== data.resourceName) {
+			return false;
+		}
+		if (data.producerId && resource.producerId !== data.producerId) {
+			return false;
+		}
+		return true;
+	});
+	const passOffset = data.passOffset ?? 0;
+	const passLimit = data.passLimit ?? 32;
+	const resourceOffset = data.resourceOffset ?? 0;
+	const resourceLimit = data.resourceLimit ?? 64;
+	const { passes: _passes, resources: _resources, ...summary } = snapshot;
+	return {
+		captured: true,
+		...summary,
+		passes: filteredPasses.slice(passOffset, passOffset + passLimit),
+		passPage: {
+			total: filteredPasses.length,
+			offset: passOffset,
+			count: Math.min(passLimit, Math.max(0, filteredPasses.length - passOffset)),
+			hasMore: passOffset + passLimit < filteredPasses.length,
+			nextOffset: passOffset + passLimit < filteredPasses.length ? passOffset + passLimit : null,
+		},
+		resources: filteredResources.slice(resourceOffset, resourceOffset + resourceLimit),
+		resourcePage: {
+			total: filteredResources.length,
+			offset: resourceOffset,
+			count: Math.min(resourceLimit, Math.max(0, filteredResources.length - resourceOffset)),
+			hasMore: resourceOffset + resourceLimit < filteredResources.length,
+			nextOffset: resourceOffset + resourceLimit < filteredResources.length ? resourceOffset + resourceLimit : null,
+		},
+	};
+}
+
+/** Captures and pages an immutable current-frame custom render-graph debugger snapshot. */
+export function captureCustomRenderPassFrameDebugger(scene: Scene, data: any, options?: IMCPActionOptions): any {
+	const result = frameDebuggerPage(scene, data, true);
+	options?.editor.layout.inspector.forceUpdate();
+	return result;
+}
+
+/** Returns a filtered/paged view of the last captured custom render-graph frame. */
+export function getCustomRenderPassFrameDebugger(scene: Scene, data: any): any {
+	return frameDebuggerPage(scene, data, false);
+}
+
+/** Applies or clears transient dependency-closure isolation without changing persisted pass enablement. */
+export function setCustomRenderPassFrameIsolation(scene: Scene, data: any, options: IMCPActionOptions): any {
+	if (!scene.activeCamera) {
+		throw new Error("No active camera. Set an active camera before changing render-graph isolation.");
+	}
+	let passId: string | null = null;
+	if (!data.clear) {
+		passId = resolvePass(scene, data).id;
+	}
+	const result = configureCustomRenderPassFrameIsolation(scene as any, scene.activeCamera as any, passes(scene), passId, getProjectAssetsRootUrl() ?? "");
+	options.editor.layout.inspector.forceUpdate();
+	return { ...result, persisted: false, snapshotCleared: true };
+}
+
 /** Enables or disables transient isolated GPU timing and rebuilds the active graph so WebGPU resources receive counters. */
 export function setCustomRenderPassGpuProfiling(scene: Scene, data: any, options: IMCPActionOptions): any {
-	if (!scene.activeCamera) throw new Error("No active camera. Set an active camera before configuring custom render-pass GPU profiling.");
+	if (!scene.activeCamera) {
+		throw new Error("No active camera. Set an active camera before configuring custom render-pass GPU profiling.");
+	}
 	configureCustomRenderPassGpuProfiling(scene.activeCamera as any, data.enabled, data.sampleCapacity ?? 120);
 	const preview = refresh(scene, options);
 	return { ...getCustomRenderPassGpuProfile(scene.activeCamera as any, data.includeSamples === true, data.sampleLimit ?? 60), preview };
@@ -273,39 +445,51 @@ export function setCustomRenderPassGpuProfiling(scene: Scene, data: any, options
 
 /** Reads isolated per-pass hardware timestamp samples without substituting CPU or whole-frame timing. */
 export function getCustomRenderPassGpuProfiling(scene: Scene, data: any): any {
-	if (!scene.activeCamera) throw new Error("No active camera. Set an active camera before reading custom render-pass GPU profiling.");
+	if (!scene.activeCamera) {
+		throw new Error("No active camera. Set an active camera before reading custom render-pass GPU profiling.");
+	}
 	return getCustomRenderPassGpuProfile(scene.activeCamera as any, data.includeSamples === true, data.sampleLimit ?? 60);
 }
 
 function computePass(scene: Scene, data: any): ICustomRenderPassDefinition {
 	const value = resolvePass(scene, data);
-	if (value.passType !== "compute") throw new Error(`Custom render pass "${value.name}" is not a compute pass.`);
+	if (value.passType !== "compute") {
+		throw new Error(`Custom render pass "${value.name}" is not a compute pass.`);
+	}
 	return value;
 }
 
 /** Updates authored and/or live typed storage-buffer data without rebuilding the graph. */
 export function setCustomComputeStorageBufferData(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const value = computePass(scene, data);
+	assertEditableBasePass(value);
 	const sourceBuffer = value.computeSettings.storageBuffers.find((candidate) => candidate.name === data.bufferName);
 	const buffer = structuredClone(sourceBuffer);
-	if (!buffer) throw new Error(`Compute pass "${value.name}" has no storage buffer named "${data.bufferName}".`);
+	if (!buffer) {
+		throw new Error(`Compute pass "${value.name}" has no storage buffer named "${data.bufferName}".`);
+	}
 	const elementOffset = data.elementOffset ?? 0;
-	if (!Number.isInteger(elementOffset) || elementOffset < 0 || elementOffset + data.data.length > buffer.data.length)
+	if (!Number.isInteger(elementOffset) || elementOffset < 0 || elementOffset + data.data.length > buffer.data.length) {
 		throw new Error(`Storage-buffer update range must fit within ${buffer.data.length} elements.`);
+	}
 	const affectedSettings = new Map<ICustomRenderPassDefinition, any>();
 	for (const pass of passes(scene)) {
 		const settings = structuredClone(pass.computeSettings);
 		const candidateBuffer = settings.storageBuffers.find((candidate: any) =>
 			buffer.sharedResource ? candidate.sharedResource === buffer.sharedResource : pass === value && candidate.name === data.bufferName
 		);
-		if (!candidateBuffer) continue;
+		if (!candidateBuffer) {
+			continue;
+		}
 		candidateBuffer.data.splice(elementOffset, data.data.length, ...data.data);
 		affectedSettings.set(pass, settings);
 	}
 	const candidates = passes(scene).map((pass) => (affectedSettings.has(pass) ? { ...pass, computeSettings: affectedSettings.get(pass) } : pass));
 	sortCustomRenderPassGraph(candidates);
 	const persist = data.persist ?? true;
-	if (persist) affectedSettings.forEach((settings, pass) => (pass.computeSettings = settings));
+	if (persist) {
+		affectedSettings.forEach((settings, pass) => (pass.computeSettings = settings));
+	}
 	let runtime = { applied: false, error: "No active camera." } as any;
 	if (scene.activeCamera) {
 		try {
@@ -318,7 +502,9 @@ export function setCustomComputeStorageBufferData(scene: Scene, data: any, optio
 			runtime = { applied: false, error: error instanceof Error ? error.message : String(error) };
 		}
 	}
-	if (!persist && !runtime.applied) throw new Error(runtime.error);
+	if (!persist && !runtime.applied) {
+		throw new Error(runtime.error);
+	}
 	options.editor.layout.inspector.forceUpdate();
 	return {
 		passId: value.id,
@@ -335,18 +521,25 @@ export function setCustomComputeStorageBufferData(scene: Scene, data: any, optio
 /** Updates authored and/or live uniform-buffer fields without rebuilding the graph. */
 export function setCustomComputeUniformBufferValues(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const value = computePass(scene, data);
+	assertEditableBasePass(value);
 	const settings = structuredClone(value.computeSettings);
 	const buffer = settings.uniformBuffers.find((candidate: any) => candidate.name === data.bufferName);
-	if (!buffer) throw new Error(`Compute pass "${value.name}" has no uniform buffer named "${data.bufferName}".`);
+	if (!buffer) {
+		throw new Error(`Compute pass "${value.name}" has no uniform buffer named "${data.bufferName}".`);
+	}
 	for (const [name, nextValue] of Object.entries(data.values as Record<string, number[]>)) {
 		const uniform = buffer.uniforms.find((candidate: any) => candidate.name === name);
-		if (!uniform) throw new Error(`Compute uniform buffer "${data.bufferName}" has no field named "${name}".`);
+		if (!uniform) {
+			throw new Error(`Compute uniform buffer "${data.bufferName}" has no field named "${name}".`);
+		}
 		uniform.value = structuredClone(nextValue);
 	}
 	const candidate = { ...value, computeSettings: settings };
 	sortCustomRenderPassGraph(passes(scene).map((pass) => (pass === value ? candidate : pass)));
 	const persist = data.persist ?? true;
-	if (persist) value.computeSettings = settings;
+	if (persist) {
+		value.computeSettings = settings;
+	}
 	let runtime = { applied: false, error: "No active camera." } as any;
 	if (scene.activeCamera) {
 		try {
@@ -355,7 +548,9 @@ export function setCustomComputeUniformBufferValues(scene: Scene, data: any, opt
 			runtime = { applied: false, error: error instanceof Error ? error.message : String(error) };
 		}
 	}
-	if (!persist && !runtime.applied) throw new Error(runtime.error);
+	if (!persist && !runtime.applied) {
+		throw new Error(runtime.error);
+	}
 	options.editor.layout.inspector.forceUpdate();
 	return { passId: value.id, bufferName: data.bufferName, updatedUniforms: Object.keys(data.values), persisted: persist, runtime };
 }
@@ -364,15 +559,20 @@ export function setCustomComputeUniformBufferValues(scene: Scene, data: any, opt
 export async function readCustomComputeStorageBuffer(scene: Scene, data: any): Promise<any> {
 	const value = computePass(scene, data);
 	if ((data.source ?? "runtime") === "runtime") {
-		if (!scene.activeCamera) throw new Error("No active camera. Rebuild the compute graph before requesting live GPU readback.");
+		if (!scene.activeCamera) {
+			throw new Error("No active camera. Rebuild the compute graph before requesting live GPU readback.");
+		}
 		return readCustomRenderPassComputeStorageBuffer(scene.activeCamera as any, value.id, data.bufferName, data.elementOffset ?? 0, data.elementCount, data.noDelay ?? false);
 	}
 	const buffer = value.computeSettings.storageBuffers.find((candidate) => candidate.name === data.bufferName);
-	if (!buffer) throw new Error(`Compute pass "${value.name}" has no storage buffer named "${data.bufferName}".`);
+	if (!buffer) {
+		throw new Error(`Compute pass "${value.name}" has no storage buffer named "${data.bufferName}".`);
+	}
 	const elementOffset = data.elementOffset ?? 0;
 	const elementCount = data.elementCount ?? buffer.data.length - elementOffset;
-	if (!Number.isInteger(elementOffset) || elementOffset < 0 || !Number.isInteger(elementCount) || elementCount < 1 || elementOffset + elementCount > buffer.data.length)
+	if (!Number.isInteger(elementOffset) || elementOffset < 0 || !Number.isInteger(elementCount) || elementCount < 1 || elementOffset + elementCount > buffer.data.length) {
 		throw new Error(`Storage-buffer read range must contain at least one element and fit within ${buffer.data.length} elements.`);
+	}
 	return {
 		passId: value.id,
 		bufferName: buffer.name,

@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which MCP tool reports ONNX, LiteRT, and PyTorch Export support, backends, and safety limits without compiling a model?</question>
+      <answer>get_runtime_ai_capabilities</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool compiles a project AI model only long enough to return its exact tensors, bounded node graph, conversion evidence, and SHA-256 before releasing it?</question>
+      <answer>inspect_runtime_ai_model</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What exact fingerprint algorithm leases inspected model and ONNX companion-weight bytes when creating a retained Runtime AI session?</question>
+      <answer>SHA-256</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two execution providers can the portable Runtime AI implementation use?</question>
+      <answer>WebAssembly and WebGPU</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>How many Runtime AI sessions can one editor window retain at once?</question>
+      <answer>4</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool returns a stable bounded page of retained Runtime AI sessions?</question>
+      <answer>list_runtime_ai_sessions</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which field prevents concurrent or stale inference calls from using an outdated Runtime AI session?</question>
+      <answer>expectedRevision</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does run_runtime_ai_inference silently accept missing or extra input names? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two destructive Runtime AI MCP tools require confirm=true?</question>
+      <answer>dispose_runtime_ai_session and reset_runtime_ai_runtime</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which PyTorch file extension is accepted and lowered from bounded Core ATen into the shared portable ONNX runtime?</question>
+      <answer>.pt2</answer>
+   </qa_pair>
+</evaluation>

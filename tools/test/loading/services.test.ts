@@ -15,6 +15,7 @@ describe("loading/services", () => {
 	test("fills in every known category so a runtime never needs existence checks", () => {
 		const configuration = normalizeProjectServicesConfiguration(undefined);
 		expect(configuration.version).toBe(servicesConfigurationVersion);
+		expect(configuration.environment).toBe("development");
 		projectServiceCategories.forEach((category) => {
 			expect(configuration[category]).toEqual({ enabled: false, provider: "", endpoint: "", options: {} });
 		});
@@ -54,9 +55,20 @@ describe("loading/services", () => {
 		// Nested objects and arrays are rejected, not deep-cloned.
 		expect(service.options.nested).toBeUndefined();
 		expect(service.options.list).toBeUndefined();
+		expect(service.options.accessToken).toBeUndefined();
 		// Oversized strings are truncated and the entry count is capped.
 		expect((service.options.huge as string).length).toBe(512);
 		expect(Object.keys(service.options).length).toBeLessThanOrEqual(64);
+	});
+
+	test("migrates an authored environment and drops unknown service fields", () => {
+		const configuration = normalizeProjectServicesConfiguration({
+			version: 1,
+			environment: " staging ",
+			auth: { enabled: true, provider: "custom", endpoint: "https://services.example.com", accessToken: "must-not-survive" },
+		});
+		expect(configuration).toMatchObject({ version: servicesConfigurationVersion, environment: "staging" });
+		expect(configuration.auth).not.toHaveProperty("accessToken");
 	});
 
 	test("trims and bounds provider/endpoint strings", () => {
@@ -86,6 +98,16 @@ describe("loading/services", () => {
 
 		scene.dispose();
 		engine.dispose();
+	});
+
+	test("includes the four hosted-service adapter categories in the version-3 runtime contract", () => {
+		expect(servicesConfigurationVersion).toBe(3);
+		expect(projectServiceCategories).toEqual(expect.arrayContaining(["leaderboards", "remoteConfig", "contentDelivery", "cloudFunctions"]));
+		const configuration = normalizeProjectServicesConfiguration({
+			leaderboards: { enabled: true, provider: "rest", endpoint: "https://services.example.test" },
+			remoteConfig: { enabled: true, provider: "rest", endpoint: "https://services.example.test" },
+		});
+		expect(getEnabledProjectServices(Object.assign({ metadata: { babylonEditorServices: configuration } }, {}) as any)).toEqual(["leaderboards", "remoteConfig"]);
 	});
 
 	test("degrades malformed authored data instead of throwing", () => {

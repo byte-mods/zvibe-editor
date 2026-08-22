@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which read-only MCP tool must be called immediately before publishing a live Babylon scene or node selection as FBX?</question>
+      <answer>inspect_fbx_export</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which external application performs the portable binary FBX conversion?</question>
+      <answer>Blender</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which intermediate format binds the exact live Babylon scene snapshot before FBX conversion?</question>
+      <answer>GLB</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which digest algorithm leases the live snapshot, scope, settings, destination, and published FBX evidence?</question>
+      <answer>SHA-256</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What happens if the live scene changes while Blender is converting an inspected FBX plan?</question>
+      <answer>The export rejects before publication and requires a new inspection fingerprint.</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>How are excluded ancestors handled during selected-node export?</question>
+      <answer>They become temporary transform-only shells so world transforms survive without exporting ancestor mesh geometry.</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which tool atomically publishes only the binary FBX asset without creating a scene instance?</question>
+      <answer>export_fbx_asset</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which tool exports, processes the result through the normal model importer, and creates selectable scene nodes?</question>
+      <answer>round_trip_fbx_export</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the maximum number of explicit FBX root node ids in one request?</question>
+      <answer>256</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does generated Web or Desktop gameplay require Blender after an FBX has been exported and imported?</question>
+      <answer>No</answer>
+   </qa_pair>
+</evaluation>

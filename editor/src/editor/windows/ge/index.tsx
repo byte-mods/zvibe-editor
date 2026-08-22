@@ -7,23 +7,29 @@ import { Component, ReactNode } from "react";
 
 import { NullEngine, Scene } from "babylonjs";
 import { AdvancedDynamicTexture } from "babylonjs-gui";
+import { applyGUIAuthoringRuntime, createDefaultGUIAuthoringState, getGUIAuthoringState } from "babylonjs-editor-tools";
 
 import { ToolbarComponent } from "../../../ui/toolbar";
 
 import { Toaster } from "../../../ui/shadcn/ui/sonner";
 
 import { waitNextAnimationFrame } from "../../../tools/tools";
+import { installEditorGUIFontFamily, loadEditorGUIFontAsset } from "../../../tools/gui/authoring";
+import { projectConfiguration } from "../../../project/configuration";
+import { configureEditorLocalization } from "../../../mcp/localization/localization";
 
 const { GUIEditor } = require("babylonjs-gui-editor");
 
 export interface INodeMaterialEditorWindowProps {
 	filePath: string;
+	projectPath: string;
 }
 
 export default class NodeMaterialEditorWindow extends Component<INodeMaterialEditorWindowProps> {
 	private _divRef: HTMLDivElement | null = null;
 
 	private _gui: AdvancedDynamicTexture | null = null;
+	private _authoring = createDefaultGUIAuthoringState();
 
 	public constructor(props: INodeMaterialEditorWindowProps) {
 		super(props);
@@ -61,12 +67,17 @@ export default class NodeMaterialEditorWindow extends Component<INodeMaterialEdi
 		}
 
 		const data = await readJSON(this.props.filePath);
+		this._authoring = data.zvibeGUIAuthoring ?? createDefaultGUIAuthoringState();
 
 		const engine = new NullEngine();
 		const scene = new Scene(engine);
+		projectConfiguration.path = this.props.projectPath;
+		await configureEditorLocalization(scene);
 
 		switch (data.guiType) {
 			case "fullscreen":
+			case "worldSpace":
+				// World-space PanelRenderer assets use a fullscreen authoring preview here; their real mesh attachment is restored by scene/runtime loaders.
 				this._gui = AdvancedDynamicTexture.CreateFullscreenUI(data.name, true, scene);
 				break;
 		}
@@ -77,6 +88,14 @@ export default class NodeMaterialEditorWindow extends Component<INodeMaterialEdi
 
 		this._gui.parseSerializedObject(data.content, false);
 		this._gui.uniqueId = data.uniqueId;
+		this._gui.metadata = { ...(this._gui.metadata ?? {}), zvibeGUIAuthoring: this._authoring };
+		this._authoring = getGUIAuthoringState(this._gui);
+		await applyGUIAuthoringRuntime(this._gui, this._authoring, {
+			rootUrl: "",
+			scene,
+			loadFontFamily: installEditorGUIFontFamily,
+			loadFontAsset: loadEditorGUIFontAsset,
+		});
 
 		GUIEditor.Show({
 			hostElement: this._divRef,
@@ -106,6 +125,10 @@ export default class NodeMaterialEditorWindow extends Component<INodeMaterialEdi
 		if (!this._gui) {
 			return;
 		}
+		if (this._authoring?.retainedDocument) {
+			toast.error(`This GUI hierarchy is owned by ${this._authoring.retainedDocument.uxmlPath}. Edit its UXML/USS sources or detach retained authoring first.`);
+			return;
+		}
 
 		const globalState = GUIEditor["_CurrentState"];
 		globalState.workbench.removeEditorTransformation();
@@ -114,9 +137,10 @@ export default class NodeMaterialEditorWindow extends Component<INodeMaterialEdi
 		this._gui.scaleTo(size.width, size.height);
 
 		const data = this._gui.serialize();
-		data.guiType = "fullscreen";
 		data.uniqueId = this._gui.uniqueId;
 		data.content = this._gui.serializeContent();
+		data.zvibeGUIAuthoring = getGUIAuthoringState(this._gui);
+		data.guiType = data.zvibeGUIAuthoring.toolkit.panelRenderer.renderMode === "worldSpace" ? "worldSpace" : "fullscreen";
 		data.base64String = globalState.guiTexture.getContext().canvas.toDataURL("image/png");
 
 		await writeJSON(this.props.filePath, data, { spaces: 4 });

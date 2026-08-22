@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect standalone development-build coverage compatibility. Which three Electron target platforms are accepted? Answer as a comma-separated list in documented order.</question>
+      <answer>darwin, win32, linux</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Build Profile validation. Which build mode is required when codeCoverage is enabled?</question>
+      <answer>development</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the development coverage manifest contract. What backend identifier is published?</question>
+      <answer>zvibe-development-build-coverage-v1</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect generated-player coverage. Which four metric families are reported? Answer as a comma-separated list in documented order.</question>
+      <answer>lines, statements, functions, branches</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect generated-player coverage export. Which two formats are supported? Answer as a comma-separated list in documented order.</question>
+      <answer>json, lcov</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect generated-player coverage clearing. What concurrency evidence must the caller provide?</question>
+      <answer>the exact coverage revision</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect source instrumentation bounds. What is the maximum number of source points in one manifest?</question>
+      <answer>100000</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect serialization-session retention. What is the maximum number of distinct loaded files retained?</question>
+      <answer>4096</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect serialization-session pagination. What is the maximum number of entries returned per page?</question>
+      <answer>500</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect current project and scene JSON publication. Which property records the editor serialization version?</question>
+      <answer>serializationVersion</answer>
+   </qa_pair>
+</evaluation>

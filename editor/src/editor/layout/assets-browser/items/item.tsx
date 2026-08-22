@@ -1,6 +1,6 @@
 import { platform } from "os";
 import { readdir, stat } from "fs-extra";
-import { basename, extname, dirname, join } from "path/posix";
+import { basename, extname, dirname, join, relative } from "path/posix";
 
 import { ipcRenderer } from "electron";
 
@@ -23,12 +23,15 @@ import { SiBabylondotjs, SiBlender, SiDotenv, SiJavascript, SiTypescript } from 
 import { FolderIcon } from "@heroicons/react/20/solid";
 
 import { EXRIcon } from "../../../../ui/icons/exr";
+import { showConfirm } from "../../../../ui/dialog";
 import { Input } from "../../../../ui/shadcn/ui/input";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, ContextMenuSeparator } from "../../../../ui/shadcn/ui/context-menu";
 
 import { isDarwin } from "../../../../tools/os";
 
 import { Editor } from "../../../main";
+import { clearTextureChannelPreviewStates } from "../../../../mcp/assets/texture-channel-preview";
+import { applyProjectSourceControlFolderAction, getProjectSourceControlWorkspace } from "../../../../mcp/project/source-control";
 
 export interface IAssetsBrowserItemProps {
 	/**
@@ -409,6 +412,15 @@ export class AssetsBrowserItem extends Component<IAssetsBrowserItemProps, IAsset
 				</ContextMenuItem>
 
 				<ContextMenuSeparator />
+				{this.state.isDirectory && (
+					<>
+						<ContextMenuItem onClick={() => void this._handleSourceControlFolderAction("add")}>Add to Source Control</ContextMenuItem>
+						<ContextMenuItem className="!text-red-400" onClick={() => void this._handleSourceControlFolderAction("undo")}>
+							Undo Changes…
+						</ContextMenuItem>
+						<ContextMenuSeparator />
+					</>
+				)}
 
 				{items.map((item, index) => (
 					<Fragment key={`context-menu-item-${index}`}>{item}</Fragment>
@@ -436,12 +448,50 @@ export class AssetsBrowserItem extends Component<IAssetsBrowserItemProps, IAsset
 		);
 	}
 
+	private async _handleSourceControlFolderAction(action: "add" | "undo"): Promise<void> {
+		const projectPath = this.props.editor.state.projectPath;
+		if (!projectPath) {
+			toast.error("Open a project before using source control.");
+			return;
+		}
+		const projectRoot = dirname(projectPath.replace(/\\/g, "/"));
+		const path = relative(projectRoot, this.props.absolutePath.replace(/\\/g, "/"));
+		if (!path || path === "." || path.startsWith("../")) {
+			toast.error("Choose a folder contained by the active project.");
+			return;
+		}
+		if (
+			action === "undo" &&
+			!(await showConfirm("Undo Folder Changes?", `Undo all tracked and staged changes under folder ${path}? Untracked files will be preserved.`, {
+				confirmText: "Undo Changes",
+			}))
+		) {
+			return;
+		}
+		try {
+			const scene = this.props.editor.layout.preview.scene;
+			const workspace = await getProjectSourceControlWorkspace(scene, { limit: 1 }, { editor: this.props.editor });
+			await applyProjectSourceControlFolderAction(
+				scene,
+				{ action, path, expectedWorkspaceFingerprint: workspace.workspaceFingerprint, confirm: action === "undo" },
+				{ editor: this.props.editor }
+			);
+			toast.success(action === "add" ? `Added ${path} to source control.` : `Undid tracked changes under ${path}.`);
+			this.props.onRefresh();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
+	}
+
 	private async _handleTrashItem(): Promise<void> {
 		try {
-			const result = ipcRenderer.sendSync("editor:trash-items", this.props.editor.layout.assets.state.selectedKeys);
+			const selected = [...this.props.editor.layout.assets.state.selectedKeys];
+			const result = ipcRenderer.sendSync("editor:trash-items", selected);
 
 			if (!result) {
 				toast("Failed to trash some assets");
+			} else {
+				selected.forEach((path) => clearTextureChannelPreviewStates(path, true));
 			}
 
 			this.props.onRefresh();

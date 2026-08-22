@@ -11,13 +11,19 @@ export function configureAnimatedTiles(scene: Scene): void {
 			const animations = node.metadata?.babylonEditorAnimatedTiles as IAnimatedTile[] | undefined;
 			const spriteMap = node.spriteMap;
 			const tiles = node.tiles as any[] | undefined;
-			if (!animations?.length || !spriteMap || !tiles) continue;
+			if (!animations?.length || !spriteMap || !tiles) {
+				continue;
+			}
 			for (const animation of animations) {
-				if (animation.enabled === false || animation.frames.length < 2 || !(animation.frameDuration > 0)) continue;
+				if (animation.enabled === false || animation.frames.length < 2 || !(animation.frameDuration > 0)) {
+					continue;
+				}
 				const state = states.get(animation.id) ?? { elapsed: 0, frame: 0 };
 				states.set(animation.id, state);
 				state.elapsed += scene.getEngine().getDeltaTime();
-				if (state.elapsed < animation.frameDuration) continue;
+				if (state.elapsed < animation.frameDuration) {
+					continue;
+				}
 				const steps = Math.floor(state.elapsed / animation.frameDuration);
 				state.elapsed %= animation.frameDuration;
 				const next = state.frame + steps;
@@ -25,9 +31,11 @@ export function configureAnimatedTiles(scene: Scene): void {
 				const frame = animation.frames[state.frame];
 				for (const tileId of animation.tileIds) {
 					const tile = tiles.find((candidate) => candidate.id === tileId);
-					if (!tile) continue;
-					for (let x = 0; x <= tile.repeatCount.x; x++)
-						for (let y = 0; y <= tile.repeatCount.y; y++)
+					if (!tile) {
+						continue;
+					}
+					for (let x = 0; x <= tile.repeatCount.x; x++) {
+						for (let y = 0; y <= tile.repeatCount.y; y++) {
 							spriteMap.changeTiles(
 								tile.layer,
 								new Vector2(
@@ -36,6 +44,8 @@ export function configureAnimatedTiles(scene: Scene): void {
 								),
 								frame
 							);
+						}
+					}
 				}
 			}
 		}

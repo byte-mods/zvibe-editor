@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect localization authoring. Which two exact values protect every MCP localization mutation from stale writes?</question>
+      <answer>revision and fingerprint</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect locale direction support. Which three authored direction policies are available? Answer as a comma-separated list in reported order.</question>
+      <answer>auto, ltr, rtl</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect localized asset types. Which six asset types are supported? Answer as a comma-separated list in reported order.</question>
+      <answer>audio, binary, font, model, texture, video</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect pseudo-localization policy. Which four transformations can be configured?</question>
+      <answer>expansion, accents, wrapping, mirroring</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect localized GUI binding behavior. Which two GUI properties can bind directly to localization tables? Answer as a comma-separated list.</question>
+      <answer>text, source</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect localized GUI bidi behavior. Are Unicode isolation and RTL horizontal-alignment mirroring supported? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect GUI accessibility actions. Which three semantic actions are supported? Answer as a comma-separated list in reported order.</question>
+      <answer>activate, decrement, increment</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect GUI accessibility preferences. Can the portable runtime apply text scale, bold text, and caption preferences from a platform adapter? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect visual accessibility auditing. What minimum interactive target size is audited in pixels?</question>
+      <answer>44 by 44 pixels</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect portability boundaries. Does this implementation claim Unity Localization package API identity or native iOS/Android accessibility hierarchy identity? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+</evaluation>

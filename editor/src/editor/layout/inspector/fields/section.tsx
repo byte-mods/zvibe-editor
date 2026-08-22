@@ -5,6 +5,7 @@ import { PropsWithChildren, ReactNode, useState } from "react";
 import { PlusIcon, MinusIcon } from "@heroicons/react/20/solid";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../../ui/shadcn/ui/tooltip";
+import { matchesInspectorSearch } from "./field";
 
 export interface IEditorInspectorSectionFieldProps extends PropsWithChildren {
 	/**
@@ -29,6 +30,9 @@ export interface IEditorInspectorSectionFieldProps extends PropsWithChildren {
 
 export function EditorInspectorSectionField(props: IEditorInspectorSectionFieldProps) {
 	const [opened, setOpened] = useState(true);
+	if (!matchesInspectorSearch(props.title, props.label, props.tooltip, props.children)) {
+		return null;
+	}
 
 	return (
 		<div className="relative flex flex-col gap-2 w-full bg-secondary dark:bg-secondary/35 rounded-lg p-2">

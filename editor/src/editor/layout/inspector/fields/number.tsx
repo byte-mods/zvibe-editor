@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../
 import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
-import { IEditorInspectorFieldProps } from "./field";
+import { IEditorInspectorFieldProps, matchesInspectorSearch } from "./field";
 import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 const mexp = new Mexp();
@@ -108,6 +108,9 @@ export function EditorInspectorNumberField(props: IEditorInspectorNumberFieldPro
 
 	const hasMinMax = props.min !== undefined && props.max !== undefined;
 	const ratio = hasMinMax ? getRatio() : 0;
+	if (!matchesInspectorSearch(props.label, props.property, props.tooltip)) {
+		return null;
+	}
 
 	return (
 		<div

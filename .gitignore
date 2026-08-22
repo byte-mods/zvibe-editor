@@ -181,3 +181,12 @@ plugins/fab/declaration
 # Codex private project state
 .codex/state/
 .lens/
+
+# Zvibe Editor generated project metadata and local verification fixtures
+*.bjsmeta.json
+**/.bjseditor/
+/.history/
+/.codex/live-*/
+/editor/.codex/
+/build/
+/assets/

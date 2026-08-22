@@ -2,6 +2,7 @@ import { ipcRenderer } from "electron";
 import { Component, ReactNode } from "react";
 
 import { Label } from "../../../ui/shadcn/ui/label";
+import { Input } from "../../../ui/shadcn/ui/input";
 import { Switch } from "../../../ui/shadcn/ui/switch";
 import { Separator } from "../../../ui/shadcn/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../ui/shadcn/ui/select";
@@ -13,6 +14,7 @@ import { EditorInspectorKeyField } from "../../layout/inspector/fields/key";
 import { EditorInspectorNumberField } from "../../layout/inspector/fields/number";
 
 import { Editor } from "../../main";
+import { IEditorUserPreferences, updateEditorUserPreferences } from "../../preferences";
 
 export interface IEditorEditPreferencesComponentProps {
 	/**
@@ -26,30 +28,22 @@ export interface IEditorEditPreferencesComponentProps {
 	onClose: () => void;
 }
 
-export interface IEditorEditPreferencesComponentState {
-	theme: "light" | "dark";
-}
-
-export class EditorEditPreferencesComponent extends Component<IEditorEditPreferencesComponentProps, IEditorEditPreferencesComponentState> {
-	public constructor(props: IEditorEditPreferencesComponentProps) {
-		super(props);
-
-		this.state = {
-			theme: document.body.classList.contains("dark") ? "dark" : "light",
-		};
-	}
-
+export class EditorEditPreferencesComponent extends Component<IEditorEditPreferencesComponentProps> {
 	public render(): ReactNode {
 		return (
 			<AlertDialog open={this.props.open}>
-				<AlertDialogContent>
+				<AlertDialogContent className="max-w-3xl max-h-[90vh]">
 					<AlertDialogHeader>
 						<AlertDialogTitle className="text-3xl font-[400]">Edit Preferences</AlertDialogTitle>
 					</AlertDialogHeader>
 
-					<div className="flex flex-col gap-[20px]">
+					<div className="flex flex-col gap-[20px] overflow-y-auto pr-2">
 						<Separator />
-						{this._getThemesComponent()}
+						{this._getAppearanceComponent()}
+						<Separator />
+						{this._getWorkflowComponent()}
+						<Separator />
+						{this._getExternalToolsComponent()}
 						<Separator />
 						{this._getCameraControlPreferences()}
 						<Separator />
@@ -64,36 +58,112 @@ export class EditorEditPreferencesComponent extends Component<IEditorEditPrefere
 		);
 	}
 
-	private _getThemesComponent(): ReactNode {
+	private _getAppearanceComponent(): ReactNode {
+		const preferences = this.props.editor.state.editorUserPreferences;
 		return (
 			<div className="flex flex-col gap-[10px] w-full">
-				<div className="flex flex-col gap-[10px]">
-					<Label className="text-xl font-[400]">Theme</Label>
+				<Label className="text-xl font-[400]">Appearance</Label>
+				<div className="grid grid-cols-2 gap-3 items-center">
+					<Label>Theme</Label>
 					<Select
-						value={this.state.theme}
-						onValueChange={(v) => {
-							this.setState({ theme: v as any });
-
-							if (v === "light") {
-								document.body.classList.remove("dark");
-							} else {
-								document.body.classList.add("dark");
-							}
-
-							localStorage.setItem("editor-theme", v);
-						}}
+						value={preferences.appearance.theme}
+						onValueChange={(theme) =>
+							this._updatePreferences({ appearance: { ...preferences.appearance, theme: theme as IEditorUserPreferences["appearance"]["theme"] } })
+						}
 					>
 						<SelectTrigger className="">
 							<SelectValue placeholder="Select Value..." />
 						</SelectTrigger>
 						<SelectContent>
+							<SelectItem value="system">System</SelectItem>
 							<SelectItem value="light">Light</SelectItem>
 							<SelectItem value="dark">Dark</SelectItem>
+						</SelectContent>
+					</Select>
+					<Label>UI Scale</Label>
+					<Input
+						type="number"
+						min={0.5}
+						max={2}
+						step={0.05}
+						value={preferences.appearance.uiScale}
+						onChange={(event) => this._updatePreferences({ appearance: { ...preferences.appearance, uiScale: Number(event.target.value) } })}
+					/>
+				</div>
+			</div>
+		);
+	}
+
+	private _getWorkflowComponent(): ReactNode {
+		const preferences = this.props.editor.state.editorUserPreferences;
+		return (
+			<div className="flex flex-col gap-[10px] w-full">
+				<Label className="text-xl font-[400]">Workflow</Label>
+				<div className="grid grid-cols-2 gap-3 items-center">
+					<Label>Auto Save</Label>
+					<Switch checked={preferences.workflow.autoSave} onCheckedChange={(autoSave) => this._updatePreferences({ workflow: { ...preferences.workflow, autoSave } })} />
+					<Label>Auto Save Interval (minutes)</Label>
+					<Input
+						type="number"
+						min={1}
+						max={120}
+						value={preferences.workflow.autoSaveIntervalMinutes}
+						onChange={(event) => this._updatePreferences({ workflow: { ...preferences.workflow, autoSaveIntervalMinutes: Number(event.target.value) } })}
+					/>
+					<Label>Confirm destructive actions</Label>
+					<Switch
+						checked={preferences.workflow.confirmDestructiveActions}
+						onCheckedChange={(confirmDestructiveActions) => this._updatePreferences({ workflow: { ...preferences.workflow, confirmDestructiveActions } })}
+					/>
+				</div>
+			</div>
+		);
+	}
+
+	private _getExternalToolsComponent(): ReactNode {
+		const preferences = this.props.editor.state.editorUserPreferences;
+		return (
+			<div className="flex flex-col gap-[10px] w-full">
+				<Label className="text-xl font-[400]">External Tools</Label>
+				<div className="grid grid-cols-2 gap-3 items-center">
+					<Label>Script Editor</Label>
+					<Input
+						value={preferences.externalTools.scriptEditorCommand}
+						onChange={(event) => this._updatePreferences({ externalTools: { ...preferences.externalTools, scriptEditorCommand: event.target.value } })}
+					/>
+					<Label>Image Editor</Label>
+					<Input
+						value={preferences.externalTools.imageEditorCommand}
+						onChange={(event) => this._updatePreferences({ externalTools: { ...preferences.externalTools, imageEditorCommand: event.target.value } })}
+					/>
+					<Label>Diff Tool</Label>
+					<Input
+						value={preferences.externalTools.diffToolCommand}
+						onChange={(event) => this._updatePreferences({ externalTools: { ...preferences.externalTools, diffToolCommand: event.target.value } })}
+					/>
+					<Label>Log Level</Label>
+					<Select
+						value={preferences.diagnostics.logLevel}
+						onValueChange={(logLevel) => this._updatePreferences({ diagnostics: { logLevel: logLevel as IEditorUserPreferences["diagnostics"]["logLevel"] } })}
+					>
+						<SelectTrigger>
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="error">Errors</SelectItem>
+							<SelectItem value="warning">Warnings</SelectItem>
+							<SelectItem value="info">Info</SelectItem>
+							<SelectItem value="verbose">Verbose</SelectItem>
 						</SelectContent>
 					</Select>
 				</div>
 			</div>
 		);
+	}
+
+	private _updatePreferences(patch: Partial<IEditorUserPreferences>): void {
+		const current = this.props.editor.state.editorUserPreferences;
+		void this.props.editor.setEditorUserPreferences(updateEditorUserPreferences(current, current.revision, patch));
 	}
 
 	private _getCameraControlPreferences(): ReactNode {

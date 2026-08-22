@@ -5,7 +5,7 @@ import { IVector4Like } from "babylonjs";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../../ui/shadcn/ui/tooltip";
 
-import { IEditorInspectorFieldProps } from "./field";
+import { IEditorInspectorFieldProps, matchesInspectorSearch } from "./field";
 import { EditorInspectorNumberField } from "./number";
 import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
@@ -27,6 +27,9 @@ export function EditorInspectorVectorField(props: IEditorInspectorVectorFieldPro
 	const value = props.object[props.property] as IVector4Like;
 
 	const [pointerOver, setPointerOver] = useState(false);
+	if (!matchesInspectorSearch(props.label, props.property, props.tooltip)) {
+		return null;
+	}
 
 	return (
 		<div

@@ -22,7 +22,7 @@ describe("mcp/lighting-scenarios", () => {
 		engine.dispose();
 	});
 
-	test("captures, restores, lists, and deletes realtime light scenarios", () => {
+	test("captures, restores, lists, and deletes realtime light scenarios", async () => {
 		const scenario = createLightingScenario(scene, { name: "Day" }, options);
 		light.intensity = 0.2;
 		light.setEnabled(false);
@@ -30,7 +30,7 @@ describe("mcp/lighting-scenarios", () => {
 		expect(light.intensity).toBe(2);
 		expect(light.isEnabled()).toBe(true);
 		expect(listLightingScenarios(scene).scenarios).toHaveLength(1);
-		expect(deleteLightingScenario(scene, { name: "Day" }, options)).toMatchObject({ deleted: true });
+		expect(await deleteLightingScenario(scene, { name: "Day", expectedRevision: 1, confirm: true }, options)).toMatchObject({ deleted: true });
 	});
 
 	test("rejects duplicate names and reports missing scenario lights", () => {

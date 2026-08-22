@@ -10,7 +10,21 @@ import { Grid } from "react-loader-spinner";
 
 import { IoPlay, IoStop, IoRefresh } from "react-icons/io5";
 
-import { Scene, Vector3, HavokPlugin } from "babylonjs";
+import { AbstractEngine, Scene, Vector3, HavokPlugin } from "babylonjs";
+import type {
+	IClothSimulationControl,
+	IEditorNetworkingConfiguration,
+	ILighting2DProviderType,
+	IPhysics2DSimulationControl,
+	IRegisteredScript,
+	IScriptSimulationControl,
+	IScriptSimulationStepResult,
+	IScriptSourceBreakpointInput,
+	IScriptSourceCoverageSnapshot,
+	IScriptSourceDebuggerSnapshot,
+	IScriptSourceManifest,
+	NetworkingRuntime,
+} from "babylonjs-editor-tools";
 
 import { ensureTemporaryDirectoryExists } from "../../../tools/project";
 
@@ -69,6 +83,10 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 	private _temporaryDirectory: string | null = null;
 
 	private _compiledScriptExports: any = null;
+	private _instrumentProjectSources = false;
+	private _scriptSourceManifest: IScriptSourceManifest | null = null;
+	private _scriptSourceBreakpoints: IScriptSourceBreakpointInput[] = [];
+	private _scriptSourceCoverageEnabled = false;
 
 	public constructor(props: IEditorPreviewPlayComponentProps) {
 		super(props);
@@ -156,6 +174,213 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 		return this.state.playing && !this.state.preparingPlay && !this.state.loading;
 	}
 
+	/** Reads attached-script simulation state from the exact tools module bundled into the active Play scene. */
+	public getScriptSimulationControl(): IScriptSimulationControl {
+		if (!this.scene) {
+			throw new Error("The Play scene is not ready for game-script simulation control.");
+		}
+		return this._getCompiledScriptExport("getScriptSimulationControl")(this.scene);
+	}
+
+	/** Pauses or resumes the attached scripts owned by the exact tools module bundled into Play. */
+	public setScriptSimulationPaused(paused: boolean): IScriptSimulationControl {
+		if (!this.scene) {
+			throw new Error("The Play scene is not ready for game-script simulation control.");
+		}
+		return this._getCompiledScriptExport("setScriptSimulationPaused")(this.scene, paused);
+	}
+
+	/** Advances the attached scripts owned by the exact tools module bundled into Play by one fixed frame. */
+	public stepPausedScriptSimulation(deltaSeconds: number): IScriptSimulationStepResult {
+		if (!this.scene) {
+			throw new Error("The Play scene is not ready for game-script simulation control.");
+		}
+		return this._getCompiledScriptExport("stepPausedScriptSimulation")(this.scene, deltaSeconds);
+	}
+
+	/** Returns whether source probes are requested for current and subsequent Play compilations. */
+	public get scriptSourceDebuggingEnabled(): boolean {
+		return this._instrumentProjectSources;
+	}
+
+	/** Rebuilds Play with source probes, or removes them, without changing exported project builds. */
+	public async setScriptSourceDebuggingEnabled(enabled: boolean): Promise<IScriptSourceDebuggerSnapshot | null> {
+		if (typeof enabled !== "boolean") {
+			throw new Error("Script source debugging enabled must be a boolean.");
+		}
+		this._instrumentProjectSources = enabled;
+		if (this.state.playing) {
+			const compiled = await this._compileScripts();
+			if (!compiled) {
+				throw new Error("Failed to compile source-instrumented Play scripts.");
+			}
+			await this.restart();
+		} else if (enabled) {
+			await this.play();
+		}
+		if (enabled && (!this.scene || !this._scriptSourceManifest)) {
+			throw new Error("Debug Play did not become ready. Check the editor Console for the compile or scene-load failure.");
+		}
+		return enabled ? this.getScriptSourceDebuggerSnapshot() : null;
+	}
+
+	/** Reads the source debugger attached to the exact tools module bundled into Play. */
+	public getScriptSourceDebuggerSnapshot(traceOffset = 0, traceLimit = 100): IScriptSourceDebuggerSnapshot {
+		if (!this.scene || !this._scriptSourceManifest) {
+			throw new Error("Source-instrumented Play is not ready. Prepare the script debugger first.");
+		}
+		return this._getCompiledScriptExport("getScriptSourceDebuggerSnapshot")(this.scene, traceOffset, traceLimit);
+	}
+
+	/** Atomically replaces source breakpoints and preserves them across Debug Play restarts. */
+	public setScriptSourceBreakpoints(breakpoints: IScriptSourceBreakpointInput[]): IScriptSourceDebuggerSnapshot {
+		if (!this.scene || !this._scriptSourceManifest) {
+			throw new Error("Source-instrumented Play is not ready. Prepare the script debugger first.");
+		}
+		const snapshot = this._getCompiledScriptExport("setScriptSourceBreakpoints")(this.scene, breakpoints) as IScriptSourceDebuggerSnapshot;
+		this._scriptSourceBreakpoints = breakpoints.map((breakpoint) => ({ ...breakpoint }));
+		return snapshot;
+	}
+
+	/** Controls source coverage and preserves its enabled state across Debug Play restarts. */
+	public setScriptSourceCoverage(enabled: boolean, clear = false): IScriptSourceDebuggerSnapshot {
+		if (!this.scene || !this._scriptSourceManifest) {
+			throw new Error("Source-instrumented Play is not ready. Prepare the script debugger first.");
+		}
+		const snapshot = this._getCompiledScriptExport("setScriptSourceCoverage")(this.scene, enabled, clear) as IScriptSourceDebuggerSnapshot;
+		this._scriptSourceCoverageEnabled = enabled;
+		return snapshot;
+	}
+
+	/** Clears retained debugger hits without changing authored breakpoints or coverage. */
+	public clearScriptSourceDebuggerTrace(): IScriptSourceDebuggerSnapshot {
+		if (!this.scene || !this._scriptSourceManifest) {
+			throw new Error("Source-instrumented Play is not ready. Prepare the script debugger first.");
+		}
+		return this._getCompiledScriptExport("clearScriptSourceDebuggerTrace")(this.scene);
+	}
+
+	/** Reads bounded source-level coverage from the active Debug Play scene. */
+	public getScriptSourceCoverage(options: { path?: string; offset?: number; limit?: number } = {}): IScriptSourceCoverageSnapshot {
+		if (!this.scene || !this._scriptSourceManifest) {
+			throw new Error("Source-instrumented Play is not ready. Prepare the script debugger first.");
+		}
+		return this._getCompiledScriptExport("getScriptSourceCoverage")(this.scene, options);
+	}
+
+	/** Reads cloth simulation state from the exact tools module bundled into the active Play scene. */
+	public getClothSimulationControl(): IClothSimulationControl {
+		if (!this.scene) {
+			throw new Error("The Play scene is not ready for cloth simulation control.");
+		}
+		return this._getCompiledScriptExport("getClothSimulationControl")(this.scene);
+	}
+
+	/** Pauses or resumes the shared cloth solver owned by the exact Play bundle. */
+	public setClothSimulationPaused(paused: boolean): IClothSimulationControl {
+		if (!this.scene) {
+			throw new Error("The Play scene is not ready for cloth simulation control.");
+		}
+		return this._getCompiledScriptExport("setClothSimulationPaused")(this.scene, paused);
+	}
+
+	/** Advances the shared cloth solver owned by the exact Play bundle by one fixed frame. */
+	public stepPausedClothSimulation(deltaSeconds: number): IClothSimulationControl & { steppedCloths: number } {
+		if (!this.scene) {
+			throw new Error("The Play scene is not ready for cloth simulation control.");
+		}
+		return this._getCompiledScriptExport("stepPausedClothSimulation")(this.scene, deltaSeconds);
+	}
+
+	/** Reads Physics 2D state from the exact tools module bundled into the active Play scene. */
+	public getPhysics2DSimulationControl(): IPhysics2DSimulationControl {
+		if (!this.scene) {
+			throw new Error("The Play scene is not ready for Physics 2D simulation control.");
+		}
+		return this._getCompiledScriptExport("getPhysics2DSimulationControl")(this.scene);
+	}
+
+	/** Pauses or resumes the shared Physics 2D solver owned by the exact Play bundle. */
+	public setPhysics2DSimulationPaused(paused: boolean): IPhysics2DSimulationControl {
+		if (!this.scene) {
+			throw new Error("The Play scene is not ready for Physics 2D simulation control.");
+		}
+		return this._getCompiledScriptExport("setPhysics2DSimulationPaused")(this.scene, paused);
+	}
+
+	/** Advances the shared Physics 2D solver owned by the exact Play bundle by one fixed frame. */
+	public stepPausedPhysics2DSimulation(deltaSeconds: number): IPhysics2DSimulationControl & { steppedBodies: number } {
+		if (!this.scene) {
+			throw new Error("The Play scene is not ready for Physics 2D simulation control.");
+		}
+		return this._getCompiledScriptExport("stepPausedPhysics2DSimulation")(this.scene, deltaSeconds);
+	}
+
+	/** Returns runtime registrations from the exact tools module bundled into the active Play scene. */
+	public getScriptRuntimeRegistrations(object: any): IRegisteredScript[] {
+		const dictionary = this._compiledScriptExports?.scriptsDictionary;
+		if (!dictionary || typeof dictionary.get !== "function") {
+			throw new Error("The compiled Play script registration bridge is unavailable. Regenerate and restart Play mode.");
+		}
+		return dictionary.get(object) ?? [];
+	}
+
+	/**
+	 * Loads an isolated player through the exact compiled Play bundle on a
+	 * caller-owned engine. Multiplayer tooling owns rendering and disposal.
+	 */
+	public async createIsolatedPlayerScene(engine: AbstractEngine): Promise<Scene> {
+		if (!this.canPlayScene || !this._compiledScriptExports?.loadScene || !this._compiledScriptExports?.scriptsMap) {
+			throw new Error("Compiled Play must be ready before creating an isolated multiplayer player.");
+		}
+		const scene = new Scene(engine);
+		scene.enablePhysics(new Vector3(0, -981, 0), new HavokPlugin());
+		scene.audioEnabled = false;
+		const projectDir = dirname(projectConfiguration.path!);
+		const rootUrl = join(projectDir, "public", "scene", "/");
+		const sceneName = basename(this.props.editor.state.lastOpenedScenePath!).split(".").shift()!;
+		try {
+			await this._compiledScriptExports.loadScene(rootUrl, `${sceneName}.babylon`, scene, this._compiledScriptExports.scriptsMap, {
+				quality: "high",
+				headless: true,
+				networking: { autoConnect: false },
+			});
+			scene.activeCamera ??= scene.cameras[0] ?? null;
+			return scene;
+		} catch (error) {
+			scene.dispose();
+			throw new Error(`Failed to load isolated multiplayer player: ${this._describePlayError(error)}`);
+		}
+	}
+
+	/** Reads a runtime from the same bundled tools instance that loaded its scene. */
+	public getCompiledNetworkingRuntime(scene: Scene): NetworkingRuntime | null {
+		return this._getCompiledScriptExport("getNetworkingRuntime")(scene);
+	}
+
+	/** Rebuilds networking through the exact bundled tools instance for this Play scene. */
+	public configureCompiledNetworking(scene: Scene, configuration: IEditorNetworkingConfiguration): NetworkingRuntime | null {
+		return this._getCompiledScriptExport("configureNetworking")(scene, { configuration });
+	}
+
+	/** Lists Light2D providers registered by the exact game-script bundle running in Play. */
+	public listCompiledLight2DProviderTypes(): ILighting2DProviderType[] {
+		return this._getCompiledScriptExport("listLight2DProviderTypes")();
+	}
+
+	/** Lists ShadowShape2D providers registered by the exact game-script bundle running in Play. */
+	public listCompiledShadowShape2DProviderTypes(): ILighting2DProviderType[] {
+		return this._getCompiledScriptExport("listShadowShape2DProviderTypes")();
+	}
+
+	/** Reads measured 2D-light runtime evidence from the exact tools instance that owns the active Play scene. */
+	public getCompiledLighting2DRuntimeEvidence(scene: Scene = this.scene!): Record<string, unknown> {
+		if (!scene) {
+			throw new Error("The Play scene is not ready for 2D lighting diagnostics.");
+		}
+		return this._getCompiledScriptExport("getLighting2DRuntimeEvidence")(scene);
+	}
+
 	/**
 	 * Sets the game / application to play or stop.
 	 * If the game / application is not playing, it will start it.
@@ -204,7 +429,7 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 	 * Stops the game / application.
 	 * It will dispose the scene and reset the state.
 	 */
-	public stop(): void {
+	public stop(onStopped?: () => void): void {
 		this.scene?.dispose();
 		this.scene = null;
 
@@ -212,11 +437,14 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 
 		this.props.editor.layout.preview.engine.wipeCaches(true);
 
-		this.setState({
-			playing: false,
-			loading: false,
-			preparingPlay: false,
-		});
+		this.setState(
+			{
+				playing: false,
+				loading: false,
+				preparingPlay: false,
+			},
+			onStopped
+		);
 
 		this.props.editor.layout.preview.setState({
 			pickingEnabled: true,
@@ -306,14 +534,16 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 		const log = await this.props.editor.layout.console.progress("Compiling scripts...");
 
 		try {
-			await compileScript({
+			const result = await compileScript({
 				entryPoints: [join(dirname(projectConfiguration.path!), "src/scripts.ts")],
 				outfile: join(this._temporaryDirectory!, "play/script.cjs"),
+				instrumentProjectSources: this._instrumentProjectSources,
 				onTransformSource: (path) =>
 					log.setState({
 						message: `Compiling source: ${basename(path)}`,
 					}),
 			});
+			this._scriptSourceManifest = result?.sourceManifest ?? null;
 
 			log.setState({
 				done: true,
@@ -347,8 +577,16 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 
 		const scene = new Scene(this.props.editor.layout.preview.engine);
 		scene.enablePhysics(new Vector3(0, -981, 0), new HavokPlugin());
+		scene.audioEnabled = !this.props.editor.state.projectSettings.playMode.muteAudio;
 
 		this.scene = scene;
+		if (this._scriptSourceManifest) {
+			this._getCompiledScriptExport("configureScriptSourceDebugger")(scene, this._scriptSourceManifest, () =>
+				this._getCompiledScriptExport("setScriptSimulationPaused")(scene, true)
+			);
+			this._getCompiledScriptExport("setScriptSourceBreakpoints")(scene, this._scriptSourceBreakpoints);
+			this._getCompiledScriptExport("setScriptSourceCoverage")(scene, this._scriptSourceCoverageEnabled, false);
+		}
 
 		const projectDir = dirname(projectConfiguration.path!);
 		const rootUrl = join(projectDir, "public", "scene", "/");
@@ -365,8 +603,10 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 			});
 		} catch (e) {
 			if (!scene.isDisposed) {
+				const description = this._describePlayError(e);
+				console.error("Failed to load play scene:", e);
 				this.props.editor.layout.selectTab("console");
-				this.props.editor.layout.console.error(`Failed to load scene: ${(e as Error).message}`);
+				this.props.editor.layout.console.error(`Failed to load scene:\n${description}`);
 				return this.stop();
 			}
 		}
@@ -378,6 +618,9 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 		scene.activeCamera?.attachControl(true);
 
 		await forceCompileAllSceneMaterials(scene);
+		if (scene.isDisposed || !this.state.playing) {
+			return;
+		}
 
 		this.setState({
 			loading: false,
@@ -388,6 +631,54 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 		const scriptPath = join(this._temporaryDirectory!, "play/script.cjs");
 		this._compiledScriptExports = require(scriptPath);
 		delete require.cache[nativeJoin(scriptPath)];
+	}
+
+	private _getCompiledScriptExport(
+		name:
+			| "getScriptSimulationControl"
+			| "setScriptSimulationPaused"
+			| "stepPausedScriptSimulation"
+			| "configureScriptSourceDebugger"
+			| "getScriptSourceDebuggerSnapshot"
+			| "setScriptSourceBreakpoints"
+			| "setScriptSourceCoverage"
+			| "clearScriptSourceDebuggerTrace"
+			| "getScriptSourceCoverage"
+			| "getClothSimulationControl"
+			| "setClothSimulationPaused"
+			| "stepPausedClothSimulation"
+			| "getPhysics2DSimulationControl"
+			| "setPhysics2DSimulationPaused"
+			| "stepPausedPhysics2DSimulation"
+			| "configureNetworking"
+			| "getNetworkingRuntime"
+			| "listLight2DProviderTypes"
+			| "listShadowShape2DProviderTypes"
+			| "getLighting2DRuntimeEvidence"
+	): (...args: any[]) => any {
+		const value = this._compiledScriptExports?.[name];
+		if (typeof value !== "function") {
+			throw new Error(
+				`The compiled Play game-script bridge "${name}" is unavailable. Update the project's babylonjs-editor-tools dependency, regenerate, and restart Play mode.`
+			);
+		}
+		return value;
+	}
+
+	private _describePlayError(error: unknown): string {
+		if (!(error instanceof Error)) {
+			return String(error);
+		}
+		const details = [error.stack ?? error.message];
+		const innerError = (error as any).innerError;
+		if (innerError && innerError !== error) {
+			details.push(`Inner error: ${innerError instanceof Error ? (innerError.stack ?? innerError.message) : String(innerError)}`);
+		}
+		const cause = error.cause;
+		if (cause && cause !== error && cause !== innerError) {
+			details.push(`Cause: ${cause instanceof Error ? (cause.stack ?? cause.message) : String(cause)}`);
+		}
+		return details.join("\n");
 	}
 
 	/**

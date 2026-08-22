@@ -1,0 +1,44 @@
+<evaluation>
+	<qa_pair>
+		<question>Inspect the project services capability contract. What integer contract version is reported?</question>
+		<answer>2</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect project services capabilities. Which ten portable service categories are supported? Answer in declaration order as a comma-separated list.</question>
+		<answer>auth, cloudSave, analytics, iap, ads, matchmaking, leaderboards, remoteConfig, contentDelivery, cloudFunctions</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect project services capabilities. What is the maximum number of named service environments?</question>
+		<answer>16</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect project services deployment behavior. Are credential values persisted in project configuration? Respond True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect project services runtime behavior. What prevents stale Cloud Save writes from overwriting newer values?</question>
+		<answer>exact expected revisions</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the project services emulator. Which network interface class may it bind to?</question>
+		<answer>loopback only</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect project services resources. Which eight provider-neutral resource catalogs are authored? Answer as a comma-separated list.</question>
+		<answer>analyticsEvents, iapProducts, adPlacements, matchmakingQueues, leaderboards, remoteConfig, contentDeliveryBuckets, cloudFunctions</answer>
+	</qa_pair>
+	<qa_pair>
+		<question
+			>Inspect the project services provider boundary. Does the editor claim to provision vendor accounts or store vendor service secrets? Respond True or False.</question
+		>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect services deployment plans. Are plans permanent and reusable after project configuration changes? Respond True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the project services adapter boundary. Which remaining hosted networking family is explicitly outside the core adapter?</question>
+		<answer>lobbyRelay</answer>
+	</qa_pair>
+</evaluation>

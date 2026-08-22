@@ -1,6 +1,8 @@
 import { AdvancedDynamicTexture } from "@babylonjs/gui/2D/advancedDynamicTexture";
 
 import { loadJsonFile } from "../../../../tools/request";
+import { applyGUIAuthoringRuntime, createDefaultGUIAuthoringState, normalizeGUIAuthoringState } from "../../../gui-authoring";
+import { createGUIPanelRendererTexture } from "../../../gui-panel-renderer";
 
 import { IScriptAssetParserParameters, registerScriptAssetParser } from "../../preload";
 
@@ -12,9 +14,17 @@ export async function preloadFullScreenScriptAsset(parameters: IScriptAssetParse
 	try {
 		switch (data.guiType) {
 			case "fullscreen":
-				gui = AdvancedDynamicTexture.CreateFullscreenUI(data.name, true, parameters.scene);
-				gui.parseSerializedObject(data.content, false);
+			case "worldSpace": {
+				const authoring = normalizeGUIAuthoringState(data.zvibeGUIAuthoring ?? createDefaultGUIAuthoringState());
+				const created = createGUIPanelRendererTexture<AdvancedDynamicTexture>(parameters.scene, data.name, authoring.toolkit.panelRenderer);
+				gui = created;
+				created.parseSerializedObject(data.content, false);
+				await applyGUIAuthoringRuntime(created, authoring, {
+					rootUrl: parameters.rootUrl,
+					scene: parameters.scene,
+				});
 				break;
+			}
 			default:
 				throw new Error(`Unknown GUI type: ${data.guiType}`);
 		}

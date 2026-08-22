@@ -14,13 +14,19 @@ import { listCustomRenderPasses, setCustomRenderPass } from "./custom-passes";
 function computePass(scene: Scene, data: any): ICustomRenderPassDefinition {
 	listCustomRenderPasses(scene);
 	const value = ((scene.metadata?.babylonEditorCustomRenderPasses ?? []) as ICustomRenderPassDefinition[]).find((pass) => pass.id === data.id || pass.name === data.name);
-	if (!value) throw new Error("Compute pass not found. Provide id (preferred) or name.");
-	if (value.passType !== "compute") throw new Error(`Custom render pass "${value.name}" is not a compute pass.`);
+	if (!value) {
+		throw new Error("Compute pass not found. Provide id (preferred) or name.");
+	}
+	if (value.passType !== "compute") {
+		throw new Error(`Custom render pass "${value.name}" is not a compute pass.`);
+	}
 	return value;
 }
 
 function graph(value: ICustomRenderPassDefinition): IComputeNodeGraph {
-	if (!value.computeSettings.nodeGraph) throw new Error(`Compute pass "${value.name}" has no node graph. Initialize or set one first.`);
+	if (!value.computeSettings.nodeGraph) {
+		throw new Error(`Compute pass "${value.name}" has no node graph. Initialize or set one first.`);
+	}
 	return value.computeSettings.nodeGraph;
 }
 
@@ -59,7 +65,9 @@ export function setCustomComputeNodeGraph(scene: Scene, data: any, options: IMCP
 	const value = computePass(scene, data);
 	const candidate = structuredClone(data.graph);
 	validateComputeNodeGraphStructure(candidate);
-	if (data.compile !== false) compileComputeNodeGraph(candidate, compileOptions(value));
+	if (data.compile !== false) {
+		compileComputeNodeGraph(candidate, compileOptions(value));
+	}
 	const next = persistGraph(value, candidate, options);
 	return data.compile === false ? { passId: value.id, graph: next, compiled: false } : compileCustomComputeNodeGraph(scene, { id: value.id }, options);
 }
@@ -88,7 +96,9 @@ export function setCustomComputeNode(scene: Scene, data: any, options: IMCPActio
 	const value = computePass(scene, data);
 	const current = graph(value);
 	const existing = current.nodes.find((node) => node.id === data.nodeId);
-	if (!existing) throw new Error(`Compute node "${data.nodeId}" was not found.`);
+	if (!existing) {
+		throw new Error(`Compute node "${data.nodeId}" was not found.`);
+	}
 	const replacement = { ...existing, ...structuredClone(data.update), id: existing.id };
 	const next = { ...structuredClone(current), nodes: current.nodes.map((node) => (node.id === existing.id ? replacement : structuredClone(node))) };
 	persistGraph(value, next, options);
@@ -98,7 +108,9 @@ export function setCustomComputeNode(scene: Scene, data: any, options: IMCPActio
 export function deleteCustomComputeNode(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const value = computePass(scene, data);
 	const current = graph(value);
-	if (!current.nodes.some((node) => node.id === data.nodeId)) throw new Error(`Compute node "${data.nodeId}" was not found.`);
+	if (!current.nodes.some((node) => node.id === data.nodeId)) {
+		throw new Error(`Compute node "${data.nodeId}" was not found.`);
+	}
 	const next = {
 		...structuredClone(current),
 		nodes: current.nodes.filter((node) => node.id !== data.nodeId),
@@ -121,7 +133,9 @@ export function disconnectCustomComputeNodes(scene: Scene, data: any, options: I
 	const value = computePass(scene, data);
 	const current = graph(value);
 	const index = current.edges.findIndex((edge) => edge.from === data.from && edge.to === data.to && edge.toPort === data.toPort);
-	if (index < 0) throw new Error("Compute graph connection was not found.");
+	if (index < 0) {
+		throw new Error("Compute graph connection was not found.");
+	}
 	const edges = structuredClone(current.edges);
 	const [edge] = edges.splice(index, 1);
 	persistGraph(value, { ...structuredClone(current), edges }, options);

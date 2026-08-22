@@ -42,15 +42,48 @@ export function registerEditorControlTools(server: McpServer): void {
 	);
 	server.registerTool(
 		"list_editor_tabs",
-		{ title: "List editor tabs", description: "List editor panel tab identifiers that can be selected.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
+		{
+			title: "List editor tabs",
+			description:
+				"List every permanent editor panel tab identifier that can be selected, including Profiler, Entities, Lighting Search, Runtime AI, ML Training, Generative Assets, Services, Occlusion Culling, networking, mobile, server, and audit workspaces.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+		},
 		async (): Promise<CallToolResult> => callTextTool("list_editor_tabs", {})
 	);
 	server.registerTool(
 		"select_editor_tab",
 		{
 			title: "Select editor tab",
-			description: "Bring an existing editor panel tab to the foreground.",
-			inputSchema: z.object({ tab: z.enum(["graph", "preview", "assets-browser", "console", "terminal", "inspector", "animations", "marketplace"]) }),
+			description: "Bring any listed permanent editor panel tab, including Runtime AI, ML Training, Generative Assets, Services, or Occlusion Culling, to the foreground.",
+			inputSchema: z
+				.object({
+					tab: z.enum([
+						"graph",
+						"preview",
+						"assets-browser",
+						"console",
+						"terminal",
+						"inspector",
+						"animations",
+						"marketplace",
+						"profiler",
+						"entities",
+						"lighting-search",
+						"script-debugger",
+						"project-auditor",
+						"runtime-ai",
+						"ml-training",
+						"generative-assets",
+						"services",
+						"occlusion-culling",
+						"networking",
+						"mobile",
+						"console-server",
+					]),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("select_editor_tab", args)
 	);

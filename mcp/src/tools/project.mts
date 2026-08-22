@@ -60,6 +60,15 @@ export function registerProjectTools(server: McpServer): void {
 			customValue: z.json().optional().describe("Bounded JSON value required only when choice is custom."),
 		})
 		.refine((value) => value.choice !== "custom" || value.customValue !== undefined, { message: "customValue is required when choice is custom." });
+	const semanticGitConflictOptionsShape = {
+		path: z.string().min(1).max(512).describe("Exact currently unmerged .prefab path or JSON manifest path inside a persisted .scene directory."),
+		resolution: z.enum(["manual", "ours", "theirs"]).optional().describe("Global semantic conflict policy; defaults to manual."),
+		maximumConflicts: z.number().int().min(1).max(5000).optional().describe("Maximum detailed semantic conflicts returned; defaults to 500."),
+		numericTolerance: z.number().min(0).max(1).optional().describe("Absolute tolerance for numeric leaf equality; defaults to exact comparison."),
+		ignorePaths: z.array(z.string().startsWith("/").max(512)).max(64).optional().describe("Semantic path prefixes kept from ours and excluded from merging."),
+		conflictResolutions: z.array(semanticMergeResolutionSchema).max(500).optional().describe("Exact per-property choices from a semantic Git conflict preview."),
+		ruleIds: z.array(z.string().uuid()).max(100).optional().describe("Ordered persistent semantic merge-rule ids applied after exact overrides."),
+	};
 	server.registerTool(
 		"get_collaborative_ordered_collection",
 		{
@@ -169,6 +178,169 @@ export function registerProjectTools(server: McpServer): void {
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (): Promise<CallToolResult> => callTextTool("get_project_source_control_status", {})
+	);
+	server.registerTool(
+		"get_project_source_control_workspace",
+		{
+			title: "Get project source-control workspace",
+			description:
+				"Read the portable Git equivalent of Unity 6.5's Version Control workspace: filtered Pending and Incoming Changes with precise empty states, a bounded branch/changeset graph, retained Git-stash shelvesets, exact workspace fingerprint, refs, and persisted splitter layout. Never fetches or contacts a remote.",
+			inputSchema: z
+				.object({
+					pendingFilter: z.string().max(128).optional(),
+					incomingFilter: z.string().max(128).optional(),
+					branchFilter: z.string().max(128).optional(),
+					limit: z.number().int().min(1).max(200).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_project_source_control_workspace", args)
+	);
+	server.registerTool(
+		"get_project_source_control_workspace_layout",
+		{
+			title: "Get source-control workspace layout",
+			description:
+				"Read the persistent branch explorer, changes, and properties splitter percentages plus active panel and exact layout revision for the current repository.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (): Promise<CallToolResult> => callTextTool("get_project_source_control_workspace_layout", {})
+	);
+	server.registerTool(
+		"set_project_source_control_workspace_layout",
+		{
+			title: "Set source-control workspace layout",
+			description:
+				"Persist exact source-control splitter positions and active panel across reloads/sessions. Requires the inspected layout revision, percentages from 15 to 70 that total exactly 100, and changes only renderer-local preferences—not project or Git files.",
+			inputSchema: z
+				.object({
+					expectedRevision: z.string().regex(/^[a-f0-9]{64}$/),
+					branchExplorerPercent: z.number().min(15).max(70),
+					changesPercent: z.number().min(15).max(70),
+					propertiesPercent: z.number().min(15).max(70),
+					activePanel: z.enum(["pending", "incoming", "branches", "shelvesets"]),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_project_source_control_workspace_layout", args)
+	);
+	server.registerTool(
+		"inspect_project_source_control_changeset",
+		{
+			title: "Inspect source-control changeset",
+			description:
+				"Read exact author/committer properties, parents, changed project paths, and a bounded first-parent unified diff for one exact 40-character commit hash. This is the changeset-by-changeset diff and properties panel contract and does not mutate Git state.",
+			inputSchema: z.object({ hash: z.string().regex(/^[a-f0-9]{40}$/) }).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("inspect_project_source_control_changeset", args)
+	);
+	server.registerTool(
+		"inspect_project_source_control_shelveset",
+		{
+			title: "Inspect source-control shelveset",
+			description:
+				"Read properties, project-scoped paths, and a bounded diff for one exact currently retained Git-stash shelveset hash. The response states portable Git boundaries and never applies or drops the shelveset.",
+			inputSchema: z.object({ shelvesetHash: z.string().regex(/^[a-f0-9]{40}$/) }).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("inspect_project_source_control_shelveset", args)
+	);
+	server.registerTool(
+		"apply_project_source_control_folder_action",
+		{
+			title: "Apply source-control folder action",
+			description:
+				"Apply Project-browser-style Add to Source Control or Undo Changes to one existing contained non-symlink folder. Both require the exact inspected workspace fingerprint; undo additionally requires confirm=true, collaboration admin, and restores tracked/index content from HEAD while preserving untracked files.",
+			inputSchema: z
+				.object({
+					action: z.enum(["add", "undo"]),
+					path: z.string().min(1).max(512),
+					expectedWorkspaceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+					confirm: z.boolean().optional(),
+					collaborationToken: z.string().min(1).max(256).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("apply_project_source_control_folder_action", args)
+	);
+	server.registerTool(
+		"create_project_source_control_shelveset",
+		{
+			title: "Create source-control shelveset",
+			description:
+				"Create and retain a Git-stash shelveset snapshot of tracked pending changes while leaving the worktree and index unchanged. Requires root-owned project, admin, confirm=true, and an exact workspace fingerprint; untracked-only content is intentionally unsupported.",
+			inputSchema: z
+				.object({
+					message: z.string().min(1).max(500),
+					expectedWorkspaceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+					confirm: z.literal(true),
+					collaborationToken: z.string().min(1).max(256).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("create_project_source_control_shelveset", args)
+	);
+	server.registerTool(
+		"apply_project_source_control_shelveset_paths",
+		{
+			title: "Partially apply source-control shelveset",
+			description:
+				"Apply 1–128 selected tracked paths from one exact retained Git shelveset into the worktree, retaining the shelveset and leaving results unstaged. Requires root ownership, admin, confirm=true, the exact workspace fingerprint, and collision-free selected paths.",
+			inputSchema: z
+				.object({
+					shelvesetHash: z.string().regex(/^[a-f0-9]{40}$/),
+					paths: z.array(z.string().min(1).max(512)).min(1).max(128),
+					expectedWorkspaceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+					confirm: z.literal(true),
+					collaborationToken: z.string().min(1).max(256).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("apply_project_source_control_shelveset_paths", args)
+	);
+	server.registerTool(
+		"delete_project_source_control_shelveset",
+		{
+			title: "Delete source-control shelveset",
+			description:
+				"Drop one exact currently retained Git shelveset without touching the worktree or index. Requires root ownership, collaboration admin, and confirm=true; a stale or arbitrary commit hash is rejected.",
+			inputSchema: z
+				.object({
+					shelvesetHash: z.string().regex(/^[a-f0-9]{40}$/),
+					confirm: z.literal(true),
+					collaborationToken: z.string().min(1).max(256).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("delete_project_source_control_shelveset", args)
+	);
+	server.registerTool(
+		"rename_project_source_control_ref",
+		{
+			title: "Rename source-control branch or label",
+			description:
+				"Rename one local branch or label (Git tag), powering the workspace F2 shortcut. Requires root ownership, collaboration admin, confirm=true, and the exact inspected ref object hash; existing targets and stale hashes are rejected, and tag object identity is preserved.",
+			inputSchema: z
+				.object({
+					kind: z.enum(["branch", "label"]),
+					name: z.string().min(1).max(255),
+					newName: z.string().min(1).max(255),
+					expectedHash: z.string().regex(/^[a-f0-9]{40}$/),
+					confirm: z.literal(true),
+					collaborationToken: z.string().min(1).max(256).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("rename_project_source_control_ref", args)
 	);
 	server.registerTool(
 		"get_project_source_control_history",
@@ -404,6 +576,33 @@ export function registerProjectTools(server: McpServer): void {
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("resolve_project_source_control_conflict", args)
+	);
+	server.registerTool(
+		"inspect_project_source_control_semantic_conflict",
+		{
+			title: "Inspect project semantic Git conflict",
+			description:
+				"Read one active merge/rebase conflict directly from Git stage 1/2/3 blobs and run the bounded Babylon-aware three-way merge for a .prefab or JSON manifest inside a .scene directory. Returns exact stage fingerprint/output hash, stable-identity automatic merges, explicit property conflicts, selected-rule evidence, and no merged file contents. Invalid JSON, binary/symlink modes, unsupported paths, and oversized blobs are refused without changing the worktree or index.",
+			inputSchema: z.object(semanticGitConflictOptionsShape),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("inspect_project_source_control_semantic_conflict", args)
+	);
+	server.registerTool(
+		"apply_project_source_control_semantic_conflict",
+		{
+			title: "Apply project semantic Git conflict",
+			description:
+				"After confirm=true, rerun the exact Babylon-aware Git-stage merge and atomically write/delete plus stage its fully resolved result. Requires collaboration admin, a root-owned active merge/rebase, exact conflict fingerprint and semantic output hash from inspection, and zero unresolved properties. Any stale stage, changed rule/resolution output, unsupported content, oversized rollback/output, or staging failure is rejected with the previous worktree content restored.",
+			inputSchema: z.object({
+				...semanticGitConflictOptionsShape,
+				expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+				expectedOutputHash: z.string().regex(/^[a-f0-9]{64}$/),
+				confirm: z.boolean(),
+			}),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("apply_project_source_control_semantic_conflict", args)
 	);
 	server.registerTool(
 		"continue_project_source_control_integration",
@@ -1076,11 +1275,81 @@ export function registerProjectTools(server: McpServer): void {
 		async (args): Promise<CallToolResult> => callTextTool("list_project_asset_locks", args)
 	);
 	server.registerTool(
+		"inspect_project_asset_lock_policy",
+		{
+			title: "Inspect project Smart Lock policy",
+			description:
+				"For one existing project file, read the first matching ordered Smart Lock rule, exact current/destination Git commit and asset-blob revisions, clean-path and destination-ancestor freshness, current shared lock with permission-safe lease identity, and retained/releasable merge evidence. A remote rule uses the already-fetched remote-tracking ref and never contacts the network; fetch explicitly first when authoritative remote freshness is required.",
+			inputSchema: z.object({ path: z.string().min(1).max(512) }),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("inspect_project_asset_lock_policy", args)
+	);
+	server.registerTool(
+		"list_project_asset_lock_rules",
+		{
+			title: "List project Smart Lock rules",
+			description:
+				"List up to 100 ordered persistent Smart Lock rules, or only enabled rules matching one project-relative path. The first enabled match owns policy. Rules bind wildcard asset paths to a local or known remote-tracking destination branch and manual or until-merged retention without changing Git, locks, or files.",
+			inputSchema: z.object({ path: z.string().min(1).max(512).optional() }),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("list_project_asset_lock_rules", args)
+	);
+	server.registerTool(
+		"create_project_asset_lock_rule",
+		{
+			title: "Create project Smart Lock rule",
+			description:
+				"Create one of at most 100 ordered persistent Smart Lock policies after collaboration-admin authorization when enforcement is enabled. Path patterns support bounded *, **, and ? wildcards; destinationRemote null means a local branch, while a named remote uses its explicitly fetched tracking ref. Until-merged retention survives lease expiry and prevents normal release while the acquisition branch has dirty asset edits or unmerged commits.",
+			inputSchema: z.object({
+				name: z.string().min(1).max(128),
+				enabled: z.boolean().optional(),
+				pathPattern: z.string().min(1).max(256),
+				destinationBranch: z.string().min(1).max(255),
+				destinationRemote: z.string().min(1).max(128).nullable().optional(),
+				retention: z.enum(["manual", "untilMerged"]).optional(),
+			}),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("create_project_asset_lock_rule", args)
+	);
+	server.registerTool(
+		"set_project_asset_lock_rule",
+		{
+			title: "Set project Smart Lock rule",
+			description:
+				"Update selected fields of one persistent Smart Lock rule after collaboration-admin authorization while preserving its stable id, order, and creation timestamp.",
+			inputSchema: z.object({
+				id: z.string().uuid(),
+				name: z.string().min(1).max(128).optional(),
+				enabled: z.boolean().optional(),
+				pathPattern: z.string().min(1).max(256).optional(),
+				destinationBranch: z.string().min(1).max(255).optional(),
+				destinationRemote: z.string().min(1).max(128).nullable().optional(),
+				retention: z.enum(["manual", "untilMerged"]).optional(),
+			}),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_project_asset_lock_rule", args)
+	);
+	server.registerTool(
+		"delete_project_asset_lock_rule",
+		{
+			title: "Delete project Smart Lock rule",
+			description:
+				"Delete one persistent Smart Lock rule after collaboration-admin authorization. Existing leases and their retained acquisition evidence are preserved and remain enforceable.",
+			inputSchema: z.object({ id: z.string().uuid() }),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("delete_project_asset_lock_rule", args)
+	);
+	server.registerTool(
 		"acquire_project_asset_lock",
 		{
 			title: "Acquire project asset lock",
 			description:
-				"Atomically acquire a shared local/remote lease for an existing project file before editing it. In an authenticated collaboration session, owner is derived from the member identity and the lease is bound to that member; caller-supplied owner is used only in legacy collaboration-disabled mode. A conflict is returned without exposing its lockId.",
+				"Atomically acquire a shared local/remote lease for an existing project file before editing it. In an authenticated collaboration session, owner is derived from the member identity and the lease is bound to that member; caller-supplied owner is used only in legacy collaboration-disabled mode. When a Smart Lock rule matches, exact head/destination hashes from policy inspection are required, the asset path must be clean, and the current branch must contain the destination. A conflict is returned without exposing its lockId.",
 			inputSchema: z.object({
 				path: z.string().min(1).describe("Existing project-relative asset or serialized editor-file path."),
 				owner: z
@@ -1091,6 +1360,16 @@ export function registerProjectTools(server: McpServer): void {
 					.describe("Legacy owner used only when collaboration is disabled; authenticated sessions derive this from their member identity."),
 				note: z.string().max(512).optional().describe("Optional reason for the lock."),
 				ttlSeconds: z.number().int().min(30).max(604800).optional().describe("Lease duration from 30 seconds through 7 days; defaults to 30 minutes."),
+				expectedHeadHash: z
+					.string()
+					.regex(/^[a-f0-9]{40,64}$/)
+					.optional()
+					.describe("Required exact HEAD from policy inspection when a Smart Lock rule matches."),
+				expectedDestinationHash: z
+					.string()
+					.regex(/^[a-f0-9]{40,64}$/)
+					.optional()
+					.describe("Required exact local or remote-tracking destination revision from policy inspection when a Smart Lock rule matches."),
 			}),
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
@@ -1116,7 +1395,7 @@ export function registerProjectTools(server: McpServer): void {
 		{
 			title: "Release project asset lock",
 			description:
-				"Release a shared local/remote asset lock using its lockId. Federated leases require the owning collaboration member. Set force only for explicit admin recovery; non-admin force attempts are rejected.",
+				"Release a shared local/remote asset lock using its lockId. Federated leases require the owning collaboration member. An until-merged Smart Lock remains retained while its acquisition branch has dirty asset changes or a tip not merged into the current destination. Set force only for explicit admin recovery; non-admin force attempts are rejected.",
 			inputSchema: z
 				.object({ path: z.string().min(1), lockId: z.string().uuid().optional(), force: z.boolean().optional() })
 				.refine((value) => value.force === true || Boolean(value.lockId), { message: "lockId is required unless force is true." }),
@@ -1329,24 +1608,366 @@ export function registerProjectTools(server: McpServer): void {
 		},
 		async (args): Promise<CallToolResult> => callTextTool("delete_project_changelist", args)
 	);
+	const projectPackageName = z
+		.string()
+		.min(1)
+		.max(214)
+		.regex(/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i)
+		.describe("Normal npm package identifier, including an optional @scope/ prefix.");
+	const projectPackageDependencyType = z.enum(["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]);
+	const projectPackageExactVersion = z
+		.string()
+		.min(5)
+		.max(512)
+		.regex(/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/)
+		.describe("Exact semantic version without a range, tag, protocol, or package-manager alias.");
+	const projectPackageSource = z.discriminatedUnion("type", [
+		z.object({ type: z.literal("registry") }).strict(),
+		z
+			.object({
+				type: z.literal("git"),
+				url: z.string().url().max(2048),
+				commit: z
+					.string()
+					.regex(/^(?!-)[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/)
+					.optional(),
+			})
+			.strict(),
+		z.object({ type: z.literal("local"), path: z.string().min(1).max(1024) }).strict(),
+		z
+			.object({ type: z.literal("tarball"), path: z.string().min(1).max(1024).optional(), url: z.string().url().max(2048).optional() })
+			.strict()
+			.refine((value) => Number(value.path !== undefined) + Number(value.url !== undefined) === 1, { message: "Exactly one tarball path or URL is required." }),
+	]);
+	const projectPackageChange = z
+		.object({
+			operation: z.enum(["install", "remove", "update"]),
+			name: projectPackageName,
+			version: projectPackageExactVersion.optional(),
+			dependencyType: projectPackageDependencyType.optional(),
+			source: projectPackageSource.optional(),
+		})
+		.strict();
+	const projectPackagePagination = {
+		offset: z.number().int().min(0).max(1_000_000).optional(),
+		limit: z.number().int().min(1).max(500).optional(),
+	};
+	const projectPackageSampleLease = {
+		sampleId: z.string().regex(/^[a-f0-9]{32}$/),
+		expectedSourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
+		expectedPackageFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+	};
 	server.registerTool(
 		"list_project_packages",
 		{
 			title: "List project packages",
-			description: "List direct dependencies and devDependencies in the active project's package.json.",
-			inputSchema: z.object({}),
-			annotations: { readOnlyHint: true },
+			description:
+				"List a bounded page of direct dependencies across dependencies, devDependencies, optionalDependencies, and peerDependencies. Returns the exact package/lock fingerprint, workspace ownership, lockfile hashes, totals, and nextOffset without running a manager or contacting a registry.",
+			inputSchema: z.object({ ...projectPackagePagination, query: z.string().max(214).optional() }).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
-		async (): Promise<CallToolResult> => callTextTool("list_project_packages", {})
+		async (args): Promise<CallToolResult> => callTextTool("list_project_packages", args)
+	);
+	server.registerTool(
+		"get_project_package_manager",
+		{
+			title: "Get project package manager",
+			description:
+				"Inspect the configured npm, Yarn, pnpm, or Bun executable and version plus exact manifest/lock/workspace evidence, supported sources, script policy, and the active bounded operation. Runs only the manager's local --version command.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (): Promise<CallToolResult> => callTextTool("get_project_package_manager", {})
+	);
+	server.registerTool(
+		"list_project_package_registries",
+		{
+			title: "List project package registries",
+			description:
+				"List configured default and scoped project registries with configuration hashes and credential availability. Credential values are never returned; only environment-variable names and literal-secret presence are reported.",
+			inputSchema: z.object({ offset: z.number().int().min(0).max(1_000_000).optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("list_project_package_registries", args)
+	);
+	server.registerTool(
+		"search_project_package_registry",
+		{
+			title: "Search project package registry",
+			description:
+				"Search one configured registry with bounded offset/limit pagination. Uses an environment-resolved credential only in memory, enforces HTTPS or loopback HTTP, bounded redirects/body/timeouts, and returns concise package metadata plus total/nextOffset.",
+			inputSchema: z
+				.object({
+					query: z.string().min(1).max(200),
+					registryId: z
+						.string()
+						.regex(/^[a-f0-9]{24}$/)
+						.optional(),
+					offset: z.number().int().min(0).max(1_000_000).optional(),
+					limit: z.number().int().min(1).max(50).optional(),
+					timeoutMs: z.number().int().min(1000).max(60000).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("search_project_package_registry", args)
+	);
+	server.registerTool(
+		"get_project_package_details",
+		{
+			title: "Get project package details",
+			description:
+				"Get one package's registry metadata, dist-tags, selected exact release dependencies/integrity, and paginated release history. Readmes are deliberately omitted and all responses/timeouts are bounded.",
+			inputSchema: z
+				.object({
+					name: projectPackageName,
+					version: projectPackageExactVersion.optional(),
+					registryId: z
+						.string()
+						.regex(/^[a-f0-9]{24}$/)
+						.optional(),
+					offset: z.number().int().min(0).max(1_000_000).optional(),
+					limit: z.number().int().min(1).max(100).optional(),
+					timeoutMs: z.number().int().min(1000).max(60000).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_project_package_details", args)
+	);
+	server.registerTool(
+		"plan_project_package_registry_change",
+		{
+			title: "Plan project package registry change",
+			description:
+				"Create an expiring no-write plan to upsert or remove one default/scoped project-root .npmrc registry. The source fingerprint is exact; credentials may only be authored as environment-variable references.",
+			inputSchema: z
+				.object({
+					action: z.enum(["upsert", "remove"]),
+					scope: z
+						.string()
+						.regex(/^@[a-z0-9][a-z0-9._-]*$/i)
+						.max(214)
+						.nullable()
+						.optional(),
+					url: z.string().url().max(2048).optional(),
+					credentialEnvironmentVariable: z
+						.string()
+						.regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/)
+						.nullable()
+						.optional(),
+					removeCredential: z.boolean().optional(),
+					expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("plan_project_package_registry_change", args)
+	);
+	server.registerTool(
+		"apply_project_package_registry_plan",
+		{
+			title: "Apply project package registry plan",
+			description:
+				"Apply one exact unexpired registry plan through an atomic project-root .npmrc replacement. Requires the plan id, exact source fingerprint, and confirm:true; verifies the planned SHA-256 postcondition.",
+			inputSchema: z.object({ planId: z.string().uuid(), expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/), confirm: z.literal(true) }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("apply_project_package_registry_plan", args)
+	);
+	server.registerTool(
+		"get_project_package_dependency_graph",
+		{
+			title: "Get project package dependency graph",
+			description:
+				"Read a bounded paginated direct/resolved/transitive graph from npm package-lock/shrinkwrap, Yarn classic, pnpm YAML, Bun text, or a contained installed fallback. Returns lock hashes, missing edges, warnings, totals, and nextOffset.",
+			inputSchema: z
+				.object({
+					...projectPackagePagination,
+					query: z.string().max(214).optional(),
+					directOnly: z.boolean().optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_project_package_dependency_graph", args)
+	);
+	server.registerTool(
+		"get_project_package_updates",
+		{
+			title: "Get project package updates",
+			description:
+				"Resolve current locked versions and registry wanted/latest versions for a bounded page of direct packages. Reports semver change kind, unsupported ranges, per-package errors, totals, and nextOffset without changing package files.",
+			inputSchema: z
+				.object({
+					names: z.array(projectPackageName).min(1).max(100).optional(),
+					offset: z.number().int().min(0).max(1_000_000).optional(),
+					limit: z.number().int().min(1).max(50).optional(),
+					includePrerelease: z.boolean().optional(),
+					timeoutMs: z.number().int().min(1000).max(60000).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_project_package_updates", args)
+	);
+	server.registerTool(
+		"plan_project_package_changes",
+		{
+			title: "Plan project package changes",
+			description:
+				"Create an expiring no-write exact plan for 1–100 installs, updates, and removals using npm, Yarn, pnpm, or Bun. Registry changes require exact versions; Git/local/tarball sources are validated; scripts stay disabled unless explicitly enabled.",
+			inputSchema: z
+				.object({
+					expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+					changes: z.array(projectPackageChange).min(1).max(100),
+					allowWorkspaceRoot: z.boolean().optional(),
+					allowScripts: z.boolean().optional(),
+					timeoutMs: z.number().int().min(1000).max(1_800_000).optional(),
+					maximumOutputBytes: z.number().int().min(16_384).max(4_194_304).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("plan_project_package_changes", args)
+	);
+	server.registerTool(
+		"apply_project_package_plan",
+		{
+			title: "Apply project package plan",
+			description:
+				"Apply one exact unexpired package plan through the selected manager with shell-free bounded execution, one-operation locking, confirmation, stale checks, exact package/lock snapshots, postconditions, file hashes, and rollback on failure.",
+			inputSchema: z.object({ planId: z.string().uuid(), expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/), confirm: z.literal(true) }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("apply_project_package_plan", args)
+	);
+	server.registerTool(
+		"cancel_project_package_operation",
+		{
+			title: "Cancel project package operation",
+			description: "Cancel the one active bounded package-manager child process. Optionally require its exact operationId; returns a no-op reason when nothing is running.",
+			inputSchema: z.object({ operationId: z.string().uuid().optional() }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("cancel_project_package_operation", args)
+	);
+	server.registerTool(
+		"list_project_package_samples",
+		{
+			title: "List project package samples",
+			description:
+				"List installed direct-package sample manifests with bounded file/byte/depth scans and exact source SHA-256 evidence. Returns per-package validation errors, pagination totals, and nextOffset without writing assets.",
+			inputSchema: z
+				.object({
+					packageName: projectPackageName.optional(),
+					query: z.string().max(200).optional(),
+					sortBy: z.enum(["display-name", "package-name", "publish-date"]).optional(),
+					sortDirection: z.enum(["asc", "desc"]).optional(),
+					offset: z.number().int().min(0).max(1_000_000).optional(),
+					limit: z.number().int().min(1).max(100).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("list_project_package_samples", args)
+	);
+	server.registerTool(
+		"get_project_package_sample_details",
+		{
+			title: "Get project package sample details",
+			description:
+				"Read one exact installed sample's bounded Overview/Details cards, publication timestamp, verified PNG/JPEG/WebP/GIF image metadata and contained preview URLs, source evidence, and current imported-target match state without writing files.",
+			inputSchema: z.object({ ...projectPackageSampleLease, targetPath: z.string().min(1).max(1024).optional() }).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_project_package_sample_details", args)
+	);
+	server.registerTool(
+		"locate_project_package_sample",
+		{
+			title: "Locate imported project package sample",
+			description:
+				"Reveal one exact existing imported sample target in the normal Assets Browser and select its first file. Validates the current package/source lease and contained target tree; does not change project files.",
+			inputSchema: z.object({ ...projectPackageSampleLease, targetPath: z.string().min(1).max(1024).optional() }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("locate_project_package_sample", args)
+	);
+	server.registerTool(
+		"plan_project_package_sample_import",
+		{
+			title: "Plan project package sample import",
+			description:
+				"Create an expiring no-write sample import plan from exact source/package hashes. Destination must be under assets; collisions require explicit fail, rename, or replace policy and the existing tree receives an exact fingerprint.",
+			inputSchema: z
+				.object({
+					sampleId: z.string().regex(/^[a-f0-9]{32}$/),
+					expectedSourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
+					expectedPackageFingerprint: z
+						.string()
+						.regex(/^[a-f0-9]{64}$/)
+						.optional(),
+					targetPath: z.string().min(1).max(1024).optional(),
+					collision: z.enum(["fail", "rename", "replace"]).optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("plan_project_package_sample_import", args)
+	);
+	server.registerTool(
+		"apply_project_package_sample_import",
+		{
+			title: "Apply project package sample import",
+			description:
+				"Apply one exact sample plan through a contained staging directory and atomic publish. Requires confirmation and the exact source hash; stale sources/targets reject, and replacement restores the previous destination on failure.",
+			inputSchema: z.object({ planId: z.string().uuid(), expectedSourceSha256: z.string().regex(/^[a-f0-9]{64}$/), confirm: z.literal(true) }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("apply_project_package_sample_import", args)
+	);
+	server.registerTool(
+		"set_project_development_package_technical_name",
+		{
+			title: "Set development package technical name",
+			description:
+				"Atomically replace the active development package's complete npm technical name in package.json. Requires the exact package fingerprint, manifest SHA-256, prior name, and confirm:true; rejects dependency-name conflicts and verifies the postcondition.",
+			inputSchema: z
+				.object({
+					technicalName: projectPackageName,
+					expectedTechnicalName: projectPackageName.nullable(),
+					expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+					expectedManifestSha256: z.string().regex(/^[a-f0-9]{64}$/),
+					confirm: z.literal(true),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_project_development_package_technical_name", args)
 	);
 	server.registerTool(
 		"modify_project_package",
 		{
-			title: "Modify project package",
+			title: "Modify one project package",
 			description:
-				"Install, remove, or update one npm package using the project's configured yarn, npm, or bun package manager. Update without a version follows the package-manager's normal compatible-version policy; this changes package.json and the lockfile.",
-			inputSchema: z.object({ operation: z.enum(["install", "remove", "update"]), name: z.string(), version: z.string().optional() }),
-			annotations: { destructiveHint: true },
+				"Compatibility convenience for one exact install, update, or removal. Internally creates and applies the same fingerprinted transaction with exact package/lock rollback. Registry installs/updates require an exact version; confirm:true and the current fingerprint are required.",
+			inputSchema: z
+				.object({
+					operation: z.enum(["install", "remove", "update"]),
+					name: projectPackageName,
+					version: z.string().min(1).max(512).optional(),
+					dependencyType: projectPackageDependencyType.optional(),
+					source: projectPackageSource.optional(),
+					expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+					allowWorkspaceRoot: z.boolean().optional(),
+					allowScripts: z.boolean().optional(),
+					timeoutMs: z.number().int().min(1000).max(1_800_000).optional(),
+					maximumOutputBytes: z.number().int().min(16_384).max(4_194_304).optional(),
+					confirm: z.literal(true),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("modify_project_package", args)
 	);
@@ -1375,10 +1996,228 @@ export function registerProjectTools(server: McpServer): void {
 		{
 			title: "Set project preferences",
 			description: "Persist project plugin, package-manager, and compressed-texture settings through the editor's project save configuration pipeline.",
-			inputSchema: z.object({ preferences: z.record(z.string(), z.any()) }),
+			inputSchema: z
+				.object({
+					preferences: z
+						.object({
+							plugins: z.array(z.string().min(1).max(1024)).max(128).optional(),
+							packageManager: z.enum(["npm", "yarn", "pnpm", "bun"]).optional(),
+							compressedTextureSoftware: z.enum(["PVRTexTool", "Khronos KTX-Software"]).optional(),
+							compressedTexturesEnabled: z.boolean().optional(),
+							compressedTexturesEnabledInPreview: z.boolean().optional(),
+							compressedEtc2Enabled: z.boolean().optional(),
+							compressedPvrtcEnabled: z.boolean().optional(),
+							compressedTextureQuality: z.enum(["very-fast", "fast", "normal", "high"]).optional(),
+							externalEditorCommand: z.string().min(1).max(1024).optional(),
+						})
+						.strict()
+						.refine((value) => Object.keys(value).length > 0, { message: "At least one project preference is required." }),
+				})
+				.strict(),
 			annotations: { idempotentHint: true },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_project_preferences", args)
+	);
+	const identitySettings = z
+		.object({
+			companyName: z.string().min(1).max(128).optional(),
+			productName: z.string().min(1).max(128).optional(),
+			version: z
+				.string()
+				.regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/)
+				.max(64)
+				.optional(),
+			applicationId: z
+				.string()
+				.regex(/^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9_-]+)+$/)
+				.max(255)
+				.optional(),
+		})
+		.strict();
+	const displaySettings = z
+		.object({
+			defaultWidth: z.number().int().min(1).max(16384).optional(),
+			defaultHeight: z.number().int().min(1).max(16384).optional(),
+			fullscreenMode: z.enum(["windowed", "fullscreen", "borderless"]).optional(),
+			resizableWindow: z.boolean().optional(),
+			runInBackground: z.boolean().optional(),
+			allowHighDpi: z.boolean().optional(),
+		})
+		.strict();
+	const renderingSettings = z
+		.object({
+			colorSpace: z.enum(["gamma", "linear"]).optional(),
+			renderingBackend: z.enum(["auto", "webgl2", "webgpu"]).optional(),
+			powerPreference: z.enum(["default", "high-performance", "low-power"]).optional(),
+			targetFrameRate: z
+				.number()
+				.int()
+				.min(-1)
+				.max(1000)
+				.refine((value) => value === -1 || value > 0)
+				.optional(),
+			maximumDevicePixelRatio: z.number().finite().min(0.25).max(8).optional(),
+			preserveDrawingBuffer: z.boolean().optional(),
+		})
+		.strict();
+	const runtimeSettings = z
+		.object({
+			showBabylonLoadingScreen: z.boolean().optional(),
+			disableContextMenu: z.boolean().optional(),
+			dataCaching: z.boolean().optional(),
+			deterministicLockstep: z.boolean().optional(),
+			lockstepMaxSteps: z.number().int().min(1).max(64).optional(),
+		})
+		.strict();
+	const platformSettings = z.object({ display: displaySettings.optional(), rendering: renderingSettings.optional(), runtime: runtimeSettings.optional() }).strict();
+	const importAcceleratorSettings = z
+		.object({
+			enabled: z.boolean().optional(),
+			endpoint: z.string().url().max(2048).optional(),
+			namespacePrefix: z
+				.string()
+				.regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
+				.optional(),
+			downloadEnabled: z.boolean().optional(),
+			uploadEnabled: z.boolean().optional(),
+			authenticationEnvironmentVariable: z
+				.string()
+				.max(128)
+				.refine((value) => value === "" || /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(value), "Must be empty or a valid environment-variable name.")
+				.optional(),
+			contentValidation: z.enum(["disabled", "uploadOnly", "enabled", "required"]).optional(),
+			downloadBatchSize: z.number().int().min(1).max(32).optional(),
+			requestTimeoutMilliseconds: z.number().int().min(1000).max(300000).optional(),
+			maximumResultSizeBytes: z.number().int().min(1_048_576).max(2_147_483_648).optional(),
+		})
+		.strict();
+	const projectSettingsPatch = z
+		.object({
+			identity: identitySettings.optional(),
+			display: displaySettings.optional(),
+			rendering: renderingSettings.optional(),
+			runtime: runtimeSettings.optional(),
+			assetPipeline: z
+				.object({
+					autoRefresh: z.boolean().optional(),
+					autoRefreshOnFocus: z.boolean().optional(),
+					directoryMonitoring: z.boolean().optional(),
+					importWorkerCount: z.number().int().min(1).max(32).optional(),
+					serializationMode: z.enum(["forceText", "mixed", "forceBinary"]).optional(),
+					reduceVersionControlNoise: z.boolean().optional(),
+					accelerator: importAcceleratorSettings.optional(),
+				})
+				.strict()
+				.optional(),
+			playMode: z
+				.object({ reloadScene: z.boolean().optional(), reloadScripts: z.boolean().optional(), muteAudio: z.boolean().optional(), maximizeOnPlay: z.boolean().optional() })
+				.strict()
+				.optional(),
+			defaultBehaviorMode: z.enum(["2d", "3d"]).optional(),
+			platformOverrides: z
+				.object({
+					web: platformSettings.optional(),
+					electron: platformSettings.optional(),
+					headless: platformSettings.optional(),
+					android: platformSettings.optional(),
+					ios: platformSettings.optional(),
+				})
+				.strict()
+				.optional(),
+		})
+		.strict()
+		.refine((value) => Object.keys(value).length > 0, { message: "At least one Project Settings field is required." });
+	const editorPreferencesPatch = z
+		.object({
+			appearance: z
+				.object({ theme: z.enum(["system", "light", "dark"]).optional(), uiScale: z.number().finite().min(0.5).max(2).optional() })
+				.strict()
+				.optional(),
+			workflow: z
+				.object({
+					autoSave: z.boolean().optional(),
+					autoSaveIntervalMinutes: z.number().int().min(1).max(120).optional(),
+					confirmDestructiveActions: z.boolean().optional(),
+				})
+				.strict()
+				.optional(),
+			externalTools: z
+				.object({
+					scriptEditorCommand: z.string().max(1024).optional(),
+					imageEditorCommand: z.string().max(1024).optional(),
+					diffToolCommand: z.string().max(1024).optional(),
+				})
+				.strict()
+				.optional(),
+			diagnostics: z
+				.object({ logLevel: z.enum(["error", "warning", "info", "verbose"]).optional() })
+				.strict()
+				.optional(),
+		})
+		.strict()
+		.refine((value) => Object.keys(value).length > 0, { message: "At least one Editor Preferences field is required." });
+	server.registerTool(
+		"get_project_settings",
+		{
+			title: "Get Project Settings",
+			description:
+				"Read versioned Unity-style common Player, display, rendering, runtime, asset-pipeline, serialization, play-mode, default-behavior, and per-target override settings with exact revision and resolved target views.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (): Promise<CallToolResult> => callTextTool("get_project_settings", {})
+	);
+	server.registerTool(
+		"set_project_settings",
+		{
+			title: "Set Project Settings",
+			description:
+				"Atomically patch validated common Player/Editor settings and bounded web, desktop, headless, Android, or iOS overrides at the exact current revision. Persists through the project configuration pipeline and reports live versus restart-required settings.",
+			inputSchema: z.object({ expectedRevision: z.number().int().min(0), settings: projectSettingsPatch }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_project_settings", args)
+	);
+	server.registerTool(
+		"reset_project_settings",
+		{
+			title: "Reset Project Settings",
+			description: "Restore safe Zvibe Player/Editor defaults under the exact current revision while preserving the project product name and unrelated project data.",
+			inputSchema: z.object({ expectedRevision: z.number().int().min(0), confirm: z.literal(true) }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("reset_project_settings", args)
+	);
+	server.registerTool(
+		"get_editor_preferences",
+		{
+			title: "Get Editor Preferences",
+			description: "Read user-scoped theme, UI scale, autosave, confirmation, external-tool, and diagnostics preferences with an exact revision.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (): Promise<CallToolResult> => callTextTool("get_editor_preferences", {})
+	);
+	server.registerTool(
+		"set_editor_preferences",
+		{
+			title: "Set Editor Preferences",
+			description:
+				"Atomically patch user-scoped appearance, autosave/workflow, external tools, or diagnostic verbosity at the exact current revision and apply live-safe values immediately.",
+			inputSchema: z.object({ expectedRevision: z.number().int().min(0), preferences: editorPreferencesPatch }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_editor_preferences", args)
+	);
+	server.registerTool(
+		"reset_editor_preferences",
+		{
+			title: "Reset Editor Preferences",
+			description: "Restore user-scoped editor defaults under the exact current revision without changing project-owned Player Settings.",
+			inputSchema: z.object({ expectedRevision: z.number().int().min(0), confirm: z.literal(true) }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("reset_editor_preferences", args)
 	);
 	server.registerTool(
 		"list_project_templates",

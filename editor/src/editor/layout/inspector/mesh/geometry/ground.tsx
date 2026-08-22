@@ -189,7 +189,9 @@ export function GroundMeshGeometryInspector(props: IGroundMeshGeometryInspectorP
 	}
 
 	function applyTerrainBrush(): void {
-		if (!(brushRadius > 0) || brushStrength < 0) return;
+		if (!(brushRadius > 0) || brushStrength < 0) {
+			return;
+		}
 		try {
 			props.object.metadata ??= {};
 			props.object.metadata.terrainBrush = { radius: brushRadius, strength: brushStrength };
@@ -204,7 +206,9 @@ export function GroundMeshGeometryInspector(props: IGroundMeshGeometryInspectorP
 	}
 
 	function carveHole(): void {
-		if (!(brushRadius > 0)) return;
+		if (!(brushRadius > 0)) {
+			return;
+		}
 		try {
 			carveTerrainHole(props.object.getScene(), { nodeId: props.object.id, center: [brushCenterX, brushCenterZ], radius: brushRadius }, { editor: props.editor });
 		} catch (error: any) {

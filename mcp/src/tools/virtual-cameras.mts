@@ -4,11 +4,64 @@ import { z } from "zod";
 import { callTextTool } from "./helpers.mjs";
 
 const identity = { virtualCameraId: z.string().optional(), virtualCameraName: z.string().optional() };
+const vector = z.tuple([z.number(), z.number(), z.number()]);
+const noiseLayer = z
+	.object({
+		amplitude: z.number().min(-100000).max(100000).describe("Position amplitude in editor centimeters or rotation amplitude in degrees."),
+		frequency: z.number().positive().max(120).describe("Layer frequency in Hz."),
+		nonRandom: z.boolean().optional().describe("Use a periodic sine wave instead of deterministic smooth noise."),
+		phase: z.number().min(-100000).max(100000).optional(),
+	})
+	.strict();
+const noiseChannels = z.object({ x: z.array(noiseLayer).max(8), y: z.array(noiseLayer).max(8), z: z.array(noiseLayer).max(8) }).strict();
+const mutationAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
+const readAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 export function registerVirtualCameraTools(server: McpServer): void {
 	server.registerTool(
 		"list_virtual_cameras",
 		{ title: "List virtual cameras", description: "List persisted virtual camera definitions.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
 		async (): Promise<CallToolResult> => callTextTool("list_virtual_cameras")
+	);
+	server.registerTool(
+		"list_camera_noise_profiles",
+		{
+			title: "List Camera Noise Profiles",
+			description:
+				"List reusable six-axis layered Cinemachine-style noise profiles. Position amplitudes are centimeters; rotation amplitudes are degrees; frequencies are Hz.",
+			inputSchema: z.object({}).strict(),
+			annotations: readAnnotations,
+		},
+		async (): Promise<CallToolResult> => callTextTool("list_camera_noise_profiles")
+	);
+	server.registerTool(
+		"set_camera_noise_profile",
+		{
+			title: "Set Camera Noise Profile",
+			description:
+				"Create or atomically replace a reusable deterministic Basic Multi Channel style profile with up to eight smooth-noise or sine layers on each position and rotation axis. At least one layer is required.",
+			inputSchema: z
+				.object({
+					noiseProfileId: z.string().min(1).optional(),
+					noiseProfileName: z.string().min(1).optional(),
+					name: z.string().min(1).max(256).optional(),
+					position: noiseChannels.optional(),
+					rotation: noiseChannels.optional(),
+				})
+				.strict(),
+			annotations: mutationAnnotations,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_camera_noise_profile", args)
+	);
+	server.registerTool(
+		"delete_camera_noise_profile",
+		{
+			title: "Delete Camera Noise Profile",
+			description:
+				"Delete one reusable camera-noise profile. Referenced profiles reject unless force is true, which also clears virtual-camera and impulse-source references.",
+			inputSchema: z.object({ noiseProfileId: z.string().min(1).optional(), noiseProfileName: z.string().min(1).optional(), force: z.boolean().optional() }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("delete_camera_noise_profile", args)
 	);
 	server.registerTool(
 		"create_virtual_camera",
@@ -26,6 +79,87 @@ export function registerVirtualCameraTools(server: McpServer): void {
 			}),
 		},
 		async (args): Promise<CallToolResult> => callTextTool("create_virtual_camera", args)
+	);
+	server.registerTool(
+		"set_virtual_camera_noise",
+		{
+			title: "Set Virtual Camera Noise",
+			description:
+				"Assign, update, mute, or clear continuous post-composition six-axis noise on one virtual camera. The profile's position/rotation amplitudes are scaled by amplitudeGain, its frequencies by frequencyGain, and pivotOffset is in camera-space centimeters.",
+			inputSchema: z
+				.object({
+					...identity,
+					noiseProfileId: z.string().min(1).nullable().optional(),
+					enabled: z.boolean().optional(),
+					amplitudeGain: z.number().min(0).max(1000).optional(),
+					frequencyGain: z.number().min(0).max(1000).optional(),
+					pivotOffset: vector.optional(),
+					seed: z.number().int().min(-2147483648).max(2147483647).optional(),
+				})
+				.strict(),
+			annotations: mutationAnnotations,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_virtual_camera_noise", args)
+	);
+	server.registerTool(
+		"set_virtual_camera_deoccluder",
+		{
+			title: "Set Virtual Camera Deoccluder",
+			description:
+				"Configure bounded physics-ray line-of-sight evaluation, obstacle avoidance, damping, and shot quality for a virtual camera with a follow/look-at target. Strategies are pull forward, preserve height, or preserve target distance.",
+			inputSchema: z
+				.object({
+					...identity,
+					enabled: z.boolean().optional(),
+					clear: z.boolean().optional(),
+					avoidObstacles: z.boolean().optional(),
+					strategy: z.enum(["pullForward", "preserveHeight", "preserveDistance"]).optional(),
+					collideLayerMask: z.number().int().min(0).max(2147483647).optional(),
+					transparentLayerMask: z.number().int().min(0).max(2147483647).optional(),
+					ignoreNodeIds: z.array(z.string().min(1)).max(128).optional(),
+					minimumDistanceFromTarget: z.number().min(0).max(1000000000).optional(),
+					distanceLimit: z.number().min(0).max(1000000000).optional(),
+					cameraRadius: z.number().min(0).max(1000000).optional(),
+					minimumOcclusionTime: z.number().min(0).max(60).optional(),
+					damping: z.number().min(0).max(60).optional(),
+					dampingWhenOccluded: z.number().min(0).max(60).optional(),
+					maximumEffort: z.number().int().min(1).max(16).optional(),
+					shotQuality: z
+						.object({
+							enabled: z.boolean().optional(),
+							optimalDistance: z.number().positive().max(1000000000).optional(),
+							nearLimit: z.number().min(0).max(1000000000).optional(),
+							farLimit: z.number().positive().max(1000000000).optional(),
+							maximumQualityBoost: z.number().min(0).max(10).optional(),
+						})
+						.strict()
+						.optional(),
+				})
+				.strict(),
+			annotations: mutationAnnotations,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_virtual_camera_deoccluder", args)
+	);
+	server.registerTool(
+		"set_virtual_camera_impulse_listener",
+		{
+			title: "Set Virtual Camera Impulse Listener",
+			description: "Set the positive 31-bit channel mask used to accept or reject manual, script-event, and collision impulses on one virtual camera.",
+			inputSchema: z.object({ ...identity, channelMask: z.number().int().min(1).max(2147483647) }).strict(),
+			annotations: mutationAnnotations,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_virtual_camera_impulse_listener", args)
+	);
+	server.registerTool(
+		"get_virtual_camera_runtime",
+		{
+			title: "Get Virtual Camera Runtime",
+			description:
+				"Read the latest shared runtime evidence for one virtual camera without advancing it: ideal/resolved pose, obstruction, displacement, obstacle, strategy, shot quality, layered noise correction, and warnings.",
+			inputSchema: z.object(identity).strict(),
+			annotations: readAnnotations,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_virtual_camera_runtime", args)
 	);
 	server.registerTool(
 		"list_camera_impulse_sources",
@@ -51,6 +185,22 @@ export function registerVirtualCameraTools(server: McpServer): void {
 				frequency: z.number().positive(),
 				direction: z.array(z.number()).length(3),
 				cameraId: z.string().optional(),
+				channelMask: z.number().int().min(1).max(2147483647).optional(),
+				noiseProfileId: z.string().min(1).optional(),
+				rotationGain: z.number().min(0).max(1000).optional(),
+				dissipationDistance: z.number().min(0).max(1000000000).optional(),
+				sourceNodeId: z.string().min(1).optional(),
+				trigger: z
+					.object({
+						type: z.literal("collision"),
+						nodeId: z.string().min(1),
+						minimumImpact: z.number().min(0).max(1000000000).default(0),
+						includeContinued: z.boolean().default(false),
+						cooldownSeconds: z.number().min(0).max(60).default(0),
+						useImpactDirection: z.boolean().default(true),
+					})
+					.strict()
+					.optional(),
 			}),
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_camera_impulse_source", args)
@@ -60,7 +210,15 @@ export function registerVirtualCameraTools(server: McpServer): void {
 		{
 			title: "Fire camera impulse",
 			description: "Fire a persisted camera-shake source in the editor preview.",
-			inputSchema: z.object({ impulseId: z.string().optional(), impulseName: z.string().optional() }),
+			inputSchema: z
+				.object({
+					impulseId: z.string().optional(),
+					impulseName: z.string().optional(),
+					origin: vector.optional(),
+					direction: vector.optional(),
+					impact: z.number().min(0).max(1000000000).optional(),
+				})
+				.strict(),
 		},
 		async (args): Promise<CallToolResult> => callTextTool("fire_camera_impulse", args)
 	);
@@ -125,6 +283,95 @@ export function registerVirtualCameraTools(server: McpServer): void {
 			}),
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_virtual_camera_dolly", args)
+	);
+	server.registerTool(
+		"get_virtual_camera_path_timeline",
+		{
+			title: "Get virtual-camera path timeline",
+			description: "Read one persisted exact-revision spline camera-path timeline and its transient playhead, segment, easing, loop, and normalized-path evidence.",
+			inputSchema: z
+				.object({ virtualCameraId: z.string().min(1).max(256).optional(), virtualCameraName: z.string().min(1).max(256).optional() })
+				.strict()
+				.superRefine((value, context) => {
+					if (!!value.virtualCameraId === !!value.virtualCameraName) {
+						context.addIssue({ code: "custom", message: "Provide exactly one virtualCameraId or virtualCameraName." });
+					}
+				}),
+			annotations: readAnnotations,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_virtual_camera_path_timeline", args)
+	);
+	server.registerTool(
+		"set_virtual_camera_path_timeline",
+		{
+			title: "Set virtual-camera path timeline",
+			description:
+				"Create, exact-revision update, or clear a bounded timeline that maps seconds to normalized spline distance. Keys are strictly time-ordered, include exact 0/duration endpoints, and use outgoing linear/ease/step interpolation.",
+			inputSchema: z
+				.object({
+					virtualCameraId: z.string().min(1).max(256).optional(),
+					virtualCameraName: z.string().min(1).max(256).optional(),
+					expectedRevision: z.number().int().positive().optional(),
+					clear: z.boolean().optional(),
+					duration: z.number().min(0.01).max(86_400).optional(),
+					autoPlay: z.boolean().optional(),
+					wrapMode: z.enum(["once", "loop", "pingPong"]).optional(),
+					keys: z
+						.array(
+							z
+								.object({
+									id: z.string().min(1).max(256).optional(),
+									time: z.number().min(0).max(86_400),
+									t: z.number().min(0).max(1),
+									easing: z.enum(["linear", "easeIn", "easeOut", "easeInOut", "step"]).optional(),
+								})
+								.strict()
+						)
+						.min(2)
+						.max(512)
+						.optional(),
+				})
+				.strict()
+				.superRefine((value, context) => {
+					if (!!value.virtualCameraId === !!value.virtualCameraName) {
+						context.addIssue({ code: "custom", message: "Provide exactly one virtualCameraId or virtualCameraName." });
+					}
+					if (value.clear && value.expectedRevision === undefined) {
+						context.addIssue({ code: "custom", message: "Clearing requires expectedRevision." });
+					}
+					if (value.clear && (value.duration !== undefined || value.autoPlay !== undefined || value.wrapMode !== undefined || value.keys !== undefined)) {
+						context.addIssue({ code: "custom", message: "A clear request cannot include timeline authoring fields." });
+					}
+				}),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_virtual_camera_path_timeline", args)
+	);
+	server.registerTool(
+		"control_virtual_camera_path_timeline",
+		{
+			title: "Control virtual-camera path timeline",
+			description: "Play, pause, stop, or seek the transient playhead of one exact-revision spline camera-path timeline and immediately preview its camera pose.",
+			inputSchema: z
+				.object({
+					virtualCameraId: z.string().min(1).max(256).optional(),
+					virtualCameraName: z.string().min(1).max(256).optional(),
+					expectedRevision: z.number().int().positive(),
+					action: z.enum(["play", "pause", "stop", "seek"]),
+					time: z.number().min(0).max(86_400).optional(),
+				})
+				.strict()
+				.superRefine((value, context) => {
+					if (!!value.virtualCameraId === !!value.virtualCameraName) {
+						context.addIssue({ code: "custom", message: "Provide exactly one virtualCameraId or virtualCameraName." });
+					}
+					if ((value.action === "seek") !== (value.time !== undefined)) {
+						context.addIssue({ code: "custom", message: "Seek requires time; other actions do not accept it." });
+					}
+				}),
+			annotations: mutationAnnotations,
+		},
+		async (args): Promise<CallToolResult> => callTextTool("control_virtual_camera_path_timeline", args)
 	);
 	server.registerTool(
 		"blend_virtual_camera",

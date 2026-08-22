@@ -36,27 +36,40 @@ function splinePath(spline: any): Vector3[] | null {
 	const knots = spline.metadata?.knots as IBezierKnot[] | undefined;
 	if (!Array.isArray(knots)) {
 		const sourcePoints = spline.metadata?.points;
-		if (!Array.isArray(sourcePoints) || sourcePoints.length < 2) return null;
+		if (!Array.isArray(sourcePoints) || sourcePoints.length < 2) {
+			return null;
+		}
 		const points = sourcePoints.map((point: number[]) => Vector3.FromArray(point));
-		if (spline.metadata?.closed) points.push(points[0].clone());
+		if (spline.metadata?.closed) {
+			points.push(points[0].clone());
+		}
 		return points;
 	}
-	if (knots.length < 2) return null;
+	if (knots.length < 2) {
+		return null;
+	}
 	const points: Vector3[] = [];
 	const segmentCount = spline.metadata?.closed ? knots.length : knots.length - 1;
 	for (let segment = 0; segment < segmentCount; segment++) {
-		for (let step = 0; step < 12; step++) points.push(evaluateBezier(knots[segment], knots[(segment + 1) % knots.length], step / 12));
+		for (let step = 0; step < 12; step++) {
+			points.push(evaluateBezier(knots[segment], knots[(segment + 1) % knots.length], step / 12));
+		}
 	}
 	points.push(Vector3.FromArray((spline.metadata?.closed ? knots[0] : knots[knots.length - 1]).position));
 	return points;
 }
 
-function evaluateSpline(spline: any, t: number): { position: Vector3; tangent: Vector3; length: number } | null {
+/** Evaluates one editor spline at normalized arc length for followers, dollies, and camera timelines. */
+export function evaluateSplineGeometry(spline: any, t: number): { position: Vector3; tangent: Vector3; length: number } | null {
 	const points = splinePath(spline);
-	if (!points || points.length < 2) return null;
+	if (!points || points.length < 2) {
+		return null;
+	}
 	const lengths = points.slice(0, -1).map((point: Vector3, index: number) => Vector3.Distance(point, points[index + 1]));
 	const length = lengths.reduce((total: number, value: number) => total + value, 0);
-	if (!length) return null;
+	if (!length) {
+		return null;
+	}
 	let remaining = Math.min(1, Math.max(0, t)) * length;
 	for (let index = 0; index < lengths.length; index++) {
 		if (remaining <= lengths[index] || index === lengths.length - 1) {
@@ -71,22 +84,33 @@ function evaluateSpline(spline: any, t: number): { position: Vector3; tangent: V
 /** Restores persisted spline-follower components and advances them before each rendered frame. */
 export function configureSplineFollowers(scene: Scene): void {
 	const followers = scene.getNodes().filter((node) => (node as any).metadata?.babylonEditorSplineFollower) as ITransformNode[];
-	if (!followers.length) return;
+	if (!followers.length) {
+		return;
+	}
 	scene.onBeforeRenderObservable.add(() => {
 		const elapsedSeconds = scene.getEngine().getDeltaTime() / 1000;
 		for (const follower of followers) {
 			const configuration = follower.metadata?.babylonEditorSplineFollower as ISplineFollower | undefined;
-			if (!configuration || !(configuration.speed >= 0)) continue;
+			if (!configuration || !(configuration.speed >= 0)) {
+				continue;
+			}
 			const spline = scene.getNodeById(configuration.splineId);
-			const sample = spline && evaluateSpline(spline, configuration.t);
-			if (!sample) continue;
+			const sample = spline && evaluateSplineGeometry(spline, configuration.t);
+			if (!sample) {
+				continue;
+			}
 			const delta = (configuration.speed * elapsedSeconds) / sample.length;
 			configuration.t = configuration.loop ? (configuration.t + delta) % 1 : Math.min(1, configuration.t + delta);
-			const current = evaluateSpline(spline, configuration.t);
-			if (!current) continue;
+			const current = evaluateSplineGeometry(spline, configuration.t);
+			if (!current) {
+				continue;
+			}
 			const worldPosition = Vector3.TransformCoordinates(current.position, (spline as any).getWorldMatrix());
-			if (follower.setAbsolutePosition) follower.setAbsolutePosition(worldPosition);
-			else follower.position.copyFrom(worldPosition);
+			if (follower.setAbsolutePosition) {
+				follower.setAbsolutePosition(worldPosition);
+			} else {
+				follower.position.copyFrom(worldPosition);
+			}
 			if (configuration.orientToPath) {
 				const worldTangent = Vector3.TransformNormal(current.tangent, (spline as any).getWorldMatrix()).normalize();
 				follower.rotationQuaternion = null;

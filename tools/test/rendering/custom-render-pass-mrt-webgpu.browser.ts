@@ -5,27 +5,41 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { Scene } from "@babylonjs/core/scene";
+import glslangFactory from "@babylonjs/core/assets/glslang/glslang.cjs";
+import twgslFactory from "@babylonjs/core/assets/twgsl/twgsl.cjs";
 
 import {
 	applyCustomRenderPassGraph,
 	defaultCustomRenderPassComputeShader,
 	defaultCustomRenderPassFragmentShader,
 	getCustomRenderPassDiagnostics,
+	getCustomRenderPassComputeTargets,
 	getCustomRenderPassMultiRenderTargets,
 	ICustomRenderPassDefinition,
 	readCustomRenderPassOutputPixels,
 } from "../../src/rendering/custom-render-pass-graph";
+import { captureRenderGraphConformanceRun, recordRenderGraphConformanceRun } from "../../src/rendering/render-graph-conformance";
 
 function definition(id: string): ICustomRenderPassDefinition {
 	return {
 		id,
 		name: id,
 		passType: "shader",
+		injectionPoint: "afterRenderingPostProcessing",
+		rendererFeature: null,
 		copySource: { source: "screen" },
 		rasterSettings: {
 			cameraId: null,
 			meshIds: [],
+			includeDescendants: false,
+			layerMask: null,
+			materialId: null,
 			clearColor: [0, 0, 0, 0],
+			clearMode: "colorDepth",
+			depthTest: true,
+			depthWrite: true,
+			cullMode: "back",
+			blendMode: "opaque",
 			renderParticles: false,
 			renderSprites: false,
 			useCameraPostProcesses: false,
@@ -84,7 +98,12 @@ async function run(): Promise<void> {
 	canvas.width = 32;
 	canvas.height = 32;
 	document.body.appendChild(canvas);
-	const engine = await WebGPUEngine.CreateAsync(canvas);
+	const glslang = glslangFactory(new URL("./glslang.wasm", location.href).href);
+	const twgsl = await twgslFactory(new URL("./twgsl.wasm", location.href).href);
+	const engine = await WebGPUEngine.CreateAsync(canvas, {
+		glslangOptions: { glslang },
+		twgslOptions: { twgsl },
+	});
 	const scene = new Scene(engine);
 	const camera = new FreeCamera("Camera", Vector3.Zero(), scene);
 	scene.activeCamera = camera;
@@ -103,6 +122,18 @@ async function run(): Promise<void> {
 			"precision highp float; varying vec2 vUV; uniform sampler2D textureSampler; void main(void) { gl_FragData[0] = vec4(0.2, 0.4, 0.6, 1.0); gl_FragData[1] = vec4(0.9, 0.1, 0.2, 1.0); }",
 		additionalOutputs: [{ name: "auxColor", outputType: "uint8", outputFormat: "rgba", outputSamples: 1 }],
 	};
+	const compute: ICustomRenderPassDefinition = {
+		...definition("WebGPU Compute"),
+		passType: "compute",
+		injectionPoint: "afterRenderingPrePasses",
+		order: -1,
+		output: "computedColor",
+		computeSettings: {
+			...definition("WebGPU Compute Defaults").computeSettings,
+			dispatch: [4, 4, 1],
+			dispatchMode: "everyFrame",
+		},
+	};
 	const copy: ICustomRenderPassDefinition = {
 		...definition("WebGPU Copy"),
 		order: 1,
@@ -120,7 +151,8 @@ async function run(): Promise<void> {
 		inputs: { copiedSampler: { source: "pass", output: "copiedColor" } },
 		output: "presentedColor",
 	};
-	applyCustomRenderPassGraph(scene, camera, [producer, copy, presenter]);
+	const definitions = [compute, producer, copy, presenter];
+	applyCustomRenderPassGraph(scene, camera, definitions);
 	for (let frame = 0; frame < 20; frame++) {
 		engine.beginFrame();
 		scene.render();
@@ -138,8 +170,29 @@ async function run(): Promise<void> {
 		presentedColor: centerPixel(presentedColor),
 	};
 	const diagnostics = getCustomRenderPassDiagnostics(camera);
+	const postProcesses = (camera as any)._postProcesses.filter(Boolean).map((postProcess: any) => ({
+		name: postProcess.name,
+		ready: postProcess.isReady(),
+		effect: Boolean(postProcess.getEffect()),
+		effectReady: postProcess.getEffect()?.isReady() ?? false,
+		compilationError: postProcess.getEffect()?.getCompilationError() || null,
+		shaderLanguage: postProcess._shaderLanguage,
+		webGPUReady: postProcess._webGPUReady,
+		width: postProcess.width,
+		height: postProcess.height,
+	}));
 	const targets = getCustomRenderPassMultiRenderTargets(camera);
+	const computeTargets = getCustomRenderPassComputeTargets(camera);
+	const conformanceRun = captureRenderGraphConformanceRun(scene, camera, definitions, 20);
+	const conformanceManifest = recordRenderGraphConformanceRun(scene, conformanceRun);
 	const passed =
+		conformanceRun.backend === "webgpu" &&
+		conformanceRun.passed &&
+		conformanceRun.requirements.computePassCount === 1 &&
+		conformanceManifest.runs.webgpu?.passed === true &&
+		computeTargets.length === 1 &&
+		computeTargets[0].ready &&
+		computeTargets[0].dispatched &&
 		diagnostics.every((pass) => pass.ready && !pass.compilationError) &&
 		targets.length === 1 &&
 		targets[0].attachments.every((attachment) => attachment.ready) &&
@@ -152,7 +205,7 @@ async function run(): Promise<void> {
 		approximately(pixels.copiedColor, [230, 26, 51, 255]) &&
 		approximately(pixels.presentedColor, [230, 26, 51, 255]);
 	document.body.dataset.result = passed ? "passed" : "failed";
-	document.body.dataset.details = JSON.stringify({ diagnostics, targets, pixels });
+	document.body.dataset.details = JSON.stringify({ diagnostics, postProcesses, targets, computeTargets, pixels, conformanceRun, conformanceManifest });
 	scene.dispose();
 	engine.dispose();
 }

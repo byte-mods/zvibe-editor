@@ -12,7 +12,7 @@ export default function DocumentationPage() {
 			<div className="flex flex-col gap-10 lg:max-w-3xl 2xl:max-w-6xl mx-auto pt-32">
 				<Fade cascade damping={0.1} triggerOnce className="w-full">
 					<Fade>
-						<div className="text-3xl md:text-5xl lg:text-6xl font-semibold font-sans tracking-tighter text-center">Babylon.js Editor documentation</div>
+						<div className="text-3xl md:text-5xl lg:text-6xl font-semibold font-sans tracking-tighter text-center">Zvibe Editor developer documentation</div>
 					</Fade>
 				</Fade>
 
@@ -21,18 +21,30 @@ export default function DocumentationPage() {
 						<div className="text-3xl md:text-2xl lg:text-3xl my-3">Introduction</div>
 
 						<div>
-							Babylon.js Editor is a visual editor for Babylon.js. It allows you to create and edit scenes, materials, attach scripts and more.
+							Zvibe Editor is a complete visual development environment built on Babylon.js. It combines scene and asset authoring, animation, scripting, physics,
+							rendering, profiling, builds, and MCP automation.
 							<br />
 							The Babylon.js Editor is available on <b>Window</b>, <b>macOS</b>, and <b>Linux</b> platforms.
 						</div>
 
 						<div>
-							The goal is to provide a simple and easy-to-use interface for creating and editing Babylon.js applications such as video games. It includes a large
-							variety of optimization tools, such as compressed textures generation, LOD collisions and more.
+							Use the guided learning path for real editor screenshots, complete workflow steps, TypeScript examples, three game projects, build instructions, and
+							safe Codex or Claude-compatible MCP automation.
 						</div>
 
+						<Link
+							href="/documentation/tutorials"
+							className="flex items-center justify-between rounded-2xl border border-cyan-800 bg-cyan-950/30 p-6 text-cyan-100 transition hover:border-cyan-400 hover:bg-cyan-950/50"
+						>
+							<span>
+								<span className="block text-xl font-semibold">Start the developer tutorials</span>
+								<span className="mt-2 block text-sm text-cyan-200/80">IDE tour → systems → complete games → MCP</span>
+							</span>
+							<span className="text-2xl">→</span>
+						</Link>
+
 						<div>
-							The Babylon.js Editor is free and open-source. You can find the source code on{" "}
+							Zvibe Editor is based on the open-source Babylon.js Editor codebase. You can find the upstream project on{" "}
 							<b>
 								<Link target="_blank" href="https://github.com/BabylonJS/Editor" className="underline underline-offset-4">
 									GitHub

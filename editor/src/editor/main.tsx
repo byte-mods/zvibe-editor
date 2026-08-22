@@ -13,8 +13,10 @@ import { onRedoObservable, onUndoObservable, redo, undo } from "../tools/undored
 import { tryGetExperimentalFeaturesEnabledFromLocalStorage } from "../tools/local-storage";
 import { checkNodeJSAvailable, checkVisualStudioCodeAvailable, nodeJSAvailable, visualStudioCodeAvailable } from "../tools/process";
 import { isSpriteManagerNode } from "../tools/guards/sprites";
+import { installBundledExrInflater } from "../tools/assets/exr-inflater";
 
-import { saveProject } from "../project/save/save";
+import { saveProject, saveProjectForRestart } from "../project/save/save";
+import { setSerializationSessionPublisher } from "../project/serialization-session";
 import { onProjectConfigurationChangedObservable, projectConfiguration } from "../project/configuration";
 import { EditorSceneWorkspace } from "../project/scene-workspace-runtime";
 import {
@@ -29,6 +31,9 @@ import {
 } from "../tools/observables";
 
 import { initializeMcpServer } from "../mcp/mcp";
+import type { EditorExtensionHost } from "../extensions/host";
+import type { IEditorExtensionMenuDescriptor } from "../extensions/types";
+import { disposeProjectEditorExtensions } from "../extensions/project";
 
 import { loadProject } from "../project/load/load";
 import { startProjectDevProcess } from "../project/run";
@@ -38,9 +43,13 @@ import {
 	EditorProjectCompressedTextureSoftware,
 	EditorProjectPackageManager,
 	IEditorPrefabStageSettings,
+	IEditorProjectExtension,
+	IEditorProjectSettings,
 	IEditorSceneBuildSettings,
 } from "../project/typings";
 import { defaultPrefabStageSettings } from "../project/prefab-stage";
+import { createDefaultProjectSettings } from "../project/settings";
+import { applyEditorUserPreferences, IEditorUserPreferences, readEditorUserPreferences, writeEditorUserPreferences } from "./preferences";
 
 import { disposeVLSPostProcess } from "./rendering/vls";
 import { disposeSSRRenderingPipeline } from "./rendering/ssr";
@@ -50,6 +59,7 @@ import { disposeDefaultRenderingPipeline } from "./rendering/default-pipeline";
 
 import { CommandPalette } from "./dialogs/command-palette/command-palette";
 import { EditorGenerateProjectComponent } from "./dialogs/generate/generate-project";
+import { showFbxExportDialog } from "./layout/graph/fbx-export";
 import { EditorEditProjectComponent } from "./dialogs/edit-project/edit-project";
 import { EditorEditPreferencesComponent } from "./dialogs/edit-preferences/edit-preferences";
 import { EditorSceneManager } from "./dialogs/scene-manager/scene-manager";
@@ -65,10 +75,8 @@ import "./nodes/scene-link";
 // import "./nodes/sprite-map";
 
 export function createEditor(): void {
-	const theme = localStorage.getItem("editor-theme") ?? "dark";
-	if (theme === "dark") {
-		document.body.classList.add("dark");
-	}
+	installBundledExrInflater();
+	applyEditorUserPreferences(readEditorUserPreferences());
 
 	const div = document.getElementById("babylonjs-editor-main-div")!;
 
@@ -111,6 +119,8 @@ export interface IEditorState {
 	 * Defines the list of all plugins to load.
 	 */
 	plugins: string[];
+	/** Shared package-managed extension enablement; machine trust is stored separately. */
+	editorExtensions: IEditorProjectExtension[];
 	/**
 	 * Defines the current package manager being used by the editor.
 	 */
@@ -119,6 +129,10 @@ export interface IEditorState {
 	 * Executable name or absolute path used to open project source files.
 	 */
 	externalEditorCommand: string;
+	/** Shared Unity-style Editor and Player settings. */
+	projectSettings: IEditorProjectSettings;
+	/** User-scoped appearance, workflow, external-tool, and diagnostics preferences. */
+	editorUserPreferences: IEditorUserPreferences;
 	/** Project-wide behavior-script execution orders. */
 	scriptExecutionOrders: Record<string, number>;
 
@@ -181,15 +195,47 @@ export interface IEditorState {
 	visualStudioCodeAvailable: boolean;
 }
 
+export interface IPlatformRestartEvidence {
+	target: "web" | "electron" | "headless" | "android" | "ios";
+	planId: string;
+	diagnosticFingerprint: string;
+	requestedAt: string;
+	restartedAt: string;
+}
+
 export class Editor extends Component<IEditorProps, IEditorState> {
 	/** Runtime authority for loaded scene ownership and per-scene dirty state. */
 	public readonly sceneWorkspace = new EditorSceneWorkspace();
 	private _sceneWorkspaceObserverCleanups: (() => void)[] = [];
+	private _disposeMcpServer: (() => void) | null = null;
+	private _extensionMenus: IEditorExtensionMenuDescriptor[] = [];
+	private _extensionCommandHandler = (_event: Electron.IpcRendererEvent, id: unknown): void => {
+		if (typeof id !== "string" || id.length > 160 || !this.extensionHost) {
+			return;
+		}
+		void this.extensionHost.invokeMenu(id).catch((error) => console.error(`Editor extension menu command "${id}" failed.`, error));
+	};
+	private _autoSaveIntervalId: number | null = null;
+	private _windowFocusHandler = (): void => {
+		const policy = this.state.projectSettings.assetPipeline;
+		if (policy.autoRefresh && policy.autoRefreshOnFocus) {
+			this.layout?.assets?.refreshWatchedAssets();
+		}
+	};
+	private _platformRestartEvidenceHandler = (_event: Electron.IpcRendererEvent, evidence: unknown): void => {
+		if (evidence && typeof evidence === "object" && !Array.isArray(evidence)) {
+			this.platformRestartEvidence = structuredClone(evidence as IPlatformRestartEvidence);
+		}
+	};
 
 	/**
 	 * The layout of the editor.
 	 */
 	public layout: EditorLayout;
+	/** Runtime host is attached after Project Manager dependency discovery completes. */
+	public extensionHost: EditorExtensionHost | null = null;
+	/** Exact evidence supplied only when this process was relaunched by the installed-platform flow. */
+	public platformRestartEvidence: IPlatformRestartEvidence | null = null;
 	/**
 	 * The command palette of the editor.
 	 */
@@ -203,9 +249,11 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 
 	public constructor(props: IEditorProps) {
 		super(props);
+		const editorUserPreferences = readEditorUserPreferences();
 
 		this.state = {
 			plugins: [],
+			editorExtensions: [],
 			lastOpenedScenePath: null,
 			sceneBuildSettings: { version: 1, scenes: [] },
 			prefabStage: defaultPrefabStageSettings,
@@ -217,7 +265,9 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 			compressedEtc2Enabled: false,
 			compressedPvrtcEnabled: false,
 			compressedTextureQuality: "very-fast",
-			externalEditorCommand: "code",
+			externalEditorCommand: editorUserPreferences.externalTools.scriptEditorCommand,
+			projectSettings: createDefaultProjectSettings(),
+			editorUserPreferences,
 			scriptExecutionOrders: {},
 
 			enableExperimentalFeatures: tryGetExperimentalFeaturesEnabledFromLocalStorage(),
@@ -232,7 +282,7 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 			visualStudioCodeAvailable: false,
 		};
 
-		webFrame.setZoomFactor(0.8);
+		webFrame.setZoomFactor(editorUserPreferences.appearance.uiScale);
 
 		const nodeObserver = onNodeModifiedObservable.add((object) => this.sceneWorkspace.markObjectDirty(object));
 		const addedNodesObserver = onNodesAddedObservable.add((objects) => {
@@ -304,6 +354,9 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 	}
 
 	public async componentDidMount(): Promise<void> {
+		setSerializationSessionPublisher((snapshot) => ipcRenderer.send("editor:serialization-session-update", snapshot));
+		this._configureAutoSave();
+		window.addEventListener("focus", this._windowFocusHandler);
 		ipcRenderer.on("save", () => saveProject(this));
 		ipcRenderer.on("generate", () => exportProject(this, { optimize: false }));
 
@@ -311,6 +364,7 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 		ipcRenderer.on("editor:edit-preferences", () => this.setState({ editPreferences: true }));
 		ipcRenderer.on("editor:generate-project", () => this.setState({ generateProject: true }));
 		ipcRenderer.on("editor:scene-manager", () => this.setState({ sceneManager: true }));
+		ipcRenderer.on("editor:export-scene-fbx", () => showFbxExportDialog(this));
 
 		ipcRenderer.on("editor:open", (_, path) => this.openProject(join(path)));
 
@@ -320,6 +374,8 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 		ipcRenderer.on("editor:path", (_, path) => (this.path = path.replace(/\\/g, sep)));
 
 		ipcRenderer.on("editor:run-project", () => startProjectDevProcess(this));
+		ipcRenderer.on("editor:extension-command", this._extensionCommandHandler);
+		ipcRenderer.on("editor:platform-restart-evidence", this._platformRestartEvidenceHandler);
 
 		// Undo-redo
 		ipcRenderer.on("undo", () => undo());
@@ -346,20 +402,85 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 
 		// Ready
 		ipcRenderer.send("editor:ready");
-		ipcRenderer.send("editor:setup-menu", {
-			enableExperimentalFeatures: this.state.enableExperimentalFeatures,
-			openedTabs: this.state.openedTabs,
-		});
+		this.setupApplicationMenu();
 
 		// Start the MCP server once the layout/preview scene is ready.
 		await waitUntil(() => this.layout?.preview?.scene);
 
 		// Initialize the MCP server to allow communication between the editor and AI agents
-		initializeMcpServer(this);
+		this._disposeMcpServer?.();
+		this._disposeMcpServer = initializeMcpServer(this);
 	}
 
 	public componentWillUnmount(): void {
+		setSerializationSessionPublisher(null);
+		ipcRenderer.removeListener("editor:extension-command", this._extensionCommandHandler);
+		ipcRenderer.removeListener("editor:platform-restart-evidence", this._platformRestartEvidenceHandler);
+		void disposeProjectEditorExtensions(this).catch((error) => console.error("Failed to dispose editor extensions while closing.", error));
+		this._disposeMcpServer?.();
+		this._disposeMcpServer = null;
 		this._sceneWorkspaceObserverCleanups.splice(0).forEach((cleanup) => cleanup());
+		if (this._autoSaveIntervalId !== null) {
+			window.clearInterval(this._autoSaveIntervalId);
+		}
+		window.removeEventListener("focus", this._windowFocusHandler);
+	}
+
+	/** Rebuilds the native menu with declarative extension commands only. */
+	public setupApplicationMenu(openedTabs: readonly string[] = this.state.openedTabs): void {
+		ipcRenderer.send("editor:setup-menu", {
+			enableExperimentalFeatures: this.state.enableExperimentalFeatures,
+			openedTabs: [...openedTabs],
+			extensionMenus: this._extensionMenus,
+		});
+	}
+
+	/** Replaces the renderer-owned extension command descriptors and refreshes the native menu. */
+	public setExtensionMenus(descriptors: readonly IEditorExtensionMenuDescriptor[]): void {
+		this._extensionMenus = descriptors.map((descriptor) => ({ ...descriptor }));
+		this.setupApplicationMenu();
+	}
+
+	/** Persists all owned scenes, then asks Electron main to relaunch this exact project for installed platform support. */
+	public async restartForInstalledPlatform(request: {
+		target: "web" | "electron" | "headless" | "android" | "ios";
+		planId: string;
+		projectPath: string;
+		diagnosticFingerprint: string;
+		requestedAt: string;
+	}): Promise<Record<string, unknown>> {
+		if (!this.state.projectPath || request.projectPath !== this.state.projectPath) {
+			throw new Error("The restart request does not match the currently open project.");
+		}
+		await saveProjectForRestart(this);
+		return ipcRenderer.invoke("editor:restart-for-installed-platform", request);
+	}
+
+	/** Applies and persists user-scoped preferences immediately. */
+	public async setEditorUserPreferences(preferences: IEditorUserPreferences): Promise<void> {
+		await new Promise<void>((resolve) =>
+			this.setState({ editorUserPreferences: preferences, externalEditorCommand: preferences.externalTools.scriptEditorCommand }, () => resolve())
+		);
+		writeEditorUserPreferences(preferences);
+		applyEditorUserPreferences(preferences);
+		webFrame.setZoomFactor(preferences.appearance.uiScale);
+		this._configureAutoSave();
+	}
+
+	private _configureAutoSave(): void {
+		if (this._autoSaveIntervalId !== null) {
+			window.clearInterval(this._autoSaveIntervalId);
+		}
+		this._autoSaveIntervalId = null;
+		const preferences = this.state.editorUserPreferences.workflow;
+		if (!preferences.autoSave) {
+			return;
+		}
+		this._autoSaveIntervalId = window.setInterval(() => {
+			if (this.state.projectPath && !this.props.editedScenePath) {
+				void saveProject(this);
+			}
+		}, preferences.autoSaveIntervalMinutes * 60_000);
 	}
 
 	/**
@@ -368,6 +489,7 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 	 */
 	public async openProject(absolutePath: string): Promise<void> {
 		await waitUntil(() => this.layout.preview.scene);
+		await disposeProjectEditorExtensions(this);
 
 		ipcRenderer.send("editor:maximize-window");
 

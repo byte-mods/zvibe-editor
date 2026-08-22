@@ -16,11 +16,15 @@ export interface ITrailConfiguration {
 function resolveGenerator(scene: Scene, data: any): TransformNode {
 	if (data.generatorNodeId || data.generatorNodeName) {
 		const node = resolveNode({ scene, nodeId: data.generatorNodeId, nodeName: data.generatorNodeName });
-		if (!(node instanceof TransformNode)) throw new Error(`Trail generator "${node.name}" must be a transform node or mesh.`);
+		if (!(node instanceof TransformNode)) {
+			throw new Error(`Trail generator "${node.name}" must be a transform node or mesh.`);
+		}
 		return node;
 	}
 	const generator = new TransformNode(data.generatorName ?? "Trail Generator", scene);
-	if (data.position) generator.position.copyFrom(toVector3(data.position));
+	if (data.position) {
+		generator.position.copyFrom(toVector3(data.position));
+	}
 	return generator;
 }
 
@@ -33,10 +37,18 @@ function normalizeConfiguration(data: any, defaults?: Partial<ITrailConfiguratio
 		doNotTaper: data.doNotTaper ?? defaults?.doNotTaper ?? false,
 		autoStart: data.autoStart ?? defaults?.autoStart ?? true,
 	};
-	if (!(configuration.diameter > 0)) throw new Error("Trail diameter must be greater than zero.");
-	if (!(configuration.length > 0)) throw new Error("Trail length must be greater than zero.");
-	if (!Number.isInteger(configuration.segments) || configuration.segments < 1) throw new Error("Trail segments must be a positive integer.");
-	if (!Number.isInteger(configuration.sections) || configuration.sections < 2) throw new Error("Trail sections must be an integer of at least 2.");
+	if (!(configuration.diameter > 0)) {
+		throw new Error("Trail diameter must be greater than zero.");
+	}
+	if (!(configuration.length > 0)) {
+		throw new Error("Trail length must be greater than zero.");
+	}
+	if (!Number.isInteger(configuration.segments) || configuration.segments < 1) {
+		throw new Error("Trail segments must be a positive integer.");
+	}
+	if (!Number.isInteger(configuration.sections) || configuration.sections < 2) {
+		throw new Error("Trail sections must be an integer of at least 2.");
+	}
 	return configuration;
 }
 
@@ -49,13 +61,17 @@ function createTrail(scene: Scene, name: string, generator: TransformNode, confi
 
 function resolveTrail(scene: Scene, data: any): TrailMesh {
 	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
-	if (!(node instanceof TrailMesh)) throw new Error(`Node "${node.name}" is not a VFX trail.`);
+	if (!(node instanceof TrailMesh)) {
+		throw new Error(`Node "${node.name}" is not a VFX trail.`);
+	}
 	return node;
 }
 
 function getConfiguration(trail: TrailMesh): ITrailConfiguration {
 	const configuration = trail.metadata?.babylonEditorTrail as ITrailConfiguration | undefined;
-	if (!configuration) throw new Error(`Trail "${trail.name}" is missing its editor configuration.`);
+	if (!configuration) {
+		throw new Error(`Trail "${trail.name}" is missing its editor configuration.`);
+	}
 	return { ...configuration };
 }
 
@@ -69,12 +85,13 @@ export function createVfxTrail(scene: Scene, data: any, options: IMCPActionOptio
 	const generator = resolveGenerator(scene, data);
 	const configuration = normalizeConfiguration(data);
 	const trail = createTrail(scene, data.name ?? "VFX Trail", generator, configuration);
-	if (data.materialId)
+	if (data.materialId) {
 		trail.material =
 			scene.getMaterialById(data.materialId) ??
 			(() => {
 				throw new Error(`Material "${data.materialId}" was not found.`);
 			})();
+	}
 	options.editor.layout.graph.refresh().then(() => options.editor.layout.graph.setSelectedNode(trail));
 	options.editor.layout.inspector.setEditedObject(trail);
 	return describeTrail(trail);
@@ -96,10 +113,14 @@ export function setVfxTrail(scene: Scene, data: any, options: IMCPActionOptions)
 	const previous = getConfiguration(trail);
 	const existingGenerator = scene.getNodeById(previous.generatorId);
 	const generator = data.generatorNodeId || data.generatorNodeName ? resolveGenerator(scene, data) : existingGenerator instanceof TransformNode ? existingGenerator : null;
-	if (!generator) throw new Error(`Trail generator "${previous.generatorId}" no longer exists. Provide generatorNodeId or generatorNodeName.`);
+	if (!generator) {
+		throw new Error(`Trail generator "${previous.generatorId}" no longer exists. Provide generatorNodeId or generatorNodeName.`);
+	}
 	const configuration = normalizeConfiguration(data, previous);
 	const material = data.materialId === undefined ? trail.material : scene.getMaterialById(data.materialId);
-	if (data.materialId !== undefined && !material) throw new Error(`Material "${data.materialId}" was not found.`);
+	if (data.materialId !== undefined && !material) {
+		throw new Error(`Material "${data.materialId}" was not found.`);
+	}
 	const id = trail.id;
 	const name = data.name ?? trail.name;
 	trail.stop();
@@ -107,8 +128,11 @@ export function setVfxTrail(scene: Scene, data: any, options: IMCPActionOptions)
 	const replacement = createTrail(scene, name, generator, configuration);
 	replacement.id = id;
 	replacement.material = material as Material | null;
-	if (data.playing === false) replacement.stop();
-	else if (data.playing === true) replacement.start();
+	if (data.playing === false) {
+		replacement.stop();
+	} else if (data.playing === true) {
+		replacement.start();
+	}
 	options.editor.layout.graph.refresh().then(() => options.editor.layout.graph.setSelectedNode(replacement));
 	options.editor.layout.inspector.setEditedObject(replacement);
 	options.editor.layout.inspector.forceUpdate();

@@ -70,12 +70,14 @@ describe("executed model importer semantics", () => {
 		});
 		const settings = normalizeModelImporterSettings({ scaleFactor: 1, meshCompression: "none", importAnimations: true, platformOverrides: overrides });
 		const web = resolveModelImporterPlatformSettings(settings, "web");
+		const android = resolveModelImporterPlatformSettings(settings, "android");
 		const desktop = resolveModelImporterPlatformSettings(settings, "electron");
 		expect(web).toMatchObject({
 			platform: "web",
 			overrideApplied: true,
 			settings: { scaleFactor: 0.5, meshCompression: "high", importAnimations: false, generatedLods: [{ quality: 0.4, distance: 400 }] },
 		});
+		expect(android).toMatchObject({ platform: "web", overrideApplied: true, settings: { scaleFactor: 0.5, meshCompression: "high" } });
 		expect(desktop).toMatchObject({ platform: "desktop", overrideApplied: false, settings: { scaleFactor: 1, meshCompression: "none", importAnimations: true } });
 		expect(settings).toMatchObject({ scaleFactor: 1, meshCompression: "none", importAnimations: true });
 		expect(JSON.parse(serializeModelImporterPlatformOverrides(overrides))).toEqual(overrides);

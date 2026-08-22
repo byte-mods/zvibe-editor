@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect script debugger capabilities. What backend identifier is reported?</question>
+      <answer>instrumented-debug-play-safe-boundary-v1</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does ordinary Play or an exported build contain source probes when Debug Play is disabled? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>When a source breakpoint fires, does the current synchronous JavaScript callback stop in the middle of its statement? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which four source coverage categories are reported?</question>
+      <answer>lines, statements, functions, branches</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Can debugger variable snapshots evaluate arbitrary expressions or invoke getters? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two exact values lease a breakpoint or coverage configuration mutation?</question>
+      <answer>expectedManifestFingerprint, expectedConfigurationRevision</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which additional exact value leases a source coverage export?</question>
+      <answer>expectedCoverageRevision</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two deterministic source coverage export formats are supported?</question>
+      <answer>json, lcov</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Must custom script-template replacement provide the fingerprint returned by exact inspection when that template already exists? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Must custom script-template deletion provide both exact expectedFingerprint and confirm=true? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+</evaluation>

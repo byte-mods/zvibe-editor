@@ -1,5 +1,4 @@
 import { dirname, join, relative } from "path/posix";
-import { writeJSON } from "fs-extra";
 import { ipcRenderer } from "electron";
 
 import { toast } from "sonner";
@@ -11,6 +10,8 @@ import { Editor } from "../../editor/main";
 import { IEditorProject } from "../typings";
 import { discoverProjectScenes, normalizeSceneBuildSettings } from "../scenes";
 import { activateSceneInWorkspaceSettings } from "../scene-workspace";
+import { normalizeProjectEditorExtensions } from "../../extensions/project";
+import { writeSerializedJSON } from "../serialization-session";
 
 // import { exportProject } from "../export/export";
 
@@ -29,16 +30,24 @@ export async function saveProject(editor: Editor): Promise<void> {
 	if (saving) {
 		return;
 	}
-
-	saving = true;
-
 	try {
-		await _saveProject(editor);
+		await saveProjectForRestart(editor);
 	} catch (e) {
 		if (e instanceof Error) {
 			editor.layout.console.error(`Error saving project:\n ${e.message}`);
 			toast.error("Error saving project");
 		}
+	}
+}
+
+/** Saves with error propagation so a platform restart can be aborted safely on persistence failure. */
+export async function saveProjectForRestart(editor: Editor): Promise<void> {
+	if (saving) {
+		throw new Error("A project save is already in progress. Wait for it to finish before restarting the editor.");
+	}
+	saving = true;
+	try {
+		await _saveProject(editor);
 	} finally {
 		saving = false;
 		editor.layout.preview.setRenderScene(true);
@@ -67,6 +76,7 @@ export async function saveProjectConfiguration(editor: Editor): Promise<Partial<
 		plugins: editor.state.plugins.map((plugin) => ({
 			nameOrPath: plugin,
 		})),
+		editorExtensions: normalizeProjectEditorExtensions(editor.state.editorExtensions),
 		version: packageJson.version,
 		packageManager: editor.state.packageManager,
 		lastOpenedScene: sceneWorkspace.activeScene ? `/${sceneWorkspace.activeScene}` : null,
@@ -81,13 +91,14 @@ export async function saveProjectConfiguration(editor: Editor): Promise<Partial<
 		compressedPvrtcEnabled: editor.state.compressedPvrtcEnabled,
 		compressedTextureQuality: editor.state.compressedTextureQuality,
 		externalEditorCommand: editor.state.externalEditorCommand,
+		projectSettings: editor.state.projectSettings,
 		scriptExecutionOrders: editor.state.scriptExecutionOrders,
 
 		gizmoSnap: editor.layout.preview?.state.gizmoSnap,
 	};
 
 	if (!editor.props.editedScenePath) {
-		await writeJSON(editor.state.projectPath!, project, {
+		await writeSerializedJSON(editor.state.projectPath!, project, {
 			spaces: 4,
 		});
 	}

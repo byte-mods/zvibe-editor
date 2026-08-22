@@ -1,0 +1,42 @@
+<evaluation>
+	<qa_pair>
+		<question>In the fixed shared-TypeTree evaluation build, inspect the verified build report, page through every portable bundle, and compare all entry schema identities. How many distinct schemas are shared by the two structured character assets? Respond with an integer.</question>
+		<answer>1</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>In the fixed shared-TypeTree evaluation build, inspect the build summary and validate every bundle page. How many structured assets were converted from raw JSON into portable entries? Respond with an integer.</question>
+		<answer>2</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>In the fixed shared-TypeTree evaluation build, compare its group packing policy with the complete verified bundle listing. How many portable bundles contain the two character assets? Respond with an integer.</question>
+		<answer>1</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>In the fixed shared-TypeTree evaluation build, validate the complete portable bundle and count the decoded entries rather than relying only on catalog metadata. How many entries validate? Respond with an integer.</question>
+		<answer>2</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>In the fixed shared-TypeTree evaluation build, inspect the schema used by both character entries and page through its complete node list. What is the root node kind? Respond with one lowercase word.</question>
+		<answer>array</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>In the fixed shared-TypeTree evaluation build, inspect the shared schema and count its root, element object, and primitive field nodes. How many schema nodes are present? Respond with an integer.</question>
+		<answer>5</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>In the fixed shared-TypeTree evaluation build, compare the source byte total with the registry-plus-bundle byte total and the reported saved byte count. Did extraction produce a strictly smaller build? Respond True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>In the fixed shared-TypeTree evaluation build, validate the bundle, inspect both entry hashes, and compare their schema IDs. Do both entries use the same schema ID? Respond True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>In the fixed shared-TypeTree evaluation build, page the portable bundle list with a limit of one and compare the first page with the reported total. Does the first page exhaust the bundle list? Respond True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>In the fixed shared-TypeTree evaluation build, compare the verified registry schema count, build summary schema count, and distinct schema IDs found after validating every bundle entry. Are all three counts equal? Respond True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+</evaluation>

@@ -6,14 +6,10 @@ import { Component, ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Mesh, StandardMaterial, Color3, IObstacle } from "babylonjs";
-import { CreateNavMeshResult } from "babylonjs-addons/navigation/types";
-import { CreateNavigationPluginAsync, RecastNavigationJSPluginV2, WaitForFullTileCacheUpdate } from "babylonjs-addons";
-
-import * as RecastCore from "@recast-navigation/core";
+import { CreateNavigationPluginAsync, RecastNavigationJSPluginV2 } from "babylonjs-addons";
+import { NavMeshRecastRuntime } from "babylonjs-editor-tools";
 
 import { SpinnerUIComponent } from "../../../ui/spinner";
-
-import { setNodeSerializable, setNodeVisibleInGraph } from "../../../tools/node/metadata";
 
 import { Editor } from "../../main";
 
@@ -23,7 +19,9 @@ import { NavMeshEditorPreview } from "./preview";
 import { NavMeshEditorMeshesList } from "./meshes";
 import { NavMeshEditorObstacles } from "./obstacles";
 import { NavMeshEditorInspector } from "./inspector";
-import { getObstacleMeshes, getStaticMeshes } from "./tools";
+import { getNavMeshSurfaceGeometry, getObstacleMeshes, getStaticMeshes } from "./tools";
+import { buildConfiguredNavMesh, loadConfiguredNavMeshTileCache } from "./build";
+import { createNavMeshAreaDebugMeshes } from "./debug";
 
 export interface INavmeshEditorProps {
 	editor: Editor;
@@ -40,10 +38,14 @@ export class NavMeshEditor extends Component<INavmeshEditorProps, INavmeshEditor
 	public configuration: INavMeshConfiguration;
 	public plugin: RecastNavigationJSPluginV2;
 
-	public result: CreateNavMeshResult | null = null;
-
-	private _debugNavMesh: Mesh | null = null;
+	private _recastRuntime: NavMeshRecastRuntime;
+	private _debugNavMeshes: Mesh[] = [];
 	private _debugObstacles: { obstacle: IObstacle; mesh: Mesh }[] = [];
+
+	/** Absolute directory of the edited .navmesh asset. */
+	public get absolutePath(): string {
+		return this.props.absolutePath;
+	}
 
 	public constructor(props: INavmeshEditorProps) {
 		super(props);
@@ -65,7 +67,7 @@ export class NavMeshEditor extends Component<INavmeshEditorProps, INavmeshEditor
 				<NavMeshEditorToolbar navMeshEditor={this} />
 
 				<div className="flex flex-1 h-full pb-10">
-					<NavMeshEditorPreview mesh={this._debugNavMesh} plugin={this.plugin} />
+					<NavMeshEditorPreview meshes={this._debugNavMeshes} plugin={this.plugin} areas={this.configuration.areas ?? []} />
 
 					<NavMeshEditorMeshesList editor={this.props.editor} navMeshEditor={this} />
 					<NavMeshEditorObstacles editor={this.props.editor} navMeshEditor={this} />
@@ -81,8 +83,7 @@ export class NavMeshEditor extends Component<INavmeshEditorProps, INavmeshEditor
 		const navMeshBinPath = join(this.props.absolutePath, "navmesh.bin");
 		const tilecacheBinPath = join(this.props.absolutePath, "tilecache.bin");
 		if ((await pathExists(navMeshBinPath)) && (await pathExists(tilecacheBinPath))) {
-			this.plugin.buildFromNavmeshData(await readFile(navMeshBinPath));
-			this.plugin.buildFromTileCacheData(await readFile(tilecacheBinPath));
+			loadConfiguredNavMeshTileCache(this.plugin, this._recastRuntime, this.configuration, new Uint8Array(await readFile(tilecacheBinPath)));
 			this._createDebugNavMesh();
 			this.createDebugObstacles();
 		}
@@ -103,37 +104,37 @@ export class NavMeshEditor extends Component<INavmeshEditorProps, INavmeshEditor
 	public async updateNavMesh(): Promise<void> {
 		this._disposeDebugNavMesh();
 		this._disposePlugin();
+		await this._createPlugin();
 
-		if (this.configuration.staticMeshes.length) {
-			await this._createPlugin();
+		const meshes = getStaticMeshes(this.props.editor.layout.preview.scene, this.configuration.staticMeshes);
+		if (!meshes.effectiveStaticMeshEntries.length) {
+			toast.error("NavMesh requires at least one enabled static mesh.");
+			this.forceUpdate();
+			return;
+		}
 
-			const meshes = getStaticMeshes(this.props.editor.layout.preview.scene, this.configuration.staticMeshes);
+		try {
+			const geometry = getNavMeshSurfaceGeometry(meshes.effectiveStaticMeshEntries, this.configuration.navMeshParameters.doNotReverseIndices);
+			buildConfiguredNavMesh(this.plugin, this._recastRuntime, this.configuration, geometry);
+
+			this._createDebugNavMesh();
+		} catch (e) {
+			toast.error("Failed to create NavMesh");
+			this.props.editor.layout.console.error(`Failed to create NavMesh: ${e.message}`);
 
 			try {
-				this.result = await this.plugin.createNavMeshAsync(meshes.effectiveStaticMeshes, this.configuration.navMeshParameters);
-				if (this.result) {
-					WaitForFullTileCacheUpdate(this.result.navMesh, this.result.tileCache);
-				}
-
-				this._createDebugNavMesh();
+				await this._recastRuntime.init();
 			} catch (e) {
-				toast.error("Failed to create NavMesh");
-				this.props.editor.layout.console.error(`Failed to create NavMesh: ${e.message}`);
-
-				try {
-					await RecastCore.init();
-				} catch (e) {
-					toast.error("Failed to re-initialize RecastCore");
-					this.props.editor.layout.console.error(`Failed to re-initialize RecastCore: ${e.message}`);
-				}
+				toast.error("Failed to re-initialize RecastCore");
+				this.props.editor.layout.console.error(`Failed to re-initialize RecastCore: ${e.message}`);
 			}
-
-			meshes.clonedMeshes.forEach((mesh) => {
-				mesh.dispose(false, false);
-			});
-
-			this.createDebugObstacles();
 		}
+
+		meshes.clonedMeshes.forEach((mesh) => {
+			mesh.dispose(false, false);
+		});
+
+		this.createDebugObstacles();
 
 		this.forceUpdate();
 	}
@@ -170,12 +171,12 @@ export class NavMeshEditor extends Component<INavmeshEditorProps, INavmeshEditor
 					case "cylinder":
 						entry.config.position = entry.clone.position.asArray();
 						entry.config.radius = boundingBox.extendSizeWorld.x;
-						entry.config.height = boundingBox.extendSizeWorld.y;
+						entry.config.height = boundingBox.extendSizeWorld.y * 2;
 
 						obstacle = this.plugin.addCylinderObstacle(
 							entry.clone.position,
 							entry.clone.getBoundingInfo().boundingBox.extendSizeWorld.x,
-							entry.clone.getBoundingInfo().boundingBox.extendSizeWorld.y,
+							entry.clone.getBoundingInfo().boundingBox.extendSizeWorld.y * 2,
 							false
 						);
 						break;
@@ -226,12 +227,14 @@ export class NavMeshEditor extends Component<INavmeshEditorProps, INavmeshEditor
 	private async _createPlugin(): Promise<void> {
 		const RecastCore = require("@recast-navigation/core");
 		const RecastGenerators = require("@recast-navigation/generators");
+		this._recastRuntime = {
+			...RecastCore,
+			...RecastGenerators,
+		};
+		await this._recastRuntime.init();
 
 		this.plugin = await CreateNavigationPluginAsync({
-			instance: {
-				...RecastCore,
-				...RecastGenerators,
-			},
+			instance: this._recastRuntime,
 		});
 	}
 
@@ -243,24 +246,14 @@ export class NavMeshEditor extends Component<INavmeshEditorProps, INavmeshEditor
 		this._disposeDebugNavMesh();
 
 		const scene = this.props.editor.layout.preview.scene;
-
-		this._debugNavMesh = this.plugin.createDebugNavMesh(scene);
-		setNodeSerializable(this._debugNavMesh, false);
-		setNodeVisibleInGraph(this._debugNavMesh, false);
-
-		const debugMaterial = new StandardMaterial("navmesh-debug-material", scene);
-		debugMaterial.emissiveColor = Color3.Magenta();
-		debugMaterial.disableLighting = true;
-		debugMaterial.transparencyMode = StandardMaterial.MATERIAL_ALPHABLEND;
-		debugMaterial.alpha = 0.35;
-		debugMaterial.zOffset = -10;
-		this._debugNavMesh.material = debugMaterial;
+		this._debugNavMeshes = createNavMeshAreaDebugMeshes(this.plugin, scene, this.configuration.areas ?? []);
 
 		this.forceUpdate();
 	}
 
 	private _disposeDebugNavMesh(): void {
-		this._debugNavMesh?.dispose(false, true);
+		this._debugNavMeshes.forEach((mesh) => mesh.dispose(false, true));
+		this._debugNavMeshes = [];
 	}
 
 	private _getLoadingScreen(): ReactNode {

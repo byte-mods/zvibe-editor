@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which MCP tool reads the Project Auditor's exact global revision and active asynchronous job?</question>
+      <answer>get_project_auditor_state</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool starts a cooperative background audit?</question>
+      <answer>start_project_audit</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which four Project Auditor categories are supported?</question>
+      <answer>serialization, obsolete-api, particle-texture-readability, atlas-waste</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which diagnostic code reports a visibleAs* decorator whose scalar field type is incompatible?</question>
+      <answer>SER1006</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Do error-severity serialization diagnostics stop the real TypeScript/esbuild script emitter before emission? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool returns stable paginated Project Auditor findings?</question>
+      <answer>list_project_audit_issues</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which field guards stable issue pagination against a changing audit job?</question>
+      <answer>expectedJobRevision</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What texture importer setting can the version-1 Project Auditor safely fix for GPU-only particle properties?</question>
+      <answer>readable</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does the atlas-waste analyzer automatically repack atlas source files? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which permanent editor tab displays asynchronous audit status and findings?</question>
+      <answer>Project Auditor</answer>
+   </qa_pair>
+</evaluation>

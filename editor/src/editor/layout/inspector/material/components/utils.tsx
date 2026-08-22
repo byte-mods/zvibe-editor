@@ -14,7 +14,14 @@ import { showConfirm } from "../../../../../ui/dialog";
 
 import { Button } from "../../../../../ui/shadcn/ui/button";
 import { projectConfiguration } from "../../../../../project/configuration";
-import { applyMaterialPreset, createMaterialPreset, listMaterialPresets, rebaseMaterialVariant } from "../../../../../mcp/materials/materials";
+import {
+	applyMaterialPreset,
+	clearMaterialVariantOverrides,
+	createMaterialPreset,
+	getMaterialVariant,
+	listMaterialPresets,
+	rebaseMaterialVariant,
+} from "../../../../../mcp/materials/materials";
 
 export interface IEditorMaterialInspectorUtilsComponentProps {
 	mesh?: AbstractMesh;
@@ -25,6 +32,15 @@ export class EditorMaterialInspectorUtilsComponent extends Component<IEditorMate
 	public render(): ReactNode {
 		const presets = listMaterialPresets(this.props.material.getScene()).presets.filter((preset: any) => preset.className === this.props.material.getClassName());
 		const variant = this.props.material.metadata?.babylonEditorMaterialVariant;
+		let variantDetails: any = null;
+		let variantError: string | null = null;
+		if (variant?.baseMaterialId) {
+			try {
+				variantDetails = getMaterialVariant(this.props.material.getScene(), { materialId: this.props.material.id });
+			} catch (error: any) {
+				variantError = error.message;
+			}
+		}
 		return (
 			<div className="space-y-2">
 				<div className="flex gap-2 items-center w-full">
@@ -56,17 +72,63 @@ export class EditorMaterialInspectorUtilsComponent extends Component<IEditorMate
 					</select>
 				</div>
 				{variant?.baseMaterialId && (
-					<Button variant="secondary" className="w-full" onClick={() => void this._handleRebaseVariant()}>
-						Rebase Variant from Base
-					</Button>
+					<div className="space-y-2 rounded-md border border-border p-2 text-xs">
+						<div className="font-medium">Material Variant Inheritance</div>
+						{variantDetails ? (
+							<>
+								<div className="text-muted-foreground break-all">{variantDetails.chain.map((entry: any) => entry.name).join(" → ")}</div>
+								<div className="grid grid-cols-2 gap-1">
+									<span>Depth</span>
+									<span>{variantDetails.chainDepth}</span>
+									<span>Overrides</span>
+									<span>{variantDetails.overridePaths.length}</span>
+									<span>Base changes</span>
+									<span>{variantDetails.inheritedChangedPaths.length}</span>
+									<span>Conflicts</span>
+									<span className={variantDetails.conflicts.length ? "text-destructive" : ""}>{variantDetails.conflicts.length}</span>
+								</div>
+								{variantDetails.overridePaths.length > 0 && (
+									<div className="text-muted-foreground break-all">Overrides: {variantDetails.overridePaths.join(", ")}</div>
+								)}
+								{variantDetails.conflicts.length > 0 && (
+									<div className="text-destructive break-all">Resolve: {variantDetails.conflicts.map((conflict: any) => conflict.path).join(", ")}</div>
+								)}
+								<div className="flex gap-2">
+									<Button variant="secondary" className="flex-1" onClick={() => void this._handleRebaseVariant("abort")}>
+										Rebase
+									</Button>
+									{variantDetails.overridePaths.length > 0 && (
+										<Button variant="secondary" className="flex-1" onClick={() => void this._handleClearVariantOverride()}>
+											Clear Override...
+										</Button>
+									)}
+								</div>
+								{variantDetails.conflicts.length > 0 && (
+									<div className="flex gap-2">
+										<Button variant="secondary" className="flex-1" onClick={() => void this._handleRebaseVariant("useBase")}>
+											Use Base
+										</Button>
+										<Button variant="secondary" className="flex-1" onClick={() => void this._handleRebaseVariant("keepVariant")}>
+											Keep Variant
+										</Button>
+									</div>
+								)}
+							</>
+						) : (
+							<div className="text-destructive">{variantError}</div>
+						)}
+					</div>
 				)}
 			</div>
 		);
 	}
 
 	private _handleSavePreset(): void {
+		// eslint-disable-next-line no-alert -- Electron's material inspector uses a synchronous name prompt for this compact action.
 		const name = window.prompt("Material preset name:");
-		if (!name?.trim()) return;
+		if (!name?.trim()) {
+			return;
+		}
 		try {
 			createMaterialPreset(this.props.material.getScene(), { materialId: this.props.material.id, name: name.trim() });
 			this.forceUpdate();
@@ -84,11 +146,33 @@ export class EditorMaterialInspectorUtilsComponent extends Component<IEditorMate
 		}
 	}
 
-	private async _handleRebaseVariant(): Promise<void> {
+	private async _handleRebaseVariant(conflictPolicy: "abort" | "useBase" | "keepVariant"): Promise<void> {
 		try {
-			await rebaseMaterialVariant(this.props.material.getScene(), { materialId: this.props.material.id });
+			const details = getMaterialVariant(this.props.material.getScene(), { materialId: this.props.material.id });
+			await rebaseMaterialVariant(this.props.material.getScene(), {
+				materialId: this.props.material.id,
+				expectedFingerprint: details.fingerprint,
+				recursive: true,
+				conflictPolicy,
+			});
 			this.forceUpdate();
 			toast.success("Material variant rebased from its base.");
+		} catch (error: any) {
+			toast.error(error.message);
+		}
+	}
+
+	private async _handleClearVariantOverride(): Promise<void> {
+		try {
+			const details = getMaterialVariant(this.props.material.getScene(), { materialId: this.props.material.id });
+			// eslint-disable-next-line no-alert -- The exact path list is short and the existing inspector action pattern is synchronous.
+			const path = window.prompt(`Exact override path to clear:\n${details.overridePaths.join("\n")}`);
+			if (!path?.trim()) {
+				return;
+			}
+			await clearMaterialVariantOverrides(this.props.material.getScene(), { materialId: this.props.material.id, paths: [path.trim()] });
+			this.forceUpdate();
+			toast.success(`Material override "${path.trim()}" cleared.`);
 		} catch (error: any) {
 			toast.error(error.message);
 		}

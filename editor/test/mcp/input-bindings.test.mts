@@ -21,7 +21,12 @@ describe("mcp/input-bindings", () => {
 
 	test("sets one action binding without replacing its map", () => {
 		const map = createInputActionMap(scene, { name: "Player", actions: [{ name: "Jump", bindings: ["<keyboard>/space"] }] }, options);
-		const result = setInputActionBinding(scene, { mapId: map.id, actionName: "Jump", binding: "<keyboard>/keyq" }, options);
-		expect(result.actions[0].bindings).toEqual(["<keyboard>/keyq"]);
+		const result = setInputActionBinding(
+			scene,
+			{ mapId: map.id, actionName: "Jump", bindingId: map.actions[0].bindings[0].id, expectedRevision: map.revision, changes: { path: "<keyboard>/keyq" } },
+			options
+		);
+		expect(result.binding.path).toBe("<keyboard>/keyq");
+		expect(result.mapRevision).toBe(2);
 	});
 });

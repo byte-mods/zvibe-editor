@@ -28,9 +28,9 @@ import { ScriptInspectorComponent } from "../script/script";
 import { EditorTransformNodeInspector } from "../transform";
 
 import { IEditorInspectorImplementationProps } from "../inspector";
-import { assignSoundNodeToAudioBus, listAudioBuses } from "../../../../mcp/sounds/sounds";
+import { assignSoundNodeToAudioBus, getAudioMixerRuntime, listAudioBuses } from "../../../../mcp/sounds/sounds";
 
-const supportedSoundExtensions = [".mp3", ".ogg", ".wav"];
+const supportedSoundExtensions = [".mp3", ".ogg", ".wav", ".wave", ".flac", ".m4a"];
 
 export interface IEditorSoundNodeInspectorState {
 	dragOver: boolean;
@@ -109,6 +109,7 @@ export class EditorSoundNodeInspector extends Component<IEditorInspectorImplemen
 		const isPlaying = this.props.object.sound?.state === SoundState.Started;
 
 		const buses = listAudioBuses(this.props.object.getScene()).buses as any[];
+		const mixerRuntime = getAudioMixerRuntime(this.props.object.getScene());
 		const assignedBusId = buses.find((bus) => bus.soundNodeIds.includes(this.props.object.id))?.id ?? "";
 
 		return (
@@ -128,7 +129,7 @@ export class EditorSoundNodeInspector extends Component<IEditorInspectorImplemen
 						<option value="">None</option>
 						{buses.map((bus) => (
 							<option key={bus.id} value={bus.id}>
-								{bus.name}
+								{mixerRuntime.buses.find((value: any) => value.id === bus.id)?.path ?? bus.name}
 							</option>
 						))}
 					</select>
@@ -213,7 +214,7 @@ export class EditorSoundNodeInspector extends Component<IEditorInspectorImplemen
 					const path = JSON.parse(ev.dataTransfer.getData("assets"))[0];
 					const extension = extname(path).toLowerCase();
 
-					if (supportedSoundExtensions.includes(extension)) {
+					if (supportedSoundExtensions.includes(extension) || path.toLowerCase().endsWith(".audio-generator.json")) {
 						await this.props.object.setSoundAbsolutePath(path);
 						this.forceUpdate();
 					}

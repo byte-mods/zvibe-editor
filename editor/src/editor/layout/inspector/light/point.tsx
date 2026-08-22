@@ -8,6 +8,7 @@ import { onNodeModifiedObservable } from "../../../../tools/observables";
 import { updateLightShadowMapRefreshRate, updatePointLightShadowMapRenderListPredicate } from "../../../../tools/light/shadows";
 
 import { IEditorInspectorImplementationProps } from "../inspector";
+import { LightRenderingLayersInspector } from "../rendering-layers";
 
 import { EditorInspectorColorField } from "../fields/color";
 import { EditorInspectorStringField } from "../fields/string";
@@ -21,6 +22,7 @@ import { CustomMetadataInspector } from "../metadata/custom-metadata";
 import { EditorLightPBRInspector } from "./components/pbr";
 import { EditorLightClusterInspector } from "./components/cluster";
 import { EditorLightShadowsInspector } from "./components/shadows";
+import { EditorLightCookieInspector } from "./components/cookie";
 
 export class EditorPointLightInspector extends Component<IEditorInspectorImplementationProps<PointLight>> {
 	/**
@@ -48,6 +50,8 @@ export class EditorPointLightInspector extends Component<IEditorInspectorImpleme
 						onChange={() => onNodeModifiedObservable.notifyObservers(this.props.object)}
 					/>
 				</EditorInspectorSectionField>
+
+				<LightRenderingLayersInspector editor={this.props.editor} light={this.props.object} onUpdate={() => this.forceUpdate()} />
 
 				<EditorInspectorSectionField title="Transforms">
 					<EditorInspectorVectorField
@@ -88,6 +92,7 @@ export class EditorPointLightInspector extends Component<IEditorInspectorImpleme
 				</EditorInspectorSectionField>
 
 				<ScriptInspectorComponent editor={this.props.editor} object={this.props.object} />
+				<EditorLightCookieInspector light={this.props.object} />
 
 				<EditorLightShadowsInspector editor={this.props.editor} light={this.props.object} onShadowGeneratorChanged={() => this.forceUpdate()} />
 

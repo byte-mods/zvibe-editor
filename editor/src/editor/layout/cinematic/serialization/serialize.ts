@@ -5,6 +5,7 @@ import { getInspectorPropertyValue } from "../../../../tools/property";
 
 import { getDefaultRenderingPipeline } from "../../../rendering/default-pipeline";
 
+/** Serializes original panel state while retaining canonical IDs and compatibility metadata. */
 export function serializeCinematic(cinematic: ICinematic): ICinematic {
 	return {
 		name: cinematic.name,
@@ -21,6 +22,7 @@ export function serializeCinematic(cinematic: ICinematic): ICinematic {
 			}
 
 			return {
+				_id: track._id,
 				node: track.node?.id,
 				propertyPath: track.propertyPath,
 
@@ -99,6 +101,7 @@ export function serializeKeyFrameAnimations(keyFrameAnimations: (ICinematicKey |
 	return keyFrameAnimations?.map((keyFrame) => {
 		if (isCinematicKey(keyFrame)) {
 			return {
+				id: keyFrame.id,
 				type: "key",
 				frame: keyFrame.frame,
 				value: serializeCinematicKeyValue(keyFrame.value, animationType),
@@ -108,6 +111,7 @@ export function serializeKeyFrameAnimations(keyFrameAnimations: (ICinematicKey |
 		}
 
 		return {
+			id: keyFrame.id,
 			type: "cut",
 			key1: {
 				frame: keyFrame.key1.frame,

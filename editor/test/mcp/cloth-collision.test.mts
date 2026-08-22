@@ -1,10 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { MeshBuilder, NullEngine, Scene } from "babylonjs";
+import { Mesh, MeshBuilder, NullEngine, Scene, SceneSerializer, VertexBuffer } from "babylonjs";
 
-vi.mock("babylonjs-editor-tools", () => ({}));
+vi.mock("babylonjs-editor-tools", async (importOriginal) => await importOriginal());
 
-import { createCloth, listCloths, setCloth } from "../../src/mcp/cloth/cloth";
+import {
+	createCloth,
+	deleteCloth,
+	getClothCollisionDiagnostics,
+	getClothConstraintSnapshot,
+	getClothConstraints,
+	getClothConstraintPaintViewport,
+	paintClothConstraints,
+	restoreClothConstraintSnapshot,
+	listCloths,
+	setCloth,
+	setClothConstraintPaintViewport,
+} from "../../src/mcp/cloth/cloth";
 
 describe("mcp/cloth collision", () => {
 	let engine: NullEngine;
@@ -77,5 +89,173 @@ describe("mcp/cloth collision", () => {
 		setCloth(scene, { id: cloth.id, selfCollision: false, selfCollisionRadius: 8 }, options);
 		expect(listCloths(scene).cloths[0]).toMatchObject({ selfCollision: false, selfCollisionRadius: 8 });
 		expect(() => setCloth(scene, { id: cloth.id, selfCollisionRadius: 0 }, options)).toThrow("selfCollisionRadius");
+	});
+
+	test("paints paginated exact-revision vertex constraints and restores snapshot content", () => {
+		const cloth = createCloth(scene, { name: "Painted Banner", subdivisions: 2 }, options);
+		const before = getClothConstraintSnapshot(scene, cloth.id);
+		const painted = paintClothConstraints(
+			scene,
+			{
+				id: cloth.id,
+				expectedConstraintRevision: before.constraintRevision,
+				center: [0, 0, 0],
+				radius: 1,
+				channel: "maxDistance",
+				mode: "paint",
+				value: 4,
+				strength: 1,
+				falloff: "smooth",
+				maxAffectedVertices: 8,
+			},
+			options
+		);
+		expect(painted).toMatchObject({ affectedCount: 1, constraintRevision: 2, constraintCount: 1 });
+		expect(getClothConstraints(scene, { id: cloth.id, offset: 0, limit: 1 })).toMatchObject({
+			constraintRevision: 2,
+			vertexConstraints: [{ vertexIndex: 4, maxDistance: 4 }],
+			page: { total: 1, returned: 1, nextOffset: null },
+		});
+		expect(listCloths(scene).cloths[0]).toMatchObject({ constraintRevision: 2, vertexConstraintCount: 1 });
+		expect(listCloths(scene).cloths[0].vertexConstraints).toBeUndefined();
+		expect(() => paintClothConstraints(scene, { ...painted, id: cloth.id, expectedConstraintRevision: 1 }, options)).toThrow("stale");
+		const erased = paintClothConstraints(
+			scene,
+			{
+				id: cloth.id,
+				expectedConstraintRevision: 2,
+				center: [0, 0, 0],
+				radius: 1,
+				channel: "maxDistance",
+				mode: "erase",
+				strength: 1,
+				falloff: "constant",
+				maxAffectedVertices: 8,
+			},
+			options
+		);
+		expect(erased).toMatchObject({ mutated: true, constraintRevision: 3, constraintCount: 0 });
+		restoreClothConstraintSnapshot(scene, before, options);
+		expect(getClothConstraints(scene, { id: cloth.id }).page.total).toBe(0);
+	});
+
+	test("requires an exact lease for atomic direct constraint replacement", () => {
+		const cloth = createCloth(scene, { name: "Leased Constraints", subdivisions: 2 }, options);
+		expect(() => setCloth(scene, { id: cloth.id, vertexConstraints: [{ vertexIndex: 4, maxDistance: 5 }] }, options)).toThrow("expectedConstraintRevision");
+		expect(() => setCloth(scene, { id: cloth.id, expectedConstraintRevision: 1 }, options)).toThrow("vertexConstraints");
+		expect(setCloth(scene, { id: cloth.id, expectedConstraintRevision: 1, vertexConstraints: [{ vertexIndex: 4, maxDistance: 5 }] }, options)).toMatchObject({
+			constraintRevision: 2,
+			vertexConstraintCount: 1,
+		});
+		expect(() => setCloth(scene, { id: cloth.id, expectedConstraintRevision: 1, vertexConstraints: [] }, options)).toThrow("stale");
+	});
+
+	test("rejects over-cap brushes before changing constraint content or revision", () => {
+		const cloth = createCloth(scene, { name: "Bounded Brush", subdivisions: 4 }, options);
+		expect(() =>
+			paintClothConstraints(
+				scene,
+				{
+					id: cloth.id,
+					expectedConstraintRevision: 1,
+					center: [0, 0, 0],
+					radius: 1000,
+					channel: "maxDistance",
+					mode: "paint",
+					value: 5,
+					strength: 1,
+					falloff: "constant",
+					maxAffectedVertices: 1,
+				},
+				options
+			)
+		).toThrow("above maxAffectedVertices");
+		expect(getClothConstraints(scene, { id: cloth.id })).toMatchObject({ constraintRevision: 1, page: { total: 0 } });
+	});
+
+	test("bounds large successful brush responses and rejects stale snapshot restoration", () => {
+		const cloth = createCloth(scene, { name: "Bounded Response", subdivisions: 20 }, options);
+		const before = getClothConstraintSnapshot(scene, cloth.id);
+		const painted = paintClothConstraints(
+			scene,
+			{
+				id: cloth.id,
+				expectedConstraintRevision: before.constraintRevision,
+				center: [0, 0, 0],
+				radius: 1000,
+				channel: "maxDistance",
+				mode: "paint",
+				value: 5,
+				strength: 1,
+				falloff: "constant",
+				maxAffectedVertices: 4096,
+			},
+			options
+		);
+		expect(painted).toMatchObject({ affectedCount: 441, returnedAffectedVertices: 256, affectedVerticesTruncated: true, constraintRevision: 2 });
+		expect(painted.affectedVertices).toHaveLength(256);
+		expect(() => restoreClothConstraintSnapshot(scene, before, options, 1)).toThrow("stale");
+		expect(restoreClothConstraintSnapshot(scene, before, options, 2)).toMatchObject({ constraintRevision: 3, page: { total: 0 } });
+	});
+
+	test("persists validated transformed triangle colliders and exposes diagnostics", () => {
+		const collider = MeshBuilder.CreatePlane("Triangle Collider", { size: 100 }, scene);
+		const cloth = createCloth(
+			scene,
+			{ name: "Triangle Banner", subdivisions: 2, triangleColliders: [{ meshId: collider.id, thickness: 3, restitution: 0.25, friction: 0.5 }] },
+			options
+		);
+		expect(listCloths(scene).cloths[0].triangleColliders).toEqual([{ meshId: collider.id, thickness: 3, restitution: 0.25, friction: 0.5 }]);
+		vi.spyOn(engine, "getDeltaTime").mockReturnValue(16);
+		scene.onBeforeRenderObservable.notifyObservers(scene);
+		expect(getClothCollisionDiagnostics(scene, { id: cloth.id })).toMatchObject({ count: 1, diagnostics: [{ clothId: cloth.id, configuredColliders: 1, activeColliders: 1 }] });
+		expect(() => setCloth(scene, { id: cloth.id, triangleColliders: [{ meshId: cloth.mesh.id }] }, options)).toThrow("own mesh");
+		expect(() => setCloth(scene, { id: cloth.id, triangleColliders: [{ meshId: "missing" }] }, options)).toThrow("no valid triangle geometry");
+		expect(() => setCloth(scene, { id: cloth.id, triangleColliders: [{ meshId: collider.id }, { meshId: collider.id }] }, options)).toThrow("duplicate");
+		expect(() => setCloth(scene, { id: cloth.id, triangleColliders: [{ meshId: collider.id, friction: 2 }] }, options)).toThrow("friction");
+		const oversized = new Mesh("Oversized Collider", scene);
+		oversized.setVerticesData(VertexBuffer.PositionKind, [0, 0, 0, 1, 0, 0, 0, 1, 0]);
+		oversized.setIndices(Array.from({ length: 4097 * 3 }, (_, index) => index % 3));
+		expect(() => setCloth(scene, { id: cloth.id, triangleColliders: [{ meshId: oversized.id }] }, options)).toThrow("4097 triangles");
+		const invalid = new Mesh("Invalid Collider", scene);
+		invalid.setVerticesData(VertexBuffer.PositionKind, [0, 0, 0, 1, 0, 0, 0, 1, 0]);
+		invalid.setIndices([0, 1, 3]);
+		expect(() => setCloth(scene, { id: cloth.id, triangleColliders: [{ meshId: invalid.id }] }, options)).toThrow("out-of-range vertex index");
+	});
+
+	test("serializes authored constraints and triangle colliders without transient viewport state", () => {
+		const collider = MeshBuilder.CreatePlane("Serialized Collider", { size: 50 }, scene);
+		const cloth = createCloth(
+			scene,
+			{
+				name: "Serialized Cloth",
+				subdivisions: 2,
+				vertexConstraints: [{ vertexIndex: 4, maxDistance: 5, surfacePenetration: 1 }],
+				triangleColliders: [{ meshId: collider.id, thickness: 2, restitution: 0.25, friction: 0.5 }],
+			},
+			options
+		);
+		setClothConstraintPaintViewport(scene, { expectedRevision: 1, clothId: cloth.id, enabled: true }, options);
+		const serialized = SceneSerializer.Serialize(scene) as any;
+		expect(serialized.metadata.babylonEditorCloths[0]).toMatchObject({
+			constraintRevision: 1,
+			vertexConstraints: [{ vertexIndex: 4, maxDistance: 5, surfacePenetration: 1 }],
+			triangleColliders: [{ meshId: collider.id, thickness: 2, restitution: 0.25, friction: 0.5 }],
+		});
+		expect(serialized.metadata.clothConstraintPaintState).toBeUndefined();
+	});
+
+	test("uses an exact scene-local viewport paint lease and disables a deleted target", () => {
+		const cloth = createCloth(scene, { name: "Viewport Paint", subdivisions: 2 }, options);
+		expect(getClothConstraintPaintViewport(scene)).toMatchObject({ revision: 1, enabled: false, clothId: null });
+		const enabled = setClothConstraintPaintViewport(
+			scene,
+			{ expectedRevision: 1, clothId: cloth.id, enabled: true, channel: "surfacePenetration", value: 2, radius: 25, strength: 0.75, falloff: "linear" },
+			options
+		);
+		expect(enabled).toMatchObject({ revision: 2, enabled: true, clothId: cloth.id, channel: "surfacePenetration", value: 2, radius: 25, strength: 0.75, falloff: "linear" });
+		expect(() => setClothConstraintPaintViewport(scene, { expectedRevision: 1, enabled: false }, options)).toThrow("stale");
+		deleteCloth(scene, { id: cloth.id }, options);
+		expect(getClothConstraintPaintViewport(scene)).toMatchObject({ revision: 3, enabled: false, clothId: null });
 	});
 });

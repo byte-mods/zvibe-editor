@@ -14,40 +14,60 @@ import { isMesh } from "../tools/guards";
 import { configureShadowMapRefreshRate, configureShadowMapRenderListPredicate } from "../tools/light";
 
 import { configureAddressables } from "./addressables";
+import { configureAdaptivePerformance } from "./adaptive-performance";
+import { configureMobileSystemRuntime } from "./mobile-system-runtime";
+import { configureGrpcTransport } from "./grpc-transport";
 import { configureAnimatedTiles } from "./animated-tiles";
 import { configureAnimationEvents } from "./animation-events";
+import { configureUnityAnimationClipRuntime } from "./unity-animation-clip-runtime";
 import { configureAnimators } from "./animator";
 import { configureAudioMixer } from "./audio-mixer";
 import { configureBehaviorTrees } from "./behavior-trees";
+import { configureMlTrainingRuntime } from "../ai/ml-training";
 import { configureCameraImpulses } from "./camera-impulses";
+import { configureCameraStacks } from "./camera-stacks";
+import { configureRendererLists } from "../rendering/renderer-lists";
 import { configureCloths } from "./cloth";
 import { configureHumanoidAvatars } from "./humanoid-avatar";
 import { configureInputActions } from "./input-actions";
 import { configureLights } from "./light";
+import { configureLightCookies, getLightCookieTexture } from "./light-cookies";
 import { configureLightingScenarios } from "./lighting-scenarios";
+import { configureLightProbeVolumes } from "./light-probes";
+import { configureReflectionProbes } from "./reflection-probes";
 import { configureLocalization } from "./localization";
 import { SceneLoaderOptions, ScriptMap } from "./loader";
 import { configureNavAgents } from "./nav-agents";
 import { configureParticleCollisions } from "./particle-collisions";
+import { configureParticleCollisionEvents } from "./particle-collision-events";
+import { configureParticleInteractions } from "./particle-interactions";
 import { configureParticleProximityEvents } from "./particle-proximity-events";
 import { configureParticleTextureVectorFields } from "./particle-texture-vector-fields";
 import { configureParticleVectorFields } from "./particle-vector-fields";
 import { configurePhysicsAggregate, configurePhysicsConstraints } from "./physics";
 import { configurePhysics2D } from "./physics2d";
 import { configureRenderingVolumes } from "./rendering-volumes";
+import { configureActiveRenderingProfile } from "./rendering-profiles";
+import { configureRendererDataSelections } from "./renderer-data";
+import { configureSubsurfaceScattering } from "../rendering/subsurface-scattering";
 import { configureRigLayers } from "./rig-layers";
 import { configureIKControllers, configureLookAtConstraints, configureSpriteIKControllers } from "./rigging";
 import { _applyScriptsForObjects, _removeRegisteredScriptInstance, IRegisteredScript, scriptsDictionary } from "./script/apply";
 import { _preloadScriptsAssets } from "./script/preload";
 import { configureSplineFollowers } from "./splines";
 import { configureTerrainStreaming } from "./terrain-streaming";
+import { configureOcclusionCulling, occlusionCullingMetadataKey, occlusionCullingSetsMetadataKey } from "./occlusion-culling";
 import { configureImportedTextures, registerTextureParser } from "./texture";
 import { configureTransformNodes } from "./transform-node";
 import { clearRuntimeGameObjectComponents, configureGameObjectComponents } from "./game-object-components";
+import { configureLighting2D } from "./lighting-2d";
 import { configureVehicles } from "./vehicles";
 import { configureVideoPlayers } from "./videos";
+import { configureAlembicPlayers } from "./alembic";
 import { configureVirtualCameras } from "./virtual-cameras";
 import { configureVisualScriptGraphs } from "./visual-scripting";
+import { refreshAuthoredECSRuntime } from "../ecs/runtime";
+import { getECSStableHash } from "../ecs/hash";
 
 import { registerAudioParser } from "./sound";
 import { registerShadowGeneratorParser } from "./shadows";
@@ -83,6 +103,7 @@ export interface IUnloadSceneAdditiveResult {
 }
 
 export interface IAdditiveSceneRuntimeServices {
+	alembicPlayers?: unknown;
 	addressables?: unknown;
 	animators?: unknown;
 	audioMixer?: unknown;
@@ -98,7 +119,17 @@ type ITrackedObserver = { remove: () => void };
 type IServiceKey = keyof IAdditiveSceneRuntimeServices;
 type IServiceValues = Partial<Record<IServiceKey, any>>;
 
-const serviceKeys: IServiceKey[] = ["addressables", "animators", "audioMixer", "humanoidAvatarValidation", "inputActions", "lightingScenarios", "localization", "videoPlayers"];
+const serviceKeys: IServiceKey[] = [
+	"alembicPlayers",
+	"addressables",
+	"animators",
+	"audioMixer",
+	"humanoidAvatarValidation",
+	"inputActions",
+	"lightingScenarios",
+	"localization",
+	"videoPlayers",
+];
 
 const containerCollectionKeys = [
 	"cameras",
@@ -191,11 +222,41 @@ function mergeMetadataValue(base: any, incoming: any): any {
 function composeRuntimeMetadata(registry: ISceneRegistry): void {
 	if (!registry.handles.length) {
 		registry.scene.metadata = registry.baseMetadata;
+		if (registry.scene.metadata && typeof registry.scene.metadata === "object") {
+			delete registry.scene.metadata[occlusionCullingSetsMetadataKey];
+		}
 		return;
 	}
 	let metadata = isPlainObject(registry.baseMetadata) ? { ...registry.baseMetadata } : {};
 	registry.handles.forEach((handle) => (metadata = mergeMetadataValue(metadata, handle.metadata)));
+	const ecsConfiguration = registry.baseMetadata?.babylonEditorECS ?? registry.handles.find((handle) => handle.metadata.babylonEditorECS)?.metadata.babylonEditorECS;
+	if (ecsConfiguration !== undefined) {
+		// ECS configuration is one exact scene-wide contract. Generic array
+		// merging would duplicate built-ins and corrupt cross-references.
+		metadata.babylonEditorECS = ecsConfiguration;
+	} else {
+		delete metadata.babylonEditorECS;
+	}
+	const occlusionConfigurations = [registry.baseMetadata, ...registry.handles.map((handle) => handle.metadata)]
+		.map((value) => value?.[occlusionCullingMetadataKey])
+		.filter((value) => value !== undefined);
+	if (occlusionConfigurations.length) {
+		metadata[occlusionCullingSetsMetadataKey] = occlusionConfigurations;
+	} else {
+		delete metadata[occlusionCullingSetsMetadataKey];
+	}
 	registry.scene.metadata = metadata;
+}
+
+function validateECSConfigurationCompatibility(registry: ISceneRegistry, metadata: Record<string, any>): void {
+	const incoming = metadata.babylonEditorECS;
+	if (incoming === undefined) {
+		return;
+	}
+	const existing = registry.baseMetadata?.babylonEditorECS ?? registry.handles.find((handle) => handle.metadata.babylonEditorECS)?.metadata.babylonEditorECS;
+	if (existing !== undefined && getECSStableHash(existing) !== getECSStableHash(incoming)) {
+		throw new Error("Cannot load additive scene because its ECS configuration differs from the running scene contract.");
+	}
 }
 
 function isolateRuntimeServices(scene: Scene): void {
@@ -215,7 +276,7 @@ function captureRuntimeServices(scene: Scene): IServiceValues {
 
 function composeRuntimeServices(registry: ISceneRegistry): void {
 	for (const key of serviceKeys) {
-		if (key === "animators" || key === "videoPlayers") {
+		if (key === "alembicPlayers" || key === "animators" || key === "videoPlayers") {
 			const maps = [registry.baseServices[key], ...registry.handles.map((handle) => handle._services[key])].filter((value): value is Map<any, any> => value instanceof Map);
 			if (maps.length) {
 				const combined = new Map<any, any>();
@@ -232,7 +293,7 @@ function composeRuntimeServices(registry: ISceneRegistry): void {
 }
 
 function validateServiceCollisions(registry: ISceneRegistry, services: IServiceValues): void {
-	for (const key of ["animators", "videoPlayers"] as const) {
+	for (const key of ["alembicPlayers", "animators", "videoPlayers"] as const) {
 		const incoming = services[key];
 		if (!(incoming instanceof Map)) {
 			continue;
@@ -249,6 +310,10 @@ function validateServiceCollisions(registry: ISceneRegistry, services: IServiceV
 }
 
 function disposeRuntimeServices(services: IServiceValues): void {
+	const alembicPlayers = services.alembicPlayers;
+	if (alembicPlayers instanceof Map) {
+		alembicPlayers.forEach((runtime) => runtime?.dispose?.());
+	}
 	const animators = services.animators;
 	if (animators instanceof Map) {
 		animators.forEach((runtime) => runtime?.dispose?.());
@@ -459,13 +524,13 @@ function disposeContainer(scene: Scene, container: AssetContainer, retainShared:
 	return retained.size;
 }
 
-function configureClusteredLights(scene: Scene): { container: any; lights: any[] } | null {
+function configureClusteredLights(scene: Scene, rootUrl = ""): { container: any; lights: any[] } | null {
 	const ids = Array.isArray(scene.metadata?.clusteredLight?.lights) ? scene.metadata.clusteredLight.lights : [];
 	if (!ids.length) {
 		return null;
 	}
 	const existing = scene.lights.find((light) => light.getClassName() === "ClusteredLightContainer") as any;
-	const clustered = configureLights(scene, existing);
+	const clustered = configureLights(scene, existing, rootUrl);
 	if (!existing) {
 		additiveClusteredLightContainers.add(clustered);
 	}
@@ -482,7 +547,17 @@ function releaseClusteredLights(configuration: { container: any; lights: any[] }
 
 async function configureRuntime(scene: Scene, container: AssetContainer, rootUrl: string, scriptsMap: ScriptMap, options: ILoadSceneAdditiveOptions): Promise<void> {
 	const scope = { meshes: container.meshes };
+	configureLightCookies(scene, rootUrl, container.lights);
+	for (const light of container.lights) {
+		const texture = getLightCookieTexture(light);
+		if (texture && !container.textures.includes(texture)) {
+			container.textures.push(texture);
+		}
+	}
 	await configureImportedTextures(scene, rootUrl, container.textures);
+	// Additive GUI/script preloading observes the same scene-level localization and Addressables services.
+	configureAddressables(scene, rootUrl);
+	configureLocalization(scene, rootUrl);
 	await waitForSceneReady(scene, (progress) => options.onProgress?.(0.55 + progress * 0.2));
 	if (!options.skipAssetsPreload) {
 		let loadedAssetsCount = 0;
@@ -508,28 +583,41 @@ async function configureRuntime(scene: Scene, container: AssetContainer, rootUrl
 	configureGeneratedModelLodDeformations(container);
 	configureCloths(scene);
 	configurePhysics2D(scene);
-	configureNavAgents(scene);
-	configureLocalization(scene);
-	configureAddressables(scene, rootUrl);
+	await configureNavAgents(scene, rootUrl);
 	configureBehaviorTrees(scene);
+	configureMlTrainingRuntime(scene);
 	configureInputActions(scene);
 	configureAudioMixer(scene);
 	configureLightingScenarios(scene);
+	configureLightProbeVolumes(scene);
+	configureReflectionProbes(scene);
 	configureAnimators(scene);
 	configureAnimationEvents(scene);
+	configureUnityAnimationClipRuntime(scene, rootUrl);
 	configureSplineFollowers(scene);
 	configureVirtualCameras(scene);
-	configureTerrainStreaming(scene);
+	configureTerrainStreaming(scene, rootUrl);
 	configureParticleCollisions(scene);
+	configureParticleCollisionEvents(scene);
+	configureParticleInteractions(scene);
 	configureParticleVectorFields(scene);
 	configureParticleTextureVectorFields(scene);
 	configureParticleProximityEvents(scene);
 	configureVisualScriptGraphs(scene);
+	configureRendererLists(scene);
 	configureRenderingVolumes(scene, rootUrl);
+	configureActiveRenderingProfile(scene, rootUrl);
+	configureAdaptivePerformance(scene);
+	configureMobileSystemRuntime(scene);
+	configureGrpcTransport(scene);
+	configureSubsurfaceScattering(scene, rootUrl);
+	configureRendererDataSelections(scene);
 	configureAnimatedTiles(scene);
+	await configureAlembicPlayers(scene, rootUrl, container.transformNodes);
 	await configureVideoPlayers(scene, rootUrl);
 	configureTransformNodes(container);
 	configureGameObjectComponents(container);
+	configureLighting2D(scene);
 	_applyScriptsForObjects(scene, scriptObjects(scene, container), scriptsMap, rootUrl);
 	options.onProgress?.(1);
 }
@@ -615,6 +703,17 @@ export class AdditiveSceneHandle {
 			registry.handles = registry.handles.filter((handle) => handle !== this);
 			composeRuntimeServices(registry);
 			composeRuntimeMetadata(registry);
+			configureCameraStacks(this.scene);
+			configureRendererLists(this.scene);
+			configureLightProbeVolumes(this.scene);
+			configureReflectionProbes(this.scene);
+			configureAdaptivePerformance(this.scene);
+			configureMobileSystemRuntime(this.scene);
+			configureGrpcTransport(this.scene);
+			configureSubsurfaceScattering(this.scene);
+			configureLighting2D(this.scene);
+			configureOcclusionCulling(this.scene);
+			refreshAuthoredECSRuntime(this.scene);
 			if (!registry.handles.length) {
 				registries.delete(this.scene);
 			}
@@ -670,11 +769,12 @@ async function loadSceneAdditiveInternal(
 	let services: IServiceValues = {};
 	let trackedObservers: ITrackedObserver[] = [];
 	let trackedScripts: ITrackedScript[] = [];
+	let registeredHandle: AdditiveSceneHandle | null = null;
 
 	try {
 		scene.metadata = metadata;
 		isolateRuntimeServices(scene);
-		clusteredLights = configureClusteredLights(scene);
+		clusteredLights = configureClusteredLights(scene, rootUrl);
 		collectionBaseline = snapshotSceneCollections(scene);
 		if (options.configureRuntime !== false) {
 			await configureRuntime(scene, container, rootUrl, scriptsMap, options);
@@ -687,10 +787,21 @@ async function loadSceneAdditiveInternal(
 		trackedScripts = addedScripts(scriptObjects(scene, container), scriptBaseline);
 		addRuntimeCreatedResources(container, scene, collectionBaseline);
 		validateServiceCollisions(registry, services);
+		validateECSConfigurationCompatibility(registry, metadata);
 		const handle = new AdditiveSceneHandle({ rootUrl, sceneFilename, scene, container, metadata, services, trackedScripts, trackedObservers, clusteredLights });
 		registry.handles.push(handle);
+		registeredHandle = handle;
+		composeRuntimeMetadata(registry);
+		if (options.configureRuntime !== false) {
+			configureOcclusionCulling(scene);
+			refreshAuthoredECSRuntime(scene);
+		}
 		return handle;
 	} catch (error) {
+		if (registeredHandle) {
+			registry.handles = registry.handles.filter((handle) => handle !== registeredHandle);
+			registeredHandle = null;
+		}
 		trackedObservers = addedObservers(scene, observerBaseline);
 		trackedScripts = addedScripts(scriptObjects(scene, container), scriptBaseline);
 		removeTrackedRuntime(trackedScripts, trackedObservers);
@@ -705,6 +816,15 @@ async function loadSceneAdditiveInternal(
 			scene.activeCamera = previousActiveCamera;
 			composeRuntimeServices(registry);
 			composeRuntimeMetadata(registry);
+			configureCameraStacks(scene);
+			configureRendererLists(scene);
+			configureLightProbeVolumes(scene);
+			configureReflectionProbes(scene);
+			configureAdaptivePerformance(scene);
+			configureMobileSystemRuntime(scene);
+			configureGrpcTransport(scene);
+			configureSubsurfaceScattering(scene);
+			configureOcclusionCulling(scene);
 		}
 		if (!registry.handles.length) {
 			registries.delete(scene);

@@ -111,6 +111,19 @@ describe("dependency-triggered Auto Reimport", () => {
 		}
 	});
 
+	test("ignores assets deleted after the registry snapshot while rebuilding external-origin watches", async () => {
+		const assetPath = join(directory, "assets/deleted-after-index.png");
+		await writeFile(assetPath, await png(1, 2, 3));
+		const metadata = await readAssetMetadata(assetPath);
+		metadata.originPath = join(directory, "external-origin.png");
+		await writeAssetMetadata(assetPath, metadata);
+		await rebuildAssetRegistry();
+		const status = await getAutoReimportStatus();
+		await setAutoReimportSettings(status.settingsFingerprint, { ...status.settings, watchImportedSources: true });
+		await remove(assetPath);
+		expect(await getAutoReimportOriginPaths()).toEqual([]);
+	});
+
 	test("exposes the same exact settings/plan/execute contract through editor MCP actions", async () => {
 		await writeFile(join(directory, "assets/action.png"), await png(1, 2, 3));
 		await rebuildAssetRegistry();

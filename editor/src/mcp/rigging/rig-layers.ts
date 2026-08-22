@@ -1,5 +1,14 @@
 import { Bone, Quaternion, Scene, Skeleton, Space, Tools, TransformNode, Vector3 } from "babylonjs";
-import { applyRigLayers, configureRigLayers } from "babylonjs-editor-tools";
+import {
+	applyRigLayers,
+	clearAnimationRigProfile as clearRuntimeAnimationRigProfile,
+	configureAnimationRigProfiler,
+	configureRigLayers,
+	getAnimationRigProfile as getRuntimeAnimationRigProfile,
+	getAnimationRigJobRuntimeDiagnostics,
+	getAnimationRigJobType,
+	listAnimationRigJobTypes as listRegisteredAnimationRigJobTypes,
+} from "babylonjs-editor-tools";
 
 import { IMCPActionOptions } from "../action";
 
@@ -58,6 +67,96 @@ function normalizeWeight(value: unknown, fallback = 1): number {
 		throw new Error("Rig weights must be finite numbers from 0 through 1.");
 	}
 	return value;
+}
+
+function validateCustomJobJson(value: unknown, path = "jobData", depth = 0, state = { entries: 0 }): void {
+	if (depth > 16) {
+		throw new Error(`${path} exceeds the maximum JSON depth of 16.`);
+	}
+	if (value === null || typeof value === "string" || typeof value === "boolean") {
+		return;
+	}
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) {
+			throw new Error(`${path} contains a non-finite number.`);
+		}
+		return;
+	}
+	if (Array.isArray(value)) {
+		if (value.length > 1024) {
+			throw new Error(`${path} contains more than 1024 array entries.`);
+		}
+		value.forEach((entry, index) => {
+			state.entries++;
+			validateCustomJobJson(entry, `${path}[${index}]`, depth + 1, state);
+		});
+		return;
+	}
+	if (typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype) {
+		throw new Error(`${path} must contain only JSON-compatible values.`);
+	}
+	for (const [key, entry] of Object.entries(value)) {
+		if (!key || key.length > 128 || key === "__proto__" || key === "prototype" || key === "constructor") {
+			throw new Error(`${path} contains an unsafe or oversized property name.`);
+		}
+		state.entries++;
+		if (state.entries > 4096) {
+			throw new Error("jobData contains more than 4096 values.");
+		}
+		validateCustomJobJson(entry, `${path}.${key}`, depth + 1, state);
+	}
+}
+
+function normalizeCustomJobData(value: unknown): Record<string, unknown> {
+	const data = value ?? {};
+	if (!data || typeof data !== "object" || Array.isArray(data)) {
+		throw new Error("Custom Animation Rig jobData must be a JSON object.");
+	}
+	validateCustomJobJson(data);
+	const serialized = JSON.stringify(data);
+	if (serialized.length > 65536) {
+		throw new Error("Custom Animation Rig jobData exceeds 64 KiB.");
+	}
+	return JSON.parse(serialized);
+}
+
+function normalizeCustomJobBindings(values: unknown, label: string, maximum: number): string[] {
+	if (values === undefined) {
+		return [];
+	}
+	if (!Array.isArray(values) || values.length > maximum || values.some((value) => typeof value !== "string" || !value.trim() || value.length > 512)) {
+		throw new Error(`${label} must contain at most ${maximum} non-empty strings of at most 512 characters.`);
+	}
+	const normalized = values.map((value) => value.trim());
+	if (new Set(normalized).size !== normalized.length) {
+		throw new Error(`${label} must not contain duplicates.`);
+	}
+	return normalized;
+}
+
+function createCustomJobConfig(scene: Scene, layer: any, data: any): any {
+	const skeleton = resolveSkeleton(scene, layer.skeletonId);
+	const jobType = String(data.jobType ?? "").trim();
+	if (!/^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$/.test(jobType)) {
+		throw new Error("Custom Animation Rig jobType must contain 1 through 128 safe identifier characters.");
+	}
+	const registered = getAnimationRigJobType(jobType);
+	const jobVersion = data.jobVersion ?? registered?.dataVersion ?? 1;
+	if (!Number.isInteger(jobVersion) || jobVersion < 1 || jobVersion > 100000) {
+		throw new Error("Custom Animation Rig jobVersion must be an integer from 1 through 100000.");
+	}
+	const boneNames = normalizeCustomJobBindings(data.boneNames, "boneNames", 64);
+	for (const boneName of boneNames) {
+		resolveBone(skeleton, boneName);
+	}
+	const nodeIds = normalizeCustomJobBindings(data.nodeIds, "nodeIds", 64);
+	for (const nodeId of nodeIds) {
+		if (!(scene.getNodeById(nodeId) instanceof TransformNode)) {
+			throw new Error(`Custom Animation Rig node binding "${nodeId}" was not found or is not a TransformNode.`);
+		}
+	}
+	const jobData = normalizeCustomJobData(data.jobData ?? registered?.defaultData ?? {});
+	return { jobType, jobVersion, boneNames, nodeIds, jobData };
 }
 
 function createMultiParentConfig(scene: Scene, layer: any, data: any): any {
@@ -634,8 +733,67 @@ function constraintResult(scene: Scene, layer: any, constraint: any): any {
 							? fullBodyIkResult(scene, layer, constraint)
 							: constraint.type === "overrideTransform" || constraint.type === "dampedTransform" || constraint.type === "blendTransform"
 								? transformConstraintResult(scene, layer, constraint)
-								: { valid: false };
+								: constraint.type === "customJob"
+									? getAnimationRigJobRuntimeDiagnostics(scene as any, layer, constraint)
+									: { valid: false };
 	return { ...structuredClone(constraint), ...validation };
+}
+
+/** Lists custom Animation Rig job types registered by loaded project scripts. */
+export function listAnimationRigJobTypes(): any {
+	return { jobTypes: listRegisteredAnimationRigJobTypes() };
+}
+
+function validateAnimationRigProfileSelection(scene: Scene, data: any): void {
+	if (data.skeletonId !== undefined) {
+		resolveSkeleton(scene, data.skeletonId);
+	}
+	if (data.constraintId !== undefined && data.layerId === undefined) {
+		throw new Error("Animation Rig profile constraintId requires layerId.");
+	}
+	if (data.layerId !== undefined) {
+		const layer = resolveLayer(scene, data.layerId);
+		if (data.skeletonId !== undefined && layer.skeletonId !== data.skeletonId) {
+			throw new Error(`Rig layer "${data.layerId}" does not belong to skeleton "${data.skeletonId}".`);
+		}
+		if (data.constraintId !== undefined && !layer.constraints.some((constraint: any) => constraint.id === data.constraintId)) {
+			throw new Error(`Rig constraint "${data.constraintId}" was not found in layer "${data.layerId}".`);
+		}
+	}
+}
+
+/** Reads bounded shared-runtime Animation Rig CPU samples and hierarchical summaries. */
+export function getAnimationRigProfile(scene: Scene, data: any = {}): any {
+	validateAnimationRigProfileSelection(scene, data);
+	return getRuntimeAnimationRigProfile(scene as any, {
+		skeletonId: data.skeletonId,
+		layerId: data.layerId,
+		constraintId: data.constraintId,
+		includeSamples: data.includeSamples === true,
+		sampleOffset: data.sampleOffset,
+		sampleLimit: data.sampleLimit,
+	});
+}
+
+/** Enables/disables or bounds transient Animation Rig CPU sampling. */
+export function setAnimationRigProfile(scene: Scene, data: any, options: IMCPActionOptions): any {
+	if (data.enabled === undefined && data.sampleCapacity === undefined && data.sampleEveryNEvaluations === undefined) {
+		throw new Error("Provide enabled, sampleCapacity, or sampleEveryNEvaluations.");
+	}
+	const result = configureAnimationRigProfiler(scene as any, {
+		enabled: data.enabled,
+		sampleCapacity: data.sampleCapacity,
+		sampleEveryNEvaluations: data.sampleEveryNEvaluations,
+	});
+	options.editor.layout.inspector.forceUpdate();
+	return result;
+}
+
+/** Clears transient Animation Rig profiler samples and summaries without changing its settings. */
+export function clearAnimationRigProfile(scene: Scene, _data: any, options: IMCPActionOptions): any {
+	const result = clearRuntimeAnimationRigProfile(scene as any);
+	options.editor.layout.inspector.forceUpdate();
+	return result;
 }
 
 /** Lists deterministic rig layers, ordered constraints, reference validity, and current evaluator evidence. */
@@ -728,7 +886,8 @@ export function createRigConstraint(scene: Scene, data: any, options: IMCPAction
 		data.type !== "fullBodyIk" &&
 		data.type !== "overrideTransform" &&
 		data.type !== "dampedTransform" &&
-		data.type !== "blendTransform"
+		data.type !== "blendTransform" &&
+		data.type !== "customJob"
 	) {
 		throw new Error("Unsupported rig constraint type.");
 	}
@@ -749,7 +908,9 @@ export function createRigConstraint(scene: Scene, data: any, options: IMCPAction
 									? createOverrideTransformConfig(scene, layer, data)
 									: data.type === "dampedTransform"
 										? createDampedTransformConfig(scene, layer, data)
-										: createBlendTransformConfig(scene, layer, data);
+										: data.type === "blendTransform"
+											? createBlendTransformConfig(scene, layer, data)
+											: createCustomJobConfig(scene, layer, data);
 	const constraint = {
 		id,
 		name: String(
@@ -770,7 +931,9 @@ export function createRigConstraint(scene: Scene, data: any, options: IMCPAction
 											? "Override Transform"
 											: data.type === "dampedTransform"
 												? "Damped Transform"
-												: "Blend Transform")
+												: data.type === "blendTransform"
+													? "Blend Transform"
+													: "Custom Animation Job")
 		)
 			.trim()
 			.slice(0, 256),
@@ -937,6 +1100,21 @@ export function setRigConstraint(scene: Scene, data: any, options: IMCPActionOpt
 				rotationWeight: data.rotationWeight ?? constraint.rotationWeight,
 				positionAxes: data.positionAxes ?? constraint.positionAxes,
 				rotationAxes: data.rotationAxes ?? constraint.rotationAxes,
+			})
+		);
+	}
+	if (
+		constraint.type === "customJob" &&
+		(data.jobType !== undefined || data.jobVersion !== undefined || data.boneNames !== undefined || data.nodeIds !== undefined || data.jobData !== undefined)
+	) {
+		Object.assign(
+			constraint,
+			createCustomJobConfig(scene, layer, {
+				jobType: data.jobType ?? constraint.jobType,
+				jobVersion: data.jobVersion ?? constraint.jobVersion,
+				boneNames: data.boneNames ?? constraint.boneNames,
+				nodeIds: data.nodeIds ?? constraint.nodeIds,
+				jobData: data.jobData ?? constraint.jobData,
 			})
 		);
 	}

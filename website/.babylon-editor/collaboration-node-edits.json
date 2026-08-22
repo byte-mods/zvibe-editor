@@ -1,0 +1,359 @@
+{
+	"version": 1,
+	"nodes": {
+		"25474c8d-fde1-4e13-b0e6-ae6f1701f444": {
+			"revision": 1,
+			"fingerprint": "841eb02e9c4fd0110e9fcd157128c192164f67576924e587ee08356627466f6c",
+			"updatedAt": "2026-07-28T22:42:05.376Z"
+		},
+		"d5c172aa-ea0f-4ce3-8d6a-ebb85669943e": {
+			"revision": 1,
+			"fingerprint": "0cdfccec024ba99a8158d5022f07ba23cf8a2a6e79044705e8a4416ce0e6f569",
+			"updatedAt": "2026-07-28T22:43:03.067Z"
+		},
+		"3d749b89-d9dd-4137-9287-2d5956a14121": {
+			"revision": 1,
+			"fingerprint": "ef2b2de2f35348b91443f532c20f6bb3dbf41d79693da04c3dd352ff6f5688b8",
+			"updatedAt": "2026-07-28T22:43:03.130Z"
+		},
+		"0f0eea6d-c71a-4aff-b04c-69cbac2544f6": {
+			"revision": 1,
+			"fingerprint": "7def6a18319c3a61391bd6163208177014b3280dac54da5374145ea59f8c9d51",
+			"updatedAt": "2026-07-28T22:43:59.769Z"
+		},
+		"1952da63-4d81-413d-9d9b-680c1df4a3e5": {
+			"revision": 1,
+			"fingerprint": "e4692576024683f8759718d203e67e70b28109d7a946c6fbaa4e3ea8d83e7fe2",
+			"updatedAt": "2026-07-28T22:43:59.829Z"
+		},
+		"6837e82d-8ef9-483e-8427-c91ec371fe0f": {
+			"revision": 1,
+			"fingerprint": "dd822fb759154000ace57e42c0ad46c7347348318efdd18e039873b015d72678",
+			"updatedAt": "2026-07-28T23:10:23.149Z"
+		},
+		"9c2f1b83-909d-411b-9a3d-1c44f4cfe494": {
+			"revision": 1,
+			"fingerprint": "935b21a43bd1eefd2b2f38db304b45edb8d58c8df069c8d5fa547af1a0d9a1af",
+			"updatedAt": "2026-07-28T23:10:23.213Z"
+		},
+		"461dfd0b-89e9-4aac-9646-f576e8d90d06": {
+			"revision": 1,
+			"fingerprint": "8811775cebb01476a107483811de7a238da0f99577433eb5edd8e7ab0ecfe582",
+			"updatedAt": "2026-07-28T23:12:01.871Z"
+		},
+		"63527abe-5a43-4fad-99ef-724a7e382cff": {
+			"revision": 1,
+			"fingerprint": "8e973f066e48e98d36a9c5355dabe8dcb1fa62badf42bfbc3d1c572f93a1a8f1",
+			"updatedAt": "2026-07-28T23:12:01.938Z"
+		},
+		"7d5d913f-c595-4346-8921-d8f207428641": {
+			"revision": 1,
+			"fingerprint": "855184746d0d4aaa12ad437ab21c009c7eff758508f206eccf08fea22484a588",
+			"updatedAt": "2026-07-28T23:38:36.532Z"
+		},
+		"415d69a4-1d16-4ecd-948f-869613e2bef5": {
+			"revision": 1,
+			"fingerprint": "4da01ea66bcecbc65ffffc8a7f1ddd1911734e440a6238fc477b646c706b0b3f",
+			"updatedAt": "2026-07-28T23:38:36.600Z"
+		}
+	},
+	"operations": [
+		{
+			"id": "codex-652-receiver-shadow",
+			"requestFingerprint": "dc244a09c7e3970fc8d172e7cb5fa066e04270927f82c37bcb8ab7917c965ee2",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-receiver-shadow",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "25474c8d-fde1-4e13-b0e6-ae6f1701f444",
+					"nodeName": "Codex 652 Deferred Receiver",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": true,
+						"visible": true,
+						"materialId": "70aaae3d-7fda-41b6-ae5d-7837204f6c9d"
+					},
+					"fingerprint": "841eb02e9c4fd0110e9fcd157128c192164f67576924e587ee08356627466f6c"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T22:42:05.376Z"
+		},
+		{
+			"id": "codex-652-receiver-shadow-d5c172aa-ea0f-4ce3-8d6a-ebb85669943e",
+			"requestFingerprint": "6dfab0b09c8899cf68f4f46cf839d9c212bb945f2073ac29ec5be42a5abd6c86",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-receiver-shadow-d5c172aa-ea0f-4ce3-8d6a-ebb85669943e",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "d5c172aa-ea0f-4ce3-8d6a-ebb85669943e",
+					"nodeName": "Codex 652 Deferred Receiver",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": true,
+						"visible": true,
+						"materialId": "35bf76c8-f022-4ff4-912e-1dcab042b91c"
+					},
+					"fingerprint": "0cdfccec024ba99a8158d5022f07ba23cf8a2a6e79044705e8a4416ce0e6f569"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T22:43:03.067Z"
+		},
+		{
+			"id": "codex-652-caster-no-receive-3d749b89-d9dd-4137-9287-2d5956a14121",
+			"requestFingerprint": "aff9daf1c6e457ecd9b68cfb67e0ea7ad4dd3fd487c39eeb29b52c0a3f23f26f",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-caster-no-receive-3d749b89-d9dd-4137-9287-2d5956a14121",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "3d749b89-d9dd-4137-9287-2d5956a14121",
+					"nodeName": "Codex 652 Shadow Caster",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": false,
+						"visible": true,
+						"materialId": "35bf76c8-f022-4ff4-912e-1dcab042b91c"
+					},
+					"fingerprint": "ef2b2de2f35348b91443f532c20f6bb3dbf41d79693da04c3dd352ff6f5688b8"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T22:43:03.130Z"
+		},
+		{
+			"id": "codex-652-receiver-shadow-0f0eea6d-c71a-4aff-b04c-69cbac2544f6",
+			"requestFingerprint": "5cb6646a5b8b9a831f5a34d5224d18e290d4f6a5588c772f550b3375a39a3b2b",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-receiver-shadow-0f0eea6d-c71a-4aff-b04c-69cbac2544f6",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "0f0eea6d-c71a-4aff-b04c-69cbac2544f6",
+					"nodeName": "Codex 652 Deferred Receiver",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": true,
+						"visible": true,
+						"materialId": "0f9c84f7-ce52-49e4-b8c2-f40f8e78d7da"
+					},
+					"fingerprint": "7def6a18319c3a61391bd6163208177014b3280dac54da5374145ea59f8c9d51"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T22:43:59.769Z"
+		},
+		{
+			"id": "codex-652-caster-no-receive-1952da63-4d81-413d-9d9b-680c1df4a3e5",
+			"requestFingerprint": "3a5d75a03fedcfd94d3e7b5158f83847fbd2703ffb5d2bb4cda40a2f88bd6891",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-caster-no-receive-1952da63-4d81-413d-9d9b-680c1df4a3e5",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "1952da63-4d81-413d-9d9b-680c1df4a3e5",
+					"nodeName": "Codex 652 Shadow Caster",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": false,
+						"visible": true,
+						"materialId": "0f9c84f7-ce52-49e4-b8c2-f40f8e78d7da"
+					},
+					"fingerprint": "e4692576024683f8759718d203e67e70b28109d7a946c6fbaa4e3ea8d83e7fe2"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T22:43:59.829Z"
+		},
+		{
+			"id": "codex-652-receiver-shadow-6837e82d-8ef9-483e-8427-c91ec371fe0f",
+			"requestFingerprint": "96d98b4f6b89cd5974810b84da965be86b098c94cba55f23b3b5e2a6f14265ca",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-receiver-shadow-6837e82d-8ef9-483e-8427-c91ec371fe0f",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "6837e82d-8ef9-483e-8427-c91ec371fe0f",
+					"nodeName": "Codex 652 Deferred Receiver",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": true,
+						"visible": true,
+						"materialId": "cac3ad9f-e25b-4ada-8d13-aeaf38a310cc"
+					},
+					"fingerprint": "dd822fb759154000ace57e42c0ad46c7347348318efdd18e039873b015d72678"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T23:10:23.149Z"
+		},
+		{
+			"id": "codex-652-caster-no-receive-9c2f1b83-909d-411b-9a3d-1c44f4cfe494",
+			"requestFingerprint": "d35ae193e897f54f3c766ee42c456aee29d9b5383ba8de1faeab0bde33eb0f03",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-caster-no-receive-9c2f1b83-909d-411b-9a3d-1c44f4cfe494",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "9c2f1b83-909d-411b-9a3d-1c44f4cfe494",
+					"nodeName": "Codex 652 Shadow Caster",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": false,
+						"visible": true,
+						"materialId": "cac3ad9f-e25b-4ada-8d13-aeaf38a310cc"
+					},
+					"fingerprint": "935b21a43bd1eefd2b2f38db304b45edb8d58c8df069c8d5fa547af1a0d9a1af"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T23:10:23.213Z"
+		},
+		{
+			"id": "codex-652-receiver-shadow-461dfd0b-89e9-4aac-9646-f576e8d90d06",
+			"requestFingerprint": "a75e4a0058fd08dc0767b9898169b959a78282ba11e4001e77fe243efd7f84e4",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-receiver-shadow-461dfd0b-89e9-4aac-9646-f576e8d90d06",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "461dfd0b-89e9-4aac-9646-f576e8d90d06",
+					"nodeName": "Codex 652 Deferred Receiver",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": true,
+						"visible": true,
+						"materialId": "2cc9b32c-de59-44d5-9b59-9bed9cf58910"
+					},
+					"fingerprint": "8811775cebb01476a107483811de7a238da0f99577433eb5edd8e7ab0ecfe582"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T23:12:01.871Z"
+		},
+		{
+			"id": "codex-652-caster-no-receive-63527abe-5a43-4fad-99ef-724a7e382cff",
+			"requestFingerprint": "f6e78adeb219fcebeee72a396153bfce944b831ab381a4fe093342341a056871",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-caster-no-receive-63527abe-5a43-4fad-99ef-724a7e382cff",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "63527abe-5a43-4fad-99ef-724a7e382cff",
+					"nodeName": "Codex 652 Shadow Caster",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": false,
+						"visible": true,
+						"materialId": "2cc9b32c-de59-44d5-9b59-9bed9cf58910"
+					},
+					"fingerprint": "8e973f066e48e98d36a9c5355dabe8dcb1fa62badf42bfbc3d1c572f93a1a8f1"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T23:12:01.938Z"
+		},
+		{
+			"id": "codex-652-receiver-shadow-7d5d913f-c595-4346-8921-d8f207428641",
+			"requestFingerprint": "7029d168ba8cab3926ceec712cdd39af459b0c5e56706a2c6f38ad9cbb2db70a",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-receiver-shadow-7d5d913f-c595-4346-8921-d8f207428641",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "7d5d913f-c595-4346-8921-d8f207428641",
+					"nodeName": "Codex 652 Deferred Receiver",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": true,
+						"visible": true,
+						"materialId": "e98a5e05-4ae6-4e88-9c49-6f367dff3e3e"
+					},
+					"fingerprint": "855184746d0d4aaa12ad437ab21c009c7eff758508f206eccf08fea22484a588"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T23:38:36.532Z"
+		},
+		{
+			"id": "codex-652-caster-no-receive-415d69a4-1d16-4ecd-948f-869613e2bef5",
+			"requestFingerprint": "31e5a26363f3f9be2f6539cc776ebcfef8958b9688888245a9c798df1d15ea27",
+			"result": {
+				"status": "applied",
+				"operationId": "codex-652-caster-no-receive-415d69a4-1d16-4ecd-948f-869613e2bef5",
+				"previousRevision": 0,
+				"current": {
+					"nodeId": "415d69a4-1d16-4ecd-948f-869613e2bef5",
+					"nodeName": "Codex 652 Shadow Caster",
+					"revision": 1,
+					"state": {
+						"enabled": true,
+						"layer": "Default",
+						"tags": [],
+						"isPickable": true,
+						"checkCollisions": false,
+						"receiveShadows": false,
+						"visible": true,
+						"materialId": "e98a5e05-4ae6-4e88-9c49-6f367dff3e3e"
+					},
+					"fingerprint": "4da01ea66bcecbc65ffffc8a7f1ddd1911734e440a6238fc477b646c706b0b3f"
+				},
+				"replayed": false
+			},
+			"createdAt": "2026-07-28T23:38:36.600Z"
+		}
+	]
+}

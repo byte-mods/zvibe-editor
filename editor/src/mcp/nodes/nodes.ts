@@ -4,6 +4,7 @@ import { isLight, isCamera, isClusteredLightContainer, isAbstractMesh, isAnyTran
 
 import { IMCPActionOptions } from "../action";
 import { resolveNode, toNodeSummary, toVector3, deepSet } from "../tools/resolve";
+import { disposeOwnedParticleEmitterIfUnused } from "../particles/emitter";
 
 /**
  * Returns the full details of a node, including transform, camera and light specific properties.
@@ -81,8 +82,12 @@ export function getNodeClassification(scene: Scene, data: any): any {
 export function setNodeClassification(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
 	node.metadata ??= {};
-	if (data.layer !== undefined) node.metadata.babylonEditorLayer = data.layer;
-	if (data.tags !== undefined) node.metadata.babylonEditorTags = [...new Set(data.tags)];
+	if (data.layer !== undefined) {
+		node.metadata.babylonEditorLayer = data.layer;
+	}
+	if (data.tags !== undefined) {
+		node.metadata.babylonEditorTags = [...new Set(data.tags)];
+	}
 	options.editor.layout.inspector.setEditedObject(node);
 	options.editor.layout.inspector.forceUpdate();
 	return getNodeClassification(scene, { nodeId: node.id });
@@ -212,13 +217,38 @@ export function renameNode(scene: Scene, data: any, options: IMCPActionOptions):
  */
 export function deleteNode(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
+	const parent = node.parent;
+	if (isCamera(node)) {
+		const references = (scene.metadata?.babylonEditorCameraStacks ?? [])
+			.filter((stack: any) => stack.baseCameraId === node.id || stack.overlays?.some((overlay: any) => overlay.cameraId === node.id))
+			.map((stack: any) => stack.name ?? stack.id);
+		if (references.length) {
+			throw new Error(
+				`Camera "${node.name}" is referenced by camera stack${references.length === 1 ? "" : "s"} ${references.join(", ")}. Reassign or remove those stack entries first.`
+			);
+		}
+	}
+	const rendererListReferences = (scene.metadata?.babylonEditorRendererLists ?? [])
+		.filter((list: any) => list.cameraId === node.id || list.meshIds?.includes(node.id))
+		.map((list: any) => list.name ?? list.id);
+	if (rendererListReferences.length) {
+		throw new Error(
+			`Node "${node.name}" is referenced by renderer list${rendererListReferences.length === 1 ? "" : "s"} ${rendererListReferences.join(", ")}. Reassign or remove those list references first.`
+		);
+	}
+	const generatedTileColliderNodeIds = node.metadata?.babylonEditorTileColliderGenerator?.nodeIds;
+	if (Array.isArray(generatedTileColliderNodeIds) && generatedTileColliderNodeIds.length) {
+		throw new Error(`Node "${node.name}" owns generated Tilemap Collider 2D bodies. Clear its Tilemap Collider generator before deleting the Sprite Map.`);
+	}
 
-	node.dispose(false, false);
+	const disposeMaterialAndTextures = data.disposeMaterialAndTextures === true;
+	node.dispose(false, disposeMaterialAndTextures);
+	disposeOwnedParticleEmitterIfUnused(scene, parent);
 
 	options.editor.layout.graph.refresh();
 	options.editor.layout.inspector.setEditedObject(null);
 
-	return { deleted: true };
+	return { deleted: true, disposedMaterialAndTextures: disposeMaterialAndTextures };
 }
 
 /**

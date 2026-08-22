@@ -1,6 +1,6 @@
 import { dirname, join, isAbsolute, basename, relative, extname, normalize, resolve } from "path/posix";
 import { randomUUID } from "crypto";
-import { copy, ensureDir, mkdir, move, pathExists, readFile, readJSON, readdir, remove, stat, writeFile, writeJSON } from "fs-extra";
+import { copy, ensureDir, lstat, mkdir, move, pathExists, readFile, readJSON, readdir, realpath, remove, stat, writeFile, writeJSON } from "fs-extra";
 
 import { Scene } from "babylonjs";
 import {
@@ -17,15 +17,20 @@ import {
 	normalizeModelImporterSettings,
 	normalizeModelImporterPlatformOverrides,
 	normalizeTextureImporterPlatformOverrides,
+	normalizeVideoImporterPlatformOverrides,
 	resolveModelImporterPlatformSettings,
 	resolveTextureImporterPlatformSettings,
+	resolveVideoImporterPlatformSettings,
 	serializeModelAnimationClipDefinitions,
 	serializeModelAuthoredLodGroups,
 	serializeModelLodDefinitions,
 	serializeModelMaterialRemaps,
 	serializeModelImporterPlatformOverrides,
 	serializeTextureImporterPlatformOverrides,
+	serializeVideoImporterPlatformOverrides,
 	normalizeTextureImporterSettings,
+	normalizeVideoImporterSettings,
+	getVideoPlatformCodecMatrix,
 	validateAssetImporterConfiguration,
 	isImportedAnimatorControllerDocument,
 	suggestModelAuthoredLodGroups,
@@ -60,11 +65,12 @@ import { applySemanticAssetMove, inspectSemanticAssetMove } from "./move";
 import { AssetDependencyGraphExportFormat, formatAssetDependencyGraph } from "./dependency-graph";
 import { openAssetDependencyGraph as openAssetDependencyGraphTab } from "../../editor/layout/assets-browser/dependency-graph";
 import { applyAudioImporterArtifact, getAudioImporterArtifactStatus } from "./audio-importer";
-import { applyVideoImporterArtifact, getVideoImporterArtifactStatus } from "./video-importer";
+import { applyVideoImporterArtifact, getVideoEncoderCapabilities, getVideoImporterArtifactStatus } from "./video-importer";
 import { applyFontImporterArtifact, getFontImporterArtifactStatus } from "./font-importer";
 import { applyMaterialImporterArtifact, getMaterialImporterArtifactStatus } from "./material-importer";
 import { applyAnimationImporterArtifact, getAnimationImporterArtifactStatus } from "./animation-importer";
 import { applyTextureImporterArtifact, getTextureImporterArtifactStatus } from "./texture-importer";
+import { getFbxExportManifestPath, withFbxAssetDeletion } from "./fbx-export-state";
 import { applyPsdLayerExtraction, getPsdLayerExtractionStatus, IPsdLayerExtractionOptions } from "./psd-layers";
 import { applyPsdSmartObjectPayloadReplacement, getPsdSmartObjectPayloadReplacementStatus, IPsdSmartObjectPayloadReplacementOptions } from "./psd-smart-object-replacement";
 import { applyModelImporterArtifact, getModelImporterArtifactStatus, getModelMaterialExtractionStatus, prepareModelMaterialExtraction } from "./model-importer";
@@ -72,7 +78,18 @@ import { getModelTextureExtractionStatus, prepareModelTextureExtraction } from "
 import { FileInspectorObject } from "../../editor/layout/inspector/file";
 import { createAnimatorController, setAnimatorController } from "../animator/animator";
 import { openProjectImage } from "../../tools/assets/image";
-import { getAutoReimportStatus, inspectAutoReimport, runAutoReimport, setAutoReimportSettings } from "./auto-reimport";
+import { cancelAssetThumbnailTasks } from "../../tools/assets/thumbnail";
+import { assetRootPlacementError, inspectAssetRootPlacement } from "../../tools/assets/root-placement";
+import { getAutoReimportStatus, inspectAutoReimport, removeDeletedPathsFromAutoReimportStatus, runAutoReimport, setAutoReimportSettings } from "./auto-reimport";
+import { createImportedUnityAvatarMask, getUnityAnimatorControllerBindingPlan } from "./unity-animator-dependencies";
+import {
+	getTextureChannelPreviewState,
+	clearTextureChannelPreviewStates,
+	setTextureChannelPreviewState,
+	TEXTURE_CHANNEL_PREVIEW_CHANNELS,
+	TEXTURE_CHANNEL_PREVIEW_DISPLAY_MODES,
+	TEXTURE_CHANNEL_PREVIEW_MAXIMUM_DIMENSION,
+} from "./texture-channel-preview";
 
 /**
  * Maps asset types to their associated file extensions (without dot).
@@ -82,6 +99,109 @@ const IMPORTER_PRESETS_PATH = ".bjseditor/importer-presets.json";
 
 function metadataPath(assetPath: string): string {
 	return `${assetPath}${ASSET_META_SUFFIX}`;
+}
+
+const assetGuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+interface IDeletedAssetArtifacts {
+	guids: string[];
+	fbxExportEvidencePaths: string[];
+	mlTrainingProvenancePaths: string[];
+}
+
+/** Captures GUID and FBX-export ownership before recursive deletion makes either identity undiscoverable. */
+async function collectDeletedAssetArtifacts(assetPath: string, root: string): Promise<IDeletedAssetArtifacts> {
+	const sidecars: string[] = [];
+	const fbxAssetPaths: string[] = [];
+	const mlTrainingProvenancePaths: string[] = [];
+	const details = await lstat(assetPath);
+	if (!details.isDirectory() || details.isSymbolicLink()) {
+		sidecars.push(metadataPath(assetPath));
+		mlTrainingProvenancePaths.push(`${assetPath}.ml-training.json`);
+		if (!details.isSymbolicLink() && extname(assetPath).toLowerCase() === ".fbx") {
+			fbxAssetPaths.push(assetPath);
+		}
+	} else {
+		const pending = [assetPath];
+		while (pending.length) {
+			const directory = pending.pop()!;
+			for (const entry of await readdir(directory, { withFileTypes: true })) {
+				const path = join(directory, entry.name);
+				if (entry.isDirectory() && !entry.isSymbolicLink()) {
+					pending.push(path);
+				} else if (entry.isFile()) {
+					if (entry.name.endsWith(ASSET_META_SUFFIX)) {
+						sidecars.push(path);
+					} else if (entry.name.endsWith(".ml-training.json")) {
+						mlTrainingProvenancePaths.push(path);
+					} else if (extname(entry.name).toLowerCase() === ".fbx") {
+						fbxAssetPaths.push(path);
+					}
+				}
+			}
+		}
+	}
+
+	const guids = new Set<string>();
+	for (const sidecar of sidecars) {
+		try {
+			const metadata = await readJSON(sidecar);
+			if (typeof metadata?.guid === "string" && assetGuidPattern.test(metadata.guid)) {
+				guids.add(metadata.guid.toLowerCase());
+			}
+		} catch {
+			// Missing or malformed sidecars cannot own a safe importer-artifact directory.
+		}
+	}
+	return {
+		guids: [...guids].sort(),
+		fbxExportEvidencePaths: fbxAssetPaths.map((path) => getFbxExportManifestPath(root, relative(root, path).replace(/\\/g, "/"))).sort(),
+		mlTrainingProvenancePaths: mlTrainingProvenancePaths.sort(),
+	};
+}
+
+export interface IRemovedAssetArtifacts {
+	removedImporterArtifacts: string[];
+	removedFbxExportEvidence: string[];
+	removedMlTrainingProvenance: string[];
+}
+
+/** Removes an asset/folder and all private importer/export evidence under one fence shared with long-running FBX conversions. */
+export async function removeAssetPathAndImporterArtifacts(assetPath: string): Promise<IRemovedAssetArtifacts> {
+	const deletionProjectDirectory = getProjectDirectory();
+	return withFbxAssetDeletion(async () => {
+		if (getProjectDirectory() !== deletionProjectDirectory) {
+			throw new Error("The open project changed while asset deletion was waiting for an FBX export. Inspect the asset again before deleting it.");
+		}
+		const artifacts = await collectDeletedAssetArtifacts(assetPath, deletionProjectDirectory);
+		await remove(assetPath);
+		await remove(metadataPath(assetPath));
+		const root = deletionProjectDirectory;
+		const artifactRoot = join(root, ".bjseditor/imported-assets");
+		const removedImporterArtifacts: string[] = [];
+		for (const guid of artifacts.guids) {
+			const artifactDirectory = join(artifactRoot, guid);
+			if (await pathExists(artifactDirectory)) {
+				await remove(artifactDirectory);
+				removedImporterArtifacts.push(relative(root, artifactDirectory));
+			}
+		}
+		const removedFbxExportEvidence: string[] = [];
+		for (const evidencePath of artifacts.fbxExportEvidencePaths) {
+			if (await pathExists(evidencePath)) {
+				await remove(evidencePath);
+				removedFbxExportEvidence.push(relative(root, evidencePath));
+			}
+		}
+		const removedMlTrainingProvenance: string[] = [];
+		for (const provenancePath of artifacts.mlTrainingProvenancePaths) {
+			if (await pathExists(provenancePath)) {
+				await remove(provenancePath);
+				removedMlTrainingProvenance.push(relative(root, provenancePath));
+			}
+		}
+		return { removedImporterArtifacts, removedFbxExportEvidence, removedMlTrainingProvenance };
+	});
 }
 
 function importerPresetsPath(): string {
@@ -157,7 +277,9 @@ function resolveProjectPath(path: string): string {
  * Refreshes the asset browser after an MCP file operation.
  */
 function refreshAssetsBrowser(options: IMCPActionOptions): void {
-	options.editor.layout.assets.refresh();
+	// FlexLayout mounts panels lazily. File mutations must also work for
+	// external MCP clients while the Assets Browser tab is not mounted.
+	options.editor.layout.assets?.refresh?.();
 }
 
 /** Reports automatic project asset watcher state and the latest detected external change. */
@@ -1173,6 +1295,68 @@ export async function getTextureImporterResult(_scene: Scene, data: any): Promis
 	return portableTextureImporterStatus(await getTextureImporterArtifactStatus(absolutePath), absolutePath);
 }
 
+async function resolveTextureChannelPreviewAsset(path: string): Promise<string> {
+	const absolutePath = resolveProjectPath(path);
+	if (!IMAGE_EXTENSIONS.has(extname(absolutePath).toLowerCase())) {
+		throw new Error(`Texture channel preview requires a supported image asset (${[...IMAGE_EXTENSIONS].join(", ")}).`);
+	}
+	if (!(await pathExists(absolutePath)) || (await stat(absolutePath)).isDirectory()) {
+		throw new Error("Texture channel preview is available only for an existing image file asset.");
+	}
+	const projectDirectory = getProjectDirectory();
+	const [canonicalProject, canonicalAsset] = await Promise.all([realpath(projectDirectory), realpath(absolutePath)]);
+	const canonicalRelative = relative(canonicalProject, canonicalAsset);
+	if (canonicalRelative === ".." || canonicalRelative.startsWith("../") || isAbsolute(canonicalRelative)) {
+		throw new Error("Texture channel preview assets must not escape the open project through a symbolic link.");
+	}
+	return absolutePath;
+}
+
+/** Returns the non-destructive Texture Inspector channel-preview state for one image asset. */
+export async function getTextureChannelPreview(_scene: Scene, data: any): Promise<any> {
+	const absolutePath = await resolveTextureChannelPreviewAsset(data.path);
+	const state = getTextureChannelPreviewState(absolutePath);
+	return {
+		path: relative(getProjectDirectory(), absolutePath).replace(/\\/g, "/"),
+		...state,
+		effectiveDisplayMode: state.channel === "rgba" ? "original" : state.channel === "alpha" ? "grayscale" : state.displayMode,
+		supportedChannels: TEXTURE_CHANNEL_PREVIEW_CHANNELS,
+		supportedDisplayModes: TEXTURE_CHANNEL_PREVIEW_DISPLAY_MODES,
+		defaults: { channel: "rgba", displayMode: "grayscale" },
+		maximumPreviewDimension: TEXTURE_CHANNEL_PREVIEW_MAXIMUM_DIMENSION,
+		persisted: false,
+		mutatesAsset: false,
+		semantics: {
+			rgba: "Displays the original RGBA preview.",
+			grayscale: "Replicates the selected channel value into RGB and displays it opaquely.",
+			colorized: "Tints red, green, or blue by its selected-channel value; alpha remains grayscale and opaque for legibility.",
+		},
+		next: "Open the asset with open_asset_inspector, then use set_texture_channel_preview with this exact revision. Capture a screenshot when visual evidence is required.",
+	};
+}
+
+/** Updates the transient Texture Inspector channel-preview state under an exact revision. */
+export async function setTextureChannelPreview(_scene: Scene, data: any): Promise<any> {
+	const absolutePath = await resolveTextureChannelPreviewAsset(data.path);
+	const result = setTextureChannelPreviewState(
+		absolutePath,
+		{
+			channel: data.channel,
+			displayMode: data.displayMode,
+		},
+		data.expectedRevision
+	);
+	return {
+		updated: result.updated,
+		path: relative(getProjectDirectory(), absolutePath).replace(/\\/g, "/"),
+		...result.state,
+		effectiveDisplayMode: result.state.channel === "rgba" ? "original" : result.state.channel === "alpha" ? "grayscale" : result.state.displayMode,
+		persisted: false,
+		mutatesAsset: false,
+		next: "The open Texture Inspector updates immediately. Re-read with get_texture_channel_preview before another external mutation.",
+	};
+}
+
 /** Reads the complete Web/Desktop texture override map and both effective target plans under one exact lease. */
 export async function getTexturePlatformOverrides(_scene: Scene, data: any): Promise<any> {
 	const absolutePath = resolveProjectPath(data.path);
@@ -1277,6 +1461,7 @@ function psdLayerExtractionOptions(data: any): IPsdLayerExtractionOptions {
 		smartObjectResourceIds: data.smartObjectResourceIds,
 		smartObjectExternalBindings: data.smartObjectExternalBindings,
 		shapeBlurKernelBindings: data.shapeBlurKernelBindings,
+		displacementMapBindings: data.displacementMapBindings,
 		inspectNestedSmartObjects: data.inspectNestedSmartObjects,
 		nestedSmartObjectMaximumDepth: data.nestedSmartObjectMaximumDepth,
 		renderEmbeddedSmartObjects: data.renderEmbeddedSmartObjects,
@@ -1420,7 +1605,7 @@ export async function getVideoImporterResult(_scene: Scene, data: any): Promise<
 	if (!(await pathExists(absolutePath)) || (await stat(absolutePath)).isDirectory()) {
 		throw new Error("Video importer results are available only for existing file assets.");
 	}
-	const status = await getVideoImporterArtifactStatus(absolutePath);
+	const status = await getVideoImporterArtifactStatus(absolutePath, data.platform);
 	const result = status.result
 		? {
 				...status.result,
@@ -1437,6 +1622,80 @@ export async function getVideoImporterResult(_scene: Scene, data: any): Promise<
 	};
 }
 
+/** Reports the actual FFmpeg encoder backends and the immutable Web/Desktop codec policy. */
+export async function getVideoImporterCapabilities(_scene: Scene, _data: any, options: IMCPActionOptions): Promise<any> {
+	return {
+		encoders: await getVideoEncoderCapabilities(options.editor),
+		platforms: {
+			web: getVideoPlatformCodecMatrix("web"),
+			desktop: getVideoPlatformCodecMatrix("desktop"),
+		},
+	};
+}
+
+/** Reads the complete Web/Desktop video override map and both effective target plans under one exact lease. */
+export async function getVideoPlatformOverrides(_scene: Scene, data: any): Promise<any> {
+	const absolutePath = resolveProjectPath(data.path);
+	if (!(await pathExists(absolutePath)) || (await stat(absolutePath)).isDirectory()) {
+		throw new Error("Video platform overrides are available only for existing video file assets.");
+	}
+	const metadata = await readAssetMetadata(absolutePath);
+	if (metadata.importer.kind !== "video") {
+		throw new Error("Video platform overrides require a video asset.");
+	}
+	const settings = normalizeVideoImporterSettings(metadata.importer.settings);
+	const status = await getVideoImporterArtifactStatus(absolutePath);
+	return {
+		path: relative(getProjectDirectory(), absolutePath).replace(/\\/g, "/"),
+		fingerprint: status.fingerprint,
+		current: status.current,
+		overrides: settings.platformOverrides,
+		effective: {
+			web: resolveVideoImporterPlatformSettings(settings, "web"),
+			desktop: resolveVideoImporterPlatformSettings(settings, "desktop"),
+		},
+		next: "Replace the complete map with set_video_platform_overrides, then inspect/apply the matching Web or Desktop importer profile.",
+	};
+}
+
+/** Atomically replaces the complete closed Web/Desktop video override map under the exact importer lease. */
+export async function setVideoPlatformOverrides(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const absolutePath = resolveProjectPath(data.path);
+	if (!(await pathExists(absolutePath)) || (await stat(absolutePath)).isDirectory()) {
+		throw new Error("Video platform overrides can only be configured for existing video file assets.");
+	}
+	const metadata = await readAssetMetadata(absolutePath);
+	if (metadata.importer.kind !== "video") {
+		throw new Error("Video platform overrides require a video asset.");
+	}
+	const before = await getVideoImporterArtifactStatus(absolutePath);
+	if (before.fingerprint !== data.expectedFingerprint) {
+		throw new Error(`Video platform override plan changed. Inspect again and use current fingerprint ${before.fingerprint}.`);
+	}
+	const overrides = normalizeVideoImporterPlatformOverrides(data.overrides);
+	const importer = validateAssetImporterConfiguration(absolutePath, {
+		...metadata.importer,
+		settings: { ...metadata.importer.settings, platformOverrides: serializeVideoImporterPlatformOverrides(overrides) },
+	}).configuration;
+	await writeAssetMetadata(absolutePath, { ...metadata, importer });
+	await refreshAssetRegistryPaths([absolutePath]);
+	refreshAssetsBrowser(options);
+	const after = await getVideoImporterArtifactStatus(absolutePath);
+	const settings = normalizeVideoImporterSettings(importer.settings);
+	return {
+		updated: true,
+		path: relative(getProjectDirectory(), absolutePath).replace(/\\/g, "/"),
+		previousFingerprint: before.fingerprint,
+		fingerprint: after.fingerprint,
+		current: after.current,
+		overrides,
+		effective: {
+			web: resolveVideoImporterPlatformSettings(settings, "web"),
+			desktop: resolveVideoImporterPlatformSettings(settings, "desktop"),
+		},
+	};
+}
+
 /** Applies one leased video importer configuration and publishes its deterministic preview artifact. */
 export async function applyVideoImporter(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
 	if (data.confirm !== true) {
@@ -1446,7 +1705,7 @@ export async function applyVideoImporter(_scene: Scene, data: any, options: IMCP
 	if (!(await pathExists(absolutePath)) || (await stat(absolutePath)).isDirectory()) {
 		throw new Error("Video importers can only be applied to existing file assets.");
 	}
-	const status = await applyVideoImporterArtifact(absolutePath, data.expectedFingerprint, options.editor);
+	const status = await applyVideoImporterArtifact(absolutePath, data.expectedFingerprint, options.editor, data.platform);
 	const result = status.result
 		? {
 				...status.result,
@@ -1473,6 +1732,7 @@ function portableFontImporterStatus(status: Awaited<ReturnType<typeof getFontImp
 				manifestPath: relative(getProjectDirectory(), status.result.manifestPath).replace(/\\/g, "/"),
 				pages: status.result.pages.map((page) => ({ ...page, path: relative(getProjectDirectory(), page.path).replace(/\\/g, "/") })),
 				dynamicFontPath: status.result.dynamicFontPath ? relative(getProjectDirectory(), status.result.dynamicFontPath).replace(/\\/g, "/") : null,
+				sourceFontPath: status.result.sourceFontPath ? relative(getProjectDirectory(), status.result.sourceFontPath).replace(/\\/g, "/") : null,
 			}
 		: null;
 	return {
@@ -1634,29 +1894,7 @@ export async function applyAnimationImporter(_scene: Scene, data: any, options: 
 	return { applied: true, ...portableAnimationImporterStatus(status, absolutePath) };
 }
 
-function animatorImportBindingPlan(scene: Scene, document: any): any {
-	const groups = scene.animationGroups.map((group) => group.name).sort();
-	const masks = ((scene.metadata?.babylonEditorHumanoidAvatarMasks ?? []) as Array<{ id: string; name: string }>).map((mask) => ({ id: mask.id, name: mask.name }));
-	const motionBindings = document.motionBindings.map((binding: any) => {
-		const exact = groups.find((name) => name === binding.suggestedAnimationGroup);
-		const insensitive = groups.find((name) => name.toLowerCase() === binding.suggestedAnimationGroup.toLowerCase());
-		return { ...binding, suggestedMatch: exact ?? insensitive ?? null };
-	});
-	const avatarMaskBindings = document.avatarMaskBindings.map((binding: any) => {
-		const match = masks.find((mask) => mask.name === binding.suggestedAvatarMask || mask.name.toLowerCase() === binding.suggestedAvatarMask.toLowerCase());
-		return { ...binding, suggestedMatch: match?.id ?? null };
-	});
-	return {
-		motionBindings,
-		avatarMaskBindings,
-		unresolvedMotionBindings: motionBindings.filter((binding: any) => !binding.suggestedMatch).map((binding: any) => binding.key),
-		unresolvedAvatarMaskBindings: avatarMaskBindings.filter((binding: any) => !binding.suggestedMatch).map((binding: any) => binding.key),
-		availableAnimationGroups: groups,
-		availableAvatarMasks: masks,
-	};
-}
-
-/** Inspects a current converted Unity Animator Controller artifact and resolves deterministic scene binding suggestions without modifying the scene. */
+/** Inspects a current converted Unity Animator Controller artifact and resolves exact Unity GUID/fileID scene binding suggestions without modifying the scene. */
 export async function getAnimatorControllerAssetImport(scene: Scene, data: any): Promise<any> {
 	const absolutePath = resolveProjectPath(data.path);
 	if (!(await pathExists(absolutePath)) || (await stat(absolutePath)).isDirectory()) {
@@ -1674,10 +1912,13 @@ export async function getAnimatorControllerAssetImport(scene: Scene, data: any):
 	if (!isImportedAnimatorControllerDocument(document) || document.sourceFormat !== "unity-yaml") {
 		return { ...portable, ready: false, reason: "This artifact is not a converted Unity YAML Animator Controller." };
 	}
-	const bindings = animatorImportBindingPlan(scene, document);
+	const bindings = await getUnityAnimatorControllerBindingPlan(scene, document, status.fingerprint, {
+		targetNodeId: data.targetNodeId,
+		targetNodeName: data.targetNodeName,
+	});
 	return {
 		...portable,
-		ready: bindings.unresolvedMotionBindings.length === 0 && bindings.unresolvedAvatarMaskBindings.length === 0,
+		ready: bindings.unresolvedMotionBindings.length === 0 && bindings.unresolvedAvatarMaskBindings.length === 0 && bindings.unresolvedBehaviourBindings.length === 0,
 		controller: document.controller,
 		unsupportedFeatures: document.unsupportedFeatures,
 		...bindings,
@@ -1685,8 +1926,16 @@ export async function getAnimatorControllerAssetImport(scene: Scene, data: any):
 	};
 }
 
-function replaceAnimatorControllerBindings(controller: any, motionMappings: Record<string, string>, avatarMaskMappings: Record<string, string>, ignoreMasks: boolean): any {
+function replaceAnimatorControllerBindings(
+	controller: any,
+	motionMappings: Record<string, string>,
+	avatarMaskMappings: Record<string, string>,
+	behaviourMappings: Record<string, string>,
+	behaviourPlans: Awaited<ReturnType<typeof getUnityAnimatorControllerBindingPlan>>["behaviourBindings"],
+	ignoreMasks: boolean
+): any {
 	const result = structuredClone(controller);
+	const behaviourPlansByKey = new Map(behaviourPlans.map((binding) => [binding.key, binding]));
 	const replaceMotion = (motion: any): void => {
 		if (motion.animationGroup?.startsWith("@unity-motion:")) {
 			motion.animationGroup = motionMappings[motion.animationGroup];
@@ -1699,13 +1948,46 @@ function replaceAnimatorControllerBindings(controller: any, motionMappings: Reco
 			}
 		}
 	};
+	const replaceBehaviours = (behaviours: any[] | undefined): any[] | undefined =>
+		behaviours?.map((behaviour) => {
+			if (!behaviour.scriptKey?.startsWith("@unity-behaviour:")) {
+				return behaviour;
+			}
+			const binding = behaviourPlansByKey.get(behaviour.scriptKey);
+			const scriptKey = behaviourMappings[behaviour.scriptKey];
+			if (!binding || !scriptKey) {
+				throw new Error(`Unity behaviour binding "${behaviour.scriptKey}" was not resolved by the current import plan.`);
+			}
+			return {
+				...behaviour,
+				scriptKey,
+				unitySource: {
+					bindingKey: binding.key,
+					behaviourFileId: binding.behaviourFileId,
+					behaviourGuid: binding.behaviourGuid,
+					scriptFileId: binding.scriptFileId,
+					scriptGuid: binding.scriptGuid,
+					scriptPath: binding.dependency?.path ?? null,
+					scriptContentHash: binding.dependency?.contentHash ?? null,
+					scriptMetaHash: binding.dependency?.metaHash ?? null,
+					behaviourName: binding.behaviourName,
+					editorClassIdentifier: binding.editorClassIdentifier,
+					serializedFieldsJson: binding.serializedFieldsJson,
+				},
+			};
+		});
 	const machines = [result, ...(result.layers ?? []), ...(result.subgraphs ?? [])];
 	for (const machine of machines) {
+		machine.behaviours = replaceBehaviours(machine.behaviours);
 		for (const state of machine.states ?? []) {
 			replaceMotion(state);
+			state.behaviours = replaceBehaviours(state.behaviours);
 		}
 		for (const motionOverride of Object.values(machine.synchronizedMotionOverrides ?? {}) as any[]) {
 			replaceMotion(motionOverride);
+		}
+		for (const [stateName, behaviours] of Object.entries(machine.synchronizedBehaviourOverrides ?? {}) as Array<[string, any[]]>) {
+			machine.synchronizedBehaviourOverrides[stateName] = replaceBehaviours(behaviours) ?? [];
 		}
 		if (machine.avatarMaskId?.startsWith("@unity-mask:")) {
 			const mapped = avatarMaskMappings[machine.avatarMaskId];
@@ -1726,9 +2008,6 @@ export async function importAnimatorControllerAsset(scene: Scene, data: any, opt
 	}
 	const absolutePath = resolveProjectPath(data.path);
 	const status = await getAnimationImporterArtifactStatus(absolutePath);
-	if (status.fingerprint !== data.expectedFingerprint) {
-		throw new Error(`Animator Controller import plan changed. Inspect again and use current fingerprint ${status.fingerprint}.`);
-	}
 	if (!status.current || !status.result?.valid) {
 		throw new Error("Apply a valid current Animation Importer artifact before importing this Animator Controller into the scene.");
 	}
@@ -1736,9 +2015,25 @@ export async function importAnimatorControllerAsset(scene: Scene, data: any, opt
 	if (!isImportedAnimatorControllerDocument(document) || document.sourceFormat !== "unity-yaml") {
 		throw new Error("The current artifact is not a converted Unity YAML Animator Controller.");
 	}
-	const plan = animatorImportBindingPlan(scene, document);
+	const plan = await getUnityAnimatorControllerBindingPlan(scene, document, status.fingerprint, {
+		targetNodeId: data.targetNodeId,
+		targetNodeName: data.targetNodeName,
+	});
+	if (plan.fingerprint !== data.expectedFingerprint) {
+		throw new Error(`Animator Controller import plan changed. Inspect again and use current fingerprint ${plan.fingerprint}.`);
+	}
 	const requestedMotionMappings = (data.motionBindings ?? {}) as Record<string, string>;
 	const requestedMaskMappings = (data.avatarMaskBindings ?? {}) as Record<string, string>;
+	const requestedBehaviourMappings = (data.behaviourBindings ?? {}) as Record<string, string>;
+	const knownMotionKeys = new Set(plan.motionBindings.map((binding) => binding.key));
+	const knownMaskKeys = new Set(plan.avatarMaskBindings.map((binding) => binding.key));
+	const knownBehaviourKeys = new Set(plan.behaviourBindings.map((binding) => binding.key));
+	const unknownMotionKeys = Object.keys(requestedMotionMappings).filter((key) => !knownMotionKeys.has(key));
+	const unknownMaskKeys = Object.keys(requestedMaskMappings).filter((key) => !knownMaskKeys.has(key));
+	const unknownBehaviourKeys = Object.keys(requestedBehaviourMappings).filter((key) => !knownBehaviourKeys.has(key));
+	if (unknownMotionKeys.length || unknownMaskKeys.length || unknownBehaviourKeys.length) {
+		throw new Error(`Animator Controller bindings contain unknown keys: ${[...unknownMotionKeys, ...unknownMaskKeys, ...unknownBehaviourKeys].join(", ")}.`);
+	}
 	const motionMappings: Record<string, string> = {};
 	for (const binding of plan.motionBindings) {
 		const groupName = requestedMotionMappings[binding.key] ?? binding.suggestedMatch;
@@ -1748,41 +2043,96 @@ export async function importAnimatorControllerAsset(scene: Scene, data: any, opt
 		motionMappings[binding.key] = groupName;
 	}
 	const avatarMaskMappings: Record<string, string> = {};
+	const importedAvatarMasks: any[] = [];
+	scene.metadata ??= {};
+	const sceneMasks = (scene.metadata.babylonEditorHumanoidAvatarMasks ??= []);
 	for (const binding of plan.avatarMaskBindings) {
 		const maskId = requestedMaskMappings[binding.key] ?? binding.suggestedMatch;
 		if (!maskId && data.ignoreUnresolvedAvatarMasks !== true) {
 			throw new Error(`Unity AvatarMask binding "${binding.key}" is unresolved. Provide avatarMaskBindings or set ignoreUnresolvedAvatarMasks=true explicitly.`);
 		}
 		if (maskId && !plan.availableAvatarMasks.some((mask: any) => mask.id === maskId)) {
-			throw new Error(`Avatar Mask id "${maskId}" was not found in the current scene.`);
+			if (binding.autoImport?.maskId !== maskId) {
+				throw new Error(`Avatar Mask id "${maskId}" was not found in the current scene.`);
+			}
+			const importedMask = createImportedUnityAvatarMask(binding);
+			if (sceneMasks.some((mask: any) => mask.id === importedMask.id)) {
+				throw new Error(`Automatic Unity AvatarMask id "${importedMask.id}" conflicts with an existing scene mask.`);
+			}
+			const staged = importedAvatarMasks.find((mask) => mask.id === importedMask.id);
+			if (staged && JSON.stringify(staged) !== JSON.stringify(importedMask)) {
+				throw new Error(`Unity AvatarMask bindings produce conflicting content for id "${importedMask.id}".`);
+			}
+			if (!staged) {
+				importedAvatarMasks.push(importedMask);
+			}
 		}
 		if (maskId) {
 			avatarMaskMappings[binding.key] = maskId;
 		}
 	}
-	const controller = replaceAnimatorControllerBindings(document.controller, motionMappings, avatarMaskMappings, data.ignoreUnresolvedAvatarMasks === true);
+	const behaviourMappings: Record<string, string> = {};
+	if (plan.behaviourBindings.length && !plan.selectedScriptTarget) {
+		throw new Error("Unity behaviour import requires targetNodeId or unique targetNodeName from the inspected plan.");
+	}
+	const attachedKeys = new Set(plan.selectedScriptTarget?.attachedScriptKeys ?? []);
+	for (const binding of plan.behaviourBindings) {
+		const scriptKey = requestedBehaviourMappings[binding.key] ?? binding.suggestedMatch;
+		if (!scriptKey || !attachedKeys.has(scriptKey)) {
+			throw new Error(
+				`Unity behaviour binding "${binding.key}" is unresolved. Map it to a script attached to "${plan.selectedScriptTarget?.name ?? "the selected target"}": ${[...attachedKeys].join(", ") || "no scripts are attached"}.`
+			);
+		}
+		behaviourMappings[binding.key] = scriptKey;
+	}
+	const controller = replaceAnimatorControllerBindings(
+		document.controller,
+		motionMappings,
+		avatarMaskMappings,
+		behaviourMappings,
+		plan.behaviourBindings,
+		data.ignoreUnresolvedAvatarMasks === true
+	);
+	if (plan.selectedScriptTarget) {
+		controller.targetNodeId = plan.selectedScriptTarget.id;
+	}
 	if (data.controllerName) {
 		controller.name = data.controllerName;
 	}
 	const existing = ((scene.metadata?.babylonEditorAnimatorControllers ?? []) as Array<{ id: string; name: string }>).find((candidate) => candidate.name === controller.name);
 	let imported: any;
 	let replaced = false;
-	if (existing) {
-		if (data.replaceExisting !== true) {
-			throw new Error(`Animator controller "${controller.name}" already exists. Set replaceExisting=true to update it atomically.`);
+	try {
+		sceneMasks.push(...importedAvatarMasks);
+		if (existing) {
+			if (data.replaceExisting !== true) {
+				throw new Error(`Animator controller "${controller.name}" already exists. Set replaceExisting=true to update it atomically.`);
+			}
+			imported = setAnimatorController(scene, { controllerId: existing.id, ...controller }, options);
+			replaced = true;
+		} else {
+			imported = createAnimatorController(scene, { ...controller, playOnCreate: data.playOnImport === true }, options);
 		}
-		imported = setAnimatorController(scene, { controllerId: existing.id, ...controller }, options);
-		replaced = true;
-	} else {
-		imported = createAnimatorController(scene, { ...controller, playOnCreate: data.playOnImport === true }, options);
+	} catch (error) {
+		for (const mask of importedAvatarMasks) {
+			const index = sceneMasks.indexOf(mask);
+			if (index !== -1) {
+				sceneMasks.splice(index, 1);
+			}
+		}
+		throw error;
 	}
 	return {
 		imported: true,
 		replaced,
 		controller: imported,
-		fingerprint: status.fingerprint,
+		fingerprint: plan.fingerprint,
+		artifactFingerprint: status.fingerprint,
 		motionBindings: motionMappings,
 		avatarMaskBindings: avatarMaskMappings,
+		behaviourBindings: behaviourMappings,
+		selectedScriptTarget: plan.selectedScriptTarget,
+		importedAvatarMasks,
 		ignoredAvatarMaskBindings:
 			data.ignoreUnresolvedAvatarMasks === true ? plan.avatarMaskBindings.filter((binding: any) => !avatarMaskMappings[binding.key]).map((binding: any) => binding.key) : [],
 		unsupportedFeatures: document.unsupportedFeatures,
@@ -1999,6 +2349,10 @@ export async function importAsset(_scene: Scene, data: any, options: IMCPActionO
 	const destinationPath = resolveProjectPath(data.destinationPath ?? join("assets", basename(sourcePath)));
 	if (await pathExists(destinationPath)) {
 		throw new Error(`An asset or folder already exists at: ${relative(getProjectDirectory(), destinationPath)}`);
+	}
+	const placement = await inspectAssetRootPlacement(sourcePath, destinationPath, join(getProjectDirectory(), "assets"));
+	if (!placement.allowed) {
+		throw new Error(assetRootPlacementError(placement));
 	}
 
 	await mkdir(dirname(destinationPath), { recursive: true });
@@ -2265,13 +2619,22 @@ export async function deleteAsset(_scene: Scene, data: any, options: IMCPActionO
 	if (!(await pathExists(absolutePath))) {
 		throw new Error(`Asset not found: ${data.path}`);
 	}
-
-	await remove(absolutePath);
-	if (await pathExists(metadataPath(absolutePath))) {
-		await remove(metadataPath(absolutePath));
+	const deletingDirectory = (await stat(absolutePath)).isDirectory();
+	const cancelledThumbnailTasks = cancelAssetThumbnailTasks(absolutePath, deletingDirectory);
+	const inspector = options.editor.layout.inspector;
+	const editedObject = inspector?.state?.editedObject;
+	if (inspector && editedObject instanceof FileInspectorObject) {
+		const editedRelativePath = relative(absolutePath, editedObject.absolutePath);
+		if (editedRelativePath === "" || (deletingDirectory && editedRelativePath !== ".." && !editedRelativePath.startsWith("../") && !isAbsolute(editedRelativePath))) {
+			await new Promise<void>((resolveInspector) => inspector.setEditedObject(_scene, resolveInspector));
+		}
 	}
+
+	const removedArtifacts = await removeAssetPathAndImporterArtifacts(absolutePath);
+	clearTextureChannelPreviewStates(absolutePath, deletingDirectory);
+	const autoReimportStatusPruned = await removeDeletedPathsFromAutoReimportStatus([absolutePath]);
 	await refreshAssetRegistryPaths([absolutePath]);
 	refreshAssetsBrowser(options);
 
-	return { deleted: true, path: relative(getProjectDirectory(), absolutePath) };
+	return { deleted: true, path: relative(getProjectDirectory(), absolutePath), ...removedArtifacts, autoReimportStatusPruned, cancelledThumbnailTasks };
 }

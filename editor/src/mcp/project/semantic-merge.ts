@@ -65,6 +65,24 @@ interface IMergeContext {
 	visitedValues: number;
 }
 
+export interface ISemanticMergeDocumentValue {
+	exists: boolean;
+	value?: unknown;
+}
+
+export interface ISemanticMergeDocumentInput {
+	kind: "scene" | "prefab";
+	file: string;
+	base: ISemanticMergeDocumentValue;
+	ours: ISemanticMergeDocumentValue;
+	theirs: ISemanticMergeDocumentValue;
+}
+
+export interface ISemanticMergeDocumentResult {
+	mergedValue: unknown;
+	result: any;
+}
+
 function validateMaximumConflicts(value: unknown): number {
 	const maximumConflicts = value ?? defaultMaximumConflicts;
 	if (!Number.isInteger(maximumConflicts) || (maximumConflicts as number) < 1 || (maximumConflicts as number) > maximumConflictsLimit) {
@@ -308,6 +326,73 @@ function mergedAssetHash(files: Map<string, unknown>): string {
 		hash.update("\0");
 	}
 	return hash.digest("hex");
+}
+
+/** Reuses the bounded scene/prefab merge engine for one persisted JSON document, including Git conflict-stage callers. */
+export async function mergeProjectSemanticDocument(data: any, input: ISemanticMergeDocumentInput, options: IMCPActionOptions): Promise<ISemanticMergeDocumentResult> {
+	if (!input.file || input.file.length > 512 || input.file.includes("\0") || input.file.startsWith("/") || input.file.split("/").includes("..")) {
+		throw new Error("Semantic merge document file must be a relative manifest path of at most 512 characters without traversal or null bytes.");
+	}
+	const numericTolerance = validateNumericTolerance(data.numericTolerance);
+	const ignorePaths = validateIgnorePaths(data.ignorePaths);
+	const maximumConflicts = validateMaximumConflicts(data.maximumConflicts);
+	const resolution = validateResolution(data.resolution);
+	const overrides = validateConflictOverrides(data.conflictResolutions);
+	const ruleIds = validateRuleIds(data.ruleIds);
+	const rules = await readProjectSemanticMergeRules(options, ruleIds);
+	const conflicts: ISemanticMergeConflict[] = [];
+	const context: IMergeContext = {
+		file: input.file.replace(/\\/g, "/"),
+		resolution,
+		kind: input.kind,
+		overrides,
+		rules,
+		numericTolerance,
+		ignorePaths,
+		maximumConflicts,
+		conflicts,
+		totalConflicts: 0,
+		resolvedConflicts: 0,
+		unresolvedConflicts: 0,
+		appliedRuleIds: new Set(),
+		automaticMerges: 0,
+		visitedValues: 0,
+	};
+	const value = (document: ISemanticMergeDocumentValue): MergeValue => (document.exists ? document.value : missing);
+	const merged = mergeValue("", value(input.base), value(input.ours), value(input.theirs), context);
+	const deleted = merged === missing;
+	const files = new Map<string, unknown>();
+	if (!deleted) {
+		files.set(context.file, merged);
+	}
+	return {
+		mergedValue: deleted ? undefined : merged,
+		result: {
+			kind: input.kind,
+			file: context.file,
+			deleted,
+			outputHash: mergedAssetHash(files),
+			summary: {
+				automaticMerges: context.automaticMerges,
+				totalConflicts: context.totalConflicts,
+				resolvedConflicts: context.resolvedConflicts,
+				unresolvedConflicts: context.unresolvedConflicts,
+				returnedConflicts: conflicts.length,
+				truncated: context.totalConflicts > conflicts.length,
+				fileCount: deleted ? 0 : 1,
+			},
+			options: {
+				resolution,
+				numericTolerance,
+				ignorePaths,
+				maximumConflicts,
+				conflictResolutionCount: overrides.size,
+				ruleIds,
+				appliedRuleIds: [...context.appliedRuleIds],
+			},
+			conflicts,
+		},
+	};
 }
 
 async function resolveSemanticOutput(root: string, value: unknown, kind: ISemanticAsset["kind"], sourcePaths: string[]): Promise<{ absolute: string; path: string }> {

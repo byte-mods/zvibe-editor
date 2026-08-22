@@ -1,4 +1,4 @@
-import { dirname, join } from "path/posix";
+import { dirname, isAbsolute, join, relative } from "path/posix";
 import { pathExists, readJSON, stat, writeJSON } from "fs-extra";
 
 import { Tools } from "babylonjs";
@@ -24,6 +24,43 @@ export interface IThumbnailCache {
  */
 export const thumbnailCache: Record<string, IThumbnailCache> = {};
 
+interface IThumbnailTask {
+	worker: Worker;
+	cancel: () => void;
+}
+
+const activeThumbnailTasks = new Map<string, Set<IThumbnailTask>>();
+
+function isSamePathOrDescendant(root: string, candidate: string): boolean {
+	const containment = relative(root, candidate);
+	return containment === "" || (containment !== ".." && !containment.startsWith("../") && !isAbsolute(containment));
+}
+
+/** Cancels thumbnail workers before an asset path is removed, preventing delayed file loads after deletion. */
+export function cancelAssetThumbnailTasks(absolutePath: string, recursive: boolean): number {
+	let cancelled = 0;
+	for (const [path, tasks] of [...activeThumbnailTasks]) {
+		if (path !== absolutePath && (!recursive || !isSamePathOrDescendant(absolutePath, path))) {
+			continue;
+		}
+		for (const task of [...tasks]) {
+			task.cancel();
+			++cancelled;
+		}
+	}
+
+	const rootUrl = getProjectAssetsRootUrl();
+	if (rootUrl) {
+		for (const key of Object.keys(thumbnailCache)) {
+			const path = join(rootUrl, key);
+			if (path === absolutePath || (recursive && isSamePathOrDescendant(absolutePath, path))) {
+				delete thumbnailCache[key];
+			}
+		}
+	}
+
+	return cancelled;
+}
 export type ThumbnailType = "mesh" | "material";
 
 export interface IComputeThumbnailOptions {
@@ -65,53 +102,59 @@ export async function computeOrGetThumbnail(editor: Editor, options: IComputeThu
 
 	++requestedPreviewCount;
 
-	if (previewCount === 4) {
+	if (previewCount >= 4) {
 		await waitUntil(() => previewCount < 4);
 	}
 
 	++previewCount;
+	let thumbnail = "";
+	try {
+		// The asset can be removed while this request is waiting for one of the four worker slots.
+		if (!(await pathExists(options.absolutePath))) {
+			return null;
+		}
 
-	let serializedOverrideMaterial: any = null;
-	if (options.overrideMaterialAbsolutePath && (await pathExists(options.overrideMaterialAbsolutePath))) {
-		try {
-			serializedOverrideMaterial = await readJSON(options.overrideMaterialAbsolutePath, {
-				encoding: "utf-8",
-			});
-		} catch (e) {
-			// Catch silently.
+		let serializedOverrideMaterial: any = null;
+		if (options.overrideMaterialAbsolutePath && (await pathExists(options.overrideMaterialAbsolutePath))) {
+			try {
+				serializedOverrideMaterial = await readJSON(options.overrideMaterialAbsolutePath, {
+					encoding: "utf-8",
+				});
+			} catch (e) {
+				// Catch silently.
+			}
+		}
+
+		thumbnail = await getAssetThumbnailBase64(options.absolutePath, {
+			rootUrl,
+			serializedOverrideMaterial,
+			type: options.type,
+			appPath: editor.path,
+			serializedEnvironmentTexture: editor.layout.preview.scene.environmentTexture?.serialize(),
+		});
+
+		if (thumbnail && (await pathExists(options.absolutePath))) {
+			thumbnailCache[cacheKey] = {
+				thumbnail,
+				lastModified,
+			};
+		}
+	} finally {
+		--requestedPreviewCount;
+		--previewCount;
+
+		// Save cache after the final active request, including cancelled requests that pruned entries.
+		if (requestedPreviewCount === 0) {
+			try {
+				await saveAssetsThumbnailCache();
+			} catch (e) {
+				editor.layout.console.error("Failed to save assets thumbnail cache");
+				editor.layout.console.error(e.message?.toString());
+			}
 		}
 	}
 
-	const thumbnail = await getAssetThumbnailBase64(options.absolutePath, {
-		rootUrl,
-		serializedOverrideMaterial,
-		type: options.type,
-		appPath: editor.path,
-		serializedEnvironmentTexture: editor.layout.preview.scene.environmentTexture?.serialize(),
-	});
-
-	--requestedPreviewCount;
-
-	if (thumbnail) {
-		thumbnailCache[cacheKey] = {
-			thumbnail,
-			lastModified,
-		};
-	}
-
-	// Save cache?
-	if (requestedPreviewCount === 0) {
-		try {
-			await saveAssetsThumbnailCache();
-		} catch (e) {
-			editor.layout.console.error("Failed to save assets thumbnail cache");
-			editor.layout.console.error(e.message?.toString());
-		}
-	}
-
-	--previewCount;
-
-	return thumbnail;
+	return thumbnail || null;
 }
 
 /**
@@ -159,26 +202,42 @@ export interface IThumbnailOptions {
  * @returns the base64 encoded thumbnail image
  */
 export async function getAssetThumbnailBase64(absolutePath: string, options: IThumbnailOptions) {
-	const result = await new Promise<{ preview: string }>(async (resolve) => {
+	const result = await new Promise<{ preview: string }>((resolve) => {
 		const worker = createOrGetThumbnailWorker();
-
-		const timeoutId = setTimeout(() => {
+		let settled = false;
+		let timeoutId: ReturnType<typeof setTimeout>;
+		let task: IThumbnailTask;
+		const finish = (value: { preview: string }): void => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			clearTimeout(timeoutId);
 			terminateWorker(worker);
-			resolve({ preview: "" });
-		}, 10_000);
+			const tasks = activeThumbnailTasks.get(absolutePath);
+			tasks?.delete(task);
+			if (!tasks?.size) {
+				activeThumbnailTasks.delete(absolutePath);
+			}
+			resolve(value);
+		};
+		task = {
+			worker,
+			cancel: () => finish({ preview: "" }),
+		};
 
-		const r = await executeSimpleWorker<{ preview: string }>(worker, {
+		const tasks = activeThumbnailTasks.get(absolutePath) ?? new Set<IThumbnailTask>();
+		tasks.add(task);
+		activeThumbnailTasks.set(absolutePath, tasks);
+		timeoutId = setTimeout(() => finish({ preview: "" }), 10_000);
+
+		executeSimpleWorker<{ preview: string }>(worker, {
 			absolutePath,
 			...options,
 			id: Tools.RandomId(),
-		});
-
-		clearTimeout(timeoutId);
-		terminateWorker(worker);
-
-		if (r) {
-			resolve(r);
-		}
+		})
+			.then((value) => finish(value ?? { preview: "" }))
+			.catch(() => finish({ preview: "" }));
 	});
 
 	return result.preview;

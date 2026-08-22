@@ -9,29 +9,51 @@ import { saveSingleFileDialog } from "../dialog";
  * @param scene defines the reference to the scene to take a screenshot.
  * @param size defines the optional size of the screenshot. If not provided, the current canvas size will be used.
  */
-export function getBase64SceneScreenshot(scene: Scene, size?: ISize) {
+export function getBase64SceneScreenshot(scene: Scene, size?: ISize): Promise<string | undefined> {
 	return new Promise<string | undefined>((resolve) => {
-		scene.onAfterRenderObservable.addOnce(() => {
-			const engine = scene.getEngine();
-
-			if (size) {
-				const canvas = engine.getRenderingCanvas();
-				if (canvas) {
-					canvas.width = size.width;
-					canvas.height = size.height;
-					engine.setHardwareScalingLevel(0.25);
-					engine.resize();
-					scene.render();
-				}
+		let completed = false;
+		let animationFrame = 0;
+		let timeout = 0;
+		const finish = (): void => {
+			if (completed) {
+				return;
 			}
-
-			resolve(scene.getEngine().getRenderingCanvas()?.toDataURL("image/png"));
-
-			if (size) {
-				engine.setHardwareScalingLevel(1 / window.devicePixelRatio);
-				engine.resize();
+			completed = true;
+			if (animationFrame && typeof cancelAnimationFrame === "function") {
+				cancelAnimationFrame(animationFrame);
 			}
-		});
+			clearTimeout(timeout);
+			const source = scene.getEngine().getRenderingCanvas();
+			if (!source) {
+				resolve(undefined);
+				return;
+			}
+			if (!size || (source.width === size.width && source.height === size.height)) {
+				resolve(source.toDataURL("image/png"));
+				return;
+			}
+			const output = document.createElement("canvas");
+			output.width = size.width;
+			output.height = size.height;
+			const context = output.getContext("2d");
+			if (!context) {
+				resolve(undefined);
+				return;
+			}
+			context.drawImage(source, 0, 0, output.width, output.height);
+			resolve(output.toDataURL("image/png"));
+		};
+		scene.onAfterRenderObservable.addOnce(() => finish());
+		if (completed) {
+			return;
+		}
+		// The authoring scene does not render while Play mode owns the canvas. A
+		// browser frame therefore provides the authoritative fallback instead of
+		// waiting forever for this scene's onAfterRenderObservable.
+		if (typeof requestAnimationFrame === "function") {
+			animationFrame = requestAnimationFrame(() => finish());
+		}
+		timeout = setTimeout(() => finish(), 1_000) as unknown as number;
 	});
 }
 

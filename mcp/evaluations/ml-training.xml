@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which MCP tool reports portable Agent observations, actions, rewards, episodes, curriculum, trainer adapters, and checkpoint-publication limits without changing the scene?</question>
+      <answer>get_ml_training_capabilities</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool reads exact-revision Agent behaviors and the live exported-runtime Agent state?</question>
+      <answer>get_ml_training_configuration</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which algorithm does the built-in portable trainer actually execute?</question>
+      <answer>behavior-cloning</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which trainer algorithms require a configured and executed external provider?</question>
+      <answer>PPO, SAC, imitation, and external algorithms</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Where can external trainer credential values be supplied?</question>
+      <answer>Only through the environment variables named by the provider manifest</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool returns a bounded demonstration summary and the exact dataset SHA-256 for one behavior?</question>
+      <answer>list_ml_training_episodes</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does starting a training job use the live mutable dataset, or an immutable snapshot under exact configuration, provider, and dataset leases?</question>
+      <answer>An immutable snapshot under exact leases</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool computes a non-mutating exact destination plan for a succeeded ONNX checkpoint?</question>
+      <answer>inspect_ml_training_checkpoint_publication</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool transactionally publishes a trained ONNX policy with normal AI Model importer metadata and real Runtime AI compilation verification?</question>
+      <answer>publish_ml_training_checkpoint</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does delete_ml_training_job remove already published Runtime AI models? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+</evaluation>

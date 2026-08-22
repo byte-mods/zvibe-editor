@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which MCP tool reads one image asset's transient Texture Inspector channel-preview state?</question>
+      <answer>get_texture_channel_preview</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool changes the transient Texture Inspector channel or display mode?</question>
+      <answer>set_texture_channel_preview</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What display mode is selected by default for single-channel texture previews?</question>
+      <answer>grayscale</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which five texture preview channels are supported?</question>
+      <answer>rgba, red, green, blue, alpha</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two texture channel display modes are supported?</question>
+      <answer>grayscale, colorized</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>How is alpha displayed when colorized mode is selected?</question>
+      <answer>opaque grayscale</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the maximum decoded width or height of the Texture Inspector channel preview?</question>
+      <answer>1024 pixels</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does changing the texture channel preview modify asset bytes or importer settings? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which field prevents stale external texture-preview mutations?</question>
+      <answer>expectedRevision</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool should open the normal File Inspector before visual texture-preview verification?</question>
+      <answer>open_asset_inspector</answer>
+   </qa_pair>
+</evaluation>

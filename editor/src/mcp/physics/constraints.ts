@@ -1,4 +1,5 @@
 import { PhysicsConstraint, PhysicsConstraintType, PhysicsMotionType, PhysicsShapeType, Scene, Tools, Vector3 } from "babylonjs";
+import { configureHybridPhysicsSolver, getHybridPhysicsSolverRuntime, normalizeHybridPhysicsSolverConfiguration } from "babylonjs-editor-tools";
 
 import { isAbstractMesh } from "../../tools/guards/nodes";
 
@@ -24,7 +25,9 @@ function configs(scene: Scene): any[] {
 }
 function runtime(scene: Scene): Map<string, PhysicsConstraint> {
 	let map = runtimeConstraints.get(scene);
-	if (!map) runtimeConstraints.set(scene, (map = new Map()));
+	if (!map) {
+		runtimeConstraints.set(scene, (map = new Map()));
+	}
 	return map;
 }
 function vector(value: any, fallback: number[]): Vector3 {
@@ -37,7 +40,9 @@ function createRuntimeConstraint(scene: Scene, config: any): PhysicsConstraint {
 		throw new Error("Both constraint nodes must be meshes with enabled physics bodies.");
 	}
 	const type = constraintTypes[config.type];
-	if (type === undefined) throw new Error(`Unknown constraint type "${config.type}".`);
+	if (type === undefined) {
+		throw new Error(`Unknown constraint type "${config.type}".`);
+	}
 	const constraint = new PhysicsConstraint(
 		type,
 		{
@@ -59,17 +64,28 @@ function createRuntimeConstraint(scene: Scene, config: any): PhysicsConstraint {
 /** Recreates serialized constraints after a scene's physics bodies are available. */
 export function restorePhysicsConstraints(scene: Scene): void {
 	for (const config of configs(scene)) {
-		if (runtime(scene).has(config.id)) continue;
+		if (runtime(scene).has(config.id)) {
+			continue;
+		}
 		try {
 			runtime(scene).set(config.id, createRuntimeConstraint(scene, config));
 		} catch (error) {
 			console.warn(`Failed to restore physics constraint ${config.id}:`, error);
 		}
 	}
+	configureHybridPhysicsSolver(scene as any);
 }
 
 export function listPhysicsConstraints(scene: Scene): any {
-	return { constraints: structuredClone(configs(scene)).map((config) => ({ ...config, active: runtime(scene).has(config.id) })) };
+	return {
+		constraints: structuredClone(configs(scene)).map((config) => ({
+			...config,
+			revision: Number.isInteger(config.revision) && config.revision > 0 ? config.revision : 1,
+			solverMode: config.solverMode === "direct" ? "direct" : "iterative",
+			active: runtime(scene).has(config.id),
+		})),
+		hybridRuntime: getHybridPhysicsSolverRuntime(scene as any),
+	};
 }
 
 /** Reads a bounded live physics snapshot for debugging without mutating simulation state. */
@@ -101,8 +117,11 @@ export function getPhysicsSimulationState(scene: Scene): any {
 			type: config.type,
 			parentNodeId: config.parentNodeId,
 			childNodeId: config.childNodeId,
+			revision: Number.isInteger(config.revision) && config.revision > 0 ? config.revision : 1,
+			solverMode: config.solverMode === "direct" ? "direct" : "iterative",
 			active: runtime(scene).has(config.id),
 		})),
+		hybridSolver: getHybridPhysicsSolverRuntime(scene as any),
 		vehicles: listVehicles(scene).vehicles,
 		contactCapture: getPhysicsContactCapture(scene),
 		simulationControl: getPhysicsSimulationControl(scene),
@@ -124,8 +143,15 @@ export function createPhysicsConstraint(scene: Scene, data: any, options: IMCPAc
 		perpAxisB: data.perpAxisB ?? [0, 1, 0],
 		maxDistance: data.maxDistance,
 		collision: data.collision ?? false,
+		revision: 1,
+		solverMode: data.solverMode === "direct" ? "direct" : "iterative",
 	};
-	if (configs(scene).some((value) => value.id === config.id)) throw new Error(`Physics constraint "${config.id}" already exists.`);
+	if (config.solverMode === "direct" && !["ball", "distance", "hinge", "lock"].includes(config.type)) {
+		throw new Error(`Direct supplemental solving supports ball, distance, hinge, and lock constraints; "${config.type}" remains iterative.`);
+	}
+	if (configs(scene).some((value) => value.id === config.id)) {
+		throw new Error(`Physics constraint "${config.id}" already exists.`);
+	}
 	const constraint = createRuntimeConstraint(scene, config);
 	configs(scene).push(config);
 	runtime(scene).set(config.id, constraint);
@@ -135,7 +161,9 @@ export function createPhysicsConstraint(scene: Scene, data: any, options: IMCPAc
 
 export function deletePhysicsConstraint(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const index = configs(scene).findIndex((value) => value.id === data.id);
-	if (index === -1) throw new Error(`Physics constraint "${data.id}" was not found.`);
+	if (index === -1) {
+		throw new Error(`Physics constraint "${data.id}" was not found.`);
+	}
 	runtime(scene).get(data.id)?.dispose();
 	runtime(scene).delete(data.id);
 	configs(scene).splice(index, 1);
@@ -148,15 +176,22 @@ export function validatePhysicsScene(scene: Scene): any {
 	const errors: string[] = [];
 	const warnings: string[] = [];
 	const bodies = scene.meshes.filter((mesh) => !!mesh.physicsAggregate);
-	if (!scene.getPhysicsEngine()) warnings.push("No physics engine is active in the current scene preview.");
-	if (!bodies.length) warnings.push("The scene has no enabled physics bodies.");
+	if (!scene.getPhysicsEngine()) {
+		warnings.push("No physics engine is active in the current scene preview.");
+	}
+	if (!bodies.length) {
+		warnings.push("The scene has no enabled physics bodies.");
+	}
 	for (const mesh of bodies) {
 		const aggregate = mesh.physicsAggregate!;
 		const motionType = aggregate.body.getMotionType();
 		const mass = aggregate.body.getMassProperties().mass ?? 0;
-		if (motionType === PhysicsMotionType.DYNAMIC && (!(mass > 0) || !Number.isFinite(mass))) errors.push(`Dynamic body "${mesh.name}" must have a positive finite mass.`);
-		if (motionType === PhysicsMotionType.DYNAMIC && aggregate.shape.type === PhysicsShapeType.MESH)
+		if (motionType === PhysicsMotionType.DYNAMIC && (!(mass > 0) || !Number.isFinite(mass))) {
+			errors.push(`Dynamic body "${mesh.name}" must have a positive finite mass.`);
+		}
+		if (motionType === PhysicsMotionType.DYNAMIC && aggregate.shape.type === PhysicsShapeType.MESH) {
 			warnings.push(`Dynamic body "${mesh.name}" uses a mesh collision shape; prefer primitive or convex shapes for runtime performance.`);
+		}
 	}
 	for (const config of configs(scene)) {
 		const parent = scene.getNodeById(config.parentNodeId);
@@ -165,10 +200,27 @@ export function validatePhysicsScene(scene: Scene): any {
 			errors.push(`Constraint "${config.id}" references a missing node.`);
 			continue;
 		}
-		if (parent === child) errors.push(`Constraint "${config.id}" cannot connect a node to itself.`);
-		if (!isAbstractMesh(parent) || !isAbstractMesh(child) || !parent.physicsAggregate || !child.physicsAggregate)
+		if (parent === child) {
+			errors.push(`Constraint "${config.id}" cannot connect a node to itself.`);
+		}
+		if (!isAbstractMesh(parent) || !isAbstractMesh(child) || !parent.physicsAggregate || !child.physicsAggregate) {
 			errors.push(`Constraint "${config.id}" requires physics bodies on both referenced meshes.`);
-		if (!runtime(scene).has(config.id)) warnings.push(`Constraint "${config.id}" is saved but not active in the current preview.`);
+		}
+		if (!runtime(scene).has(config.id)) {
+			warnings.push(`Constraint "${config.id}" is saved but not active in the current preview.`);
+		}
+	}
+	const hybrid = normalizeHybridPhysicsSolverConfiguration(scene.metadata?.babylonEditorHybridPhysicsSolver);
+	if (!hybrid.ok) {
+		errors.push(hybrid.error);
+	} else {
+		for (const coupling of hybrid.value.gearCouplings) {
+			const bodyA = scene.getMeshById(coupling.bodyANodeId);
+			const bodyB = scene.getMeshById(coupling.bodyBNodeId);
+			if (!bodyA?.physicsAggregate || !bodyB?.physicsAggregate) {
+				errors.push(`Hybrid gear coupling "${coupling.id}" requires physics bodies on both referenced meshes.`);
+			}
+		}
 	}
 	const vehicleValidation = validateVehicles(scene);
 	errors.push(...vehicleValidation.errors);
@@ -182,6 +234,8 @@ export function validatePhysicsScene(scene: Scene): any {
 			bodyCount: bodies.length,
 			constraintCount: configs(scene).length,
 			activeConstraintCount: runtime(scene).size,
+			directConstraintCount: configs(scene).filter((configuration) => configuration.solverMode === "direct").length,
+			gearCouplingCount: hybrid.ok ? hybrid.value.gearCouplings.length : 0,
 			vehicleCount: listVehicles(scene).vehicles.length,
 		},
 	};

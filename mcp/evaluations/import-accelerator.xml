@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect Import Accelerator capabilities. How many exact-fingerprint importer artifact kinds are cacheable?</question>
+      <answer>7</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the Import Accelerator configuration for a new project. Is remote import-result caching enabled by default? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare Import Accelerator endpoint security rules. Is cleartext HTTP permitted for a non-loopback host? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Import Accelerator authentication semantics. Where is the bearer token value stored?</question>
+      <answer>In the configured environment variable</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Import Accelerator blob integrity. Which digest algorithm addresses and verifies downloaded blobs?</question>
+      <answer>SHA-256</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare Import Accelerator download publication behavior. Is an artifact directory replaced before all blobs pass validation? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Import Accelerator stale-write protection. Which value must exactly match before an importer apply is allowed?</question>
+      <answer>The importer fingerprint</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare a failed Import Accelerator download with local importing. Does a cache integrity or connection failure prevent the local importer from running? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Import Accelerator diagnostics. What is the maximum number of recent activities persisted?</question>
+      <answer>256</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect diagnostics clearing semantics. Which two guards are required before local Import Accelerator diagnostics can be cleared?</question>
+      <answer>The exact diagnostics revision and confirm=true</answer>
+   </qa_pair>
+</evaluation>

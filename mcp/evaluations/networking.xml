@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which networking topology and protocol version are shipped?</question>
+      <answer>client-server using zvibe-gameplay version 1 over authenticated WebSocket</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Are host, join, or reconnect credentials persisted in the scene configuration or returned by retained runtime status? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two authority modes can a Network Replication component author?</question>
+      <answer>server, owner</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which prediction correction behaviors are implemented?</question>
+      <answer>authoritative reconciliation, rollback and replay</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which five deterministic adverse-network controls are available per player?</question>
+      <answer>latency, jitter, packet loss, packet reorder, seed</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>How many local players can Multiplayer Play Mode run?</question>
+      <answer>1 to 4</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does each additional Multiplayer Play player use a separate compiled scene and engine? Respond True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What exact values lease authored networking, transient lobby, and Multiplayer Play control mutations?</question>
+      <answer>configuration revision, session revision, run revision</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does the browser transport claim Unity Transport protocol identity or raw UDP/DTLS unreliable datagrams? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is required before the local gameplay host may bind beyond loopback?</question>
+      <answer>confirm=true and a trusted network or external TLS terminator</answer>
+   </qa_pair>
+</evaluation>

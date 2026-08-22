@@ -10,19 +10,23 @@ import { getNodeById } from "../tools/scene";
 import { getAnimationTypeForObject } from "../tools/animation";
 
 import { getPropertyValue } from "./tools";
+import { toLegacyCinematic } from "./compatibility";
+import { ICinematicDocument, cinematicDocumentVersion, normalizeCinematicDocument } from "./model";
 import { ICinematic, ICinematicKey, ICinematicKeyCut } from "./typings";
 
 /**
- * Parses the given JSON data and returns a new cinematic object.
+ * Parses original or version-2 JSON data and resolves its legacy-compatible scene references.
  * @param data defines the JSON data of the cinematic to parse.
  * @param scene defines the reference to the scene used to retrieve cinematic's data.
  */
-export function parseCinematic(data: ICinematic, scene: Scene): ICinematic {
+
+export function parseCinematic(data: ICinematic | ICinematicDocument, scene: Scene): ICinematic {
+	const legacyData = "version" in data && data.version === cinematicDocumentVersion ? toLegacyCinematic(normalizeCinematicDocument(data)) : data;
 	return {
-		name: data.name,
-		framesPerSecond: data.framesPerSecond,
-		outputFramesPerSecond: data.outputFramesPerSecond,
-		tracks: data.tracks.map((track) => {
+		name: legacyData.name,
+		framesPerSecond: legacyData.framesPerSecond,
+		outputFramesPerSecond: legacyData.outputFramesPerSecond,
+		tracks: legacyData.tracks.map((track) => {
 			let node: any = null;
 			let animationType: number | null = null;
 
@@ -46,6 +50,7 @@ export function parseCinematic(data: ICinematic, scene: Scene): ICinematic {
 			}
 
 			return {
+				_id: track._id,
 				node,
 				sound,
 				propertyPath: track.propertyPath,

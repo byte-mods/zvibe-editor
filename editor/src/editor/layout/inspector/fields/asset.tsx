@@ -16,7 +16,7 @@ import { getProjectAssetsRootUrl } from "../../../../project/configuration";
 import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
-import { IEditorInspectorFieldProps } from "./field";
+import { IEditorInspectorFieldProps, matchesInspectorSearch } from "./field";
 import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorAssetFieldProps extends IEditorInspectorFieldProps {
@@ -142,6 +142,9 @@ export function EditorInspectorAssetField(props: IEditorInspectorAssetFieldProps
 			oldValue: value,
 			newValue: path,
 		});
+	}
+	if (!matchesInspectorSearch(props.label, props.property, props.tooltip)) {
+		return null;
 	}
 
 	return (

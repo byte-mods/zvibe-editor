@@ -8,7 +8,7 @@ import { Scene } from "babylonjs";
 import { normalizeVideoImporterSettings } from "babylonjs-editor-tools";
 
 import { applyVideoImporterArtifact, getVideoImporterArtifactStatus, processVideoImporterOutput } from "../../src/mcp/assets/video-importer";
-import { applyVideoImporter, getVideoImporterResult } from "../../src/mcp/assets/assets";
+import { applyVideoImporter, getVideoImporterCapabilities, getVideoImporterResult, getVideoPlatformOverrides, setVideoPlatformOverrides } from "../../src/mcp/assets/assets";
 import { readAssetMetadata, writeAssetMetadata } from "../../src/mcp/assets/registry";
 import { projectConfiguration } from "../../src/project/configuration";
 
@@ -73,8 +73,12 @@ describe.runIf(mediaToolsAvailable)("executed video importer", () => {
 		const applied = await applyVideoImporterArtifact(path, planned.fingerprint);
 		expect(applied).toMatchObject({
 			current: true,
+			platform: "default",
 			result: {
 				transcoded: true,
+				platform: "default",
+				compatibility: { status: "notEvaluated" },
+				encoder: { backend: "software", ffmpegName: "libvpx-vp9", hardware: false },
 				settings: { transcode: "webm", maxWidth: 320, maxHeight: 180, includeAudio: false },
 				source: { width: 640, height: 360, audioCodec: "aac" },
 				output: { width: 320, height: 180, videoCodec: "vp9", audioCodec: null },
@@ -86,6 +90,28 @@ describe.runIf(mediaToolsAvailable)("executed video importer", () => {
 		await writeAssetMetadata(path, metadata);
 		expect(await getVideoImporterArtifactStatus(path)).toMatchObject({ current: false, exists: true });
 		await expect(applyVideoImporterArtifact(path, planned.fingerprint)).rejects.toThrow("plan changed");
+	});
+
+	test("resolves one exact Web override into the artifact lease and output evidence", async () => {
+		const path = join(directory, "assets", "platform.mp4");
+		createVideo(path);
+		const metadata = await readAssetMetadata(path);
+		metadata.importer.settings = {
+			...metadata.importer.settings,
+			platformOverrides: JSON.stringify({
+				web: { enabled: true, transcode: "webm", videoCodec: "vp8", encoder: "software", maxWidth: 320, maxHeight: 180, includeAudio: false, colorDefinition: "rec709" },
+			}),
+		};
+		await writeAssetMetadata(path, metadata);
+		const planned = await getVideoImporterArtifactStatus(path, "web");
+		expect(planned).toMatchObject({ platform: "web", overrideApplied: true, settings: { videoCodec: "vp8", colorDefinition: "rec709" } });
+		const applied = await applyVideoImporterArtifact(path, planned.fingerprint, undefined, "web");
+		expect(applied.result).toMatchObject({
+			platform: "web",
+			encoder: { ffmpegName: "libvpx", hardware: false },
+			compatibility: { status: "supported", videoCodec: "vp8" },
+			output: { videoCodec: "vp8", colorSpace: "bt709", colorRange: "tv" },
+		});
 	});
 
 	test("preserves a compatible source for direct build output", async () => {
@@ -113,5 +139,35 @@ describe.runIf(mediaToolsAvailable)("executed video importer", () => {
 		await expect(applyVideoImporter(scene, { path: "assets/mcp.mp4", expectedFingerprint: planned.fingerprint, confirm: false }, {} as any)).rejects.toThrow("confirm=true");
 		const applied = await applyVideoImporter(scene, { path: "assets/mcp.mp4", expectedFingerprint: planned.fingerprint, confirm: true }, { editor: { path: null } } as any);
 		expect(applied).toMatchObject({ applied: true, current: true, result: { output: { width: 320, height: 180 } } });
+	});
+
+	test("exposes encoder evidence and leases the complete Web/Desktop override map through MCP actions", async () => {
+		const path = join(directory, "assets", "platform-actions.mp4");
+		createVideo(path);
+		const scene = {} as Scene;
+		const capabilities = await getVideoImporterCapabilities(scene, {}, { editor: { path: null } } as any);
+		expect(capabilities).toMatchObject({
+			encoders: { availableBackends: expect.arrayContaining(["software"]) },
+			platforms: { web: { platform: "web", recommendedContainer: "mp4" }, desktop: { platform: "desktop", recommendedVideoCodec: "h264" } },
+		});
+		const planned = await getVideoPlatformOverrides(scene, { path: "assets/platform-actions.mp4" });
+		expect(planned).toMatchObject({ overrides: {}, effective: { web: { overrideApplied: false }, desktop: { overrideApplied: false } } });
+		const overrides = {
+			web: { enabled: true, transcode: "webm", videoCodec: "vp8", encoder: "software", maxWidth: 320, maxHeight: 180, includeAudio: false },
+			desktop: { enabled: true, transcode: "mp4", videoCodec: "h264", quality: 0.9, colorDefinition: "rec709" },
+		};
+		await expect(setVideoPlatformOverrides(scene, { path: "assets/platform-actions.mp4", expectedFingerprint: "0".repeat(64), overrides }, {} as any)).rejects.toThrow(
+			"plan changed"
+		);
+		const updated = await setVideoPlatformOverrides(scene, { path: "assets/platform-actions.mp4", expectedFingerprint: planned.fingerprint, overrides }, {
+			editor: { layout: { assets: { refresh: () => undefined } } },
+		} as any);
+		expect(updated).toMatchObject({ updated: true, current: false, effective: { web: { overrideApplied: true }, desktop: { overrideApplied: true } } });
+		const web = await getVideoImporterResult(scene, { path: "assets/platform-actions.mp4", platform: "web" });
+		expect(web).toMatchObject({ platform: "web", overrideApplied: true, settings: { transcode: "webm", videoCodec: "vp8" } });
+		const applied = await applyVideoImporter(scene, { path: "assets/platform-actions.mp4", platform: "web", expectedFingerprint: web.fingerprint, confirm: true }, {
+			editor: { path: null },
+		} as any);
+		expect(applied).toMatchObject({ applied: true, current: true, platform: "web", result: { compatibility: { status: "supported" }, output: { videoCodec: "vp8" } } });
 	});
 });

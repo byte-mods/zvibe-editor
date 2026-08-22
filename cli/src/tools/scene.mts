@@ -3,6 +3,15 @@ import { readdir } from "node:fs/promises";
 
 import fs from "fs-extra";
 
+async function readSceneContentFiles(directory: string): Promise<string[]> {
+	const entries = await readdir(directory, { withFileTypes: true });
+
+	return entries
+		.filter((entry) => entry.isFile() && !entry.name.startsWith(".") && !entry.name.endsWith(".bjsmeta.json"))
+		.map((entry) => entry.name)
+		.sort();
+}
+
 export async function ensureSceneDirectories(scenePath: string) {
 	await Promise.all([
 		fs.ensureDir(join(scenePath, "nodes")),
@@ -11,6 +20,7 @@ export async function ensureSceneDirectories(scenePath: string) {
 		fs.ensureDir(join(scenePath, "lights")),
 		fs.ensureDir(join(scenePath, "cameras")),
 		fs.ensureDir(join(scenePath, "geometries")),
+		fs.ensureDir(join(scenePath, "generatedGeometries")),
 		fs.ensureDir(join(scenePath, "skeletons")),
 		fs.ensureDir(join(scenePath, "shadowGenerators")),
 		fs.ensureDir(join(scenePath, "sceneLinks")),
@@ -49,25 +59,25 @@ export async function readSceneDirectories(scenePath: string) {
 		geometryFiles,
 		nodeParticleSystemSetFiles,
 	] = await Promise.all([
-		readdir(join(scenePath, "nodes")),
-		readdir(join(scenePath, "meshes")),
-		readdir(join(scenePath, "lods")),
-		readdir(join(scenePath, "lights")),
-		readdir(join(scenePath, "cameras")),
-		readdir(join(scenePath, "skeletons")),
-		readdir(join(scenePath, "shadowGenerators")),
-		readdir(join(scenePath, "sceneLinks")),
-		readdir(join(scenePath, "gui")),
-		readdir(join(scenePath, "sounds")),
-		readdir(join(scenePath, "soundNodes")),
-		readdir(join(scenePath, "particleSystems")),
-		readdir(join(scenePath, "morphTargetManagers")),
-		readdir(join(scenePath, "morphTargets")),
-		readdir(join(scenePath, "animationGroups")),
-		readdir(join(scenePath, "sprite-maps")),
-		readdir(join(scenePath, "sprite-managers")),
-		readdir(join(scenePath, "geometries")),
-		readdir(join(scenePath, "nodeParticleSystemSets")),
+		readSceneContentFiles(join(scenePath, "nodes")),
+		readSceneContentFiles(join(scenePath, "meshes")),
+		readSceneContentFiles(join(scenePath, "lods")),
+		readSceneContentFiles(join(scenePath, "lights")),
+		readSceneContentFiles(join(scenePath, "cameras")),
+		readSceneContentFiles(join(scenePath, "skeletons")),
+		readSceneContentFiles(join(scenePath, "shadowGenerators")),
+		readSceneContentFiles(join(scenePath, "sceneLinks")),
+		readSceneContentFiles(join(scenePath, "gui")),
+		readSceneContentFiles(join(scenePath, "sounds")),
+		readSceneContentFiles(join(scenePath, "soundNodes")),
+		readSceneContentFiles(join(scenePath, "particleSystems")),
+		readSceneContentFiles(join(scenePath, "morphTargetManagers")),
+		readSceneContentFiles(join(scenePath, "morphTargets")),
+		readSceneContentFiles(join(scenePath, "animationGroups")),
+		readSceneContentFiles(join(scenePath, "sprite-maps")),
+		readSceneContentFiles(join(scenePath, "sprite-managers")),
+		readSceneContentFiles(join(scenePath, "geometries")),
+		readSceneContentFiles(join(scenePath, "nodeParticleSystemSets")),
 	]);
 
 	return {

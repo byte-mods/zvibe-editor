@@ -1,10 +1,27 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { Bone, Matrix, MeshBuilder, NullEngine, Quaternion, Scene, Skeleton, Space, TransformNode, Vector3 } from "babylonjs";
-import { applyRigLayers } from "babylonjs-editor-tools";
+import { Animation, AnimationGroup, Bone, Matrix, MeshBuilder, NullEngine, Quaternion, Scene, Skeleton, Space, TransformNode, Vector3 } from "babylonjs";
+import { applyRigLayers, registerAnimationRigJob, resetRigLayerTemporalState } from "babylonjs-editor-tools";
 
-import { createRigConstraint, createRigLayer, deleteRigConstraint, deleteRigLayer, listRigLayers, setRigConstraint, setRigLayer } from "../../src/mcp/rigging/rig-layers";
+import {
+	clearAnimationRigProfile,
+	createRigConstraint,
+	createRigLayer,
+	deleteRigConstraint,
+	deleteRigLayer,
+	getAnimationRigProfile,
+	listAnimationRigJobTypes,
+	listRigLayers,
+	setAnimationRigProfile,
+	setRigConstraint,
+	setRigLayer,
+} from "../../src/mcp/rigging/rig-layers";
 import { getRigConstraintGraph, setRigConstraintGraphLayout } from "../../src/mcp/rigging/rig-constraint-graph";
+import { bakeRigToConstraintAnimation, bakeRigToSkeletonAnimation, inspectRigToConstraintBake, inspectRigToSkeletonBake } from "../../src/mcp/rigging/rig-baking";
+
+function rotationAngle(left: Quaternion, right: Quaternion): number {
+	return 2 * Math.acos(Math.min(1, Math.abs(Quaternion.Dot(left.normalize(), right.normalize()))));
+}
 
 describe("mcp/animation rig layers", () => {
 	let engine: NullEngine;
@@ -97,6 +114,120 @@ describe("mcp/animation rig layers", () => {
 			createRigConstraint(scene, { layerId: layer.id, type: "twist", sourceBoneName: bone.name, axis: [1, 0, 0], twistBones: [{ boneName: bone.name, weight: 1 }] }, options)
 		).toThrow("cannot also be");
 		expect(() => createRigLayer(scene, { skeletonId: "missing" }, options)).toThrow("was not found");
+	});
+
+	test("authors registered custom Animation Rig jobs with bounded versioned data, handles, lifecycle diagnostics, and MCP discovery", () => {
+		const skeleton = new Skeleton("Custom Character", "custom-character", scene);
+		const driven = new Bone("Driven", skeleton, null, Matrix.Identity(), Matrix.Identity());
+		const mesh = MeshBuilder.CreateBox("Custom Character Mesh", { size: 1 }, scene);
+		mesh.skeleton = skeleton;
+		const target = new TransformNode("Custom Target", scene);
+		const unregister = registerAnimationRigJob<{ x: number }>({
+			id: "test.editor.custom-position",
+			displayName: "Editor Custom Position",
+			description: "Moves one bound bone on X.",
+			dataVersion: 2,
+			setDefaultValues: () => ({ x: 4 }),
+			validate: (context) =>
+				context.bones.length === 1 && context.nodes.length === 1 && typeof context.data.x === "number" ? true : "Expected one bone, one node, and numeric x.",
+			processAnimation: (context) => {
+				context.bones[0].setPosition(new Vector3(context.data.x * context.weight, 0, 0));
+			},
+		});
+		try {
+			expect(listAnimationRigJobTypes()).toMatchObject({
+				jobTypes: [
+					expect.objectContaining({
+						id: "test.editor.custom-position",
+						displayName: "Editor Custom Position",
+						dataVersion: 2,
+						hasRootMotion: false,
+						defaultData: { x: 4 },
+					}),
+				],
+			});
+			const layer = createRigLayer(scene, { id: "custom-rig", skeletonId: skeleton.id, weight: 0.5 }, options);
+			const created = createRigConstraint(
+				scene,
+				{
+					layerId: layer.id,
+					id: "custom-job",
+					type: "customJob",
+					jobType: "test.editor.custom-position",
+					boneNames: [driven.name],
+					nodeIds: [target.id],
+					weight: 0.5,
+				},
+				options
+			);
+			expect(created).toMatchObject({
+				type: "customJob",
+				jobType: "test.editor.custom-position",
+				jobVersion: 2,
+				boneNames: ["Driven"],
+				nodeIds: [target.id],
+				jobData: { x: 4 },
+				registered: true,
+				valid: true,
+				createCount: 1,
+				processAnimationCount: 1,
+				lastWeight: 0.25,
+				lastSucceeded: true,
+			});
+			expect(driven.getPosition().x).toBe(1);
+			const updated = setRigConstraint(scene, { layerId: layer.id, constraintId: created.id, jobData: { x: 8 } }, options);
+			expect(updated).toMatchObject({ valid: true, jobData: { x: 8 }, updateCount: 2, processAnimationCount: 2 });
+			expect(driven.getPosition().x).toBe(2);
+			expect(() => setRigConstraint(scene, { layerId: layer.id, constraintId: created.id, jobData: { x: Number.NaN } }, options)).toThrow("non-finite");
+			expect(() => setRigConstraint(scene, { layerId: layer.id, constraintId: created.id, boneNames: [driven.name, driven.name] }, options)).toThrow("duplicates");
+			expect(setRigConstraint(scene, { layerId: layer.id, constraintId: created.id, jobVersion: 1 }, options)).toMatchObject({
+				valid: false,
+				validationMessage: "Registered data version 2 does not match serialized version 1.",
+			});
+			expect(setRigConstraint(scene, { layerId: layer.id, constraintId: created.id, jobVersion: 2 }, options)).toMatchObject({ valid: true });
+			expect(deleteRigConstraint(scene, { layerId: layer.id, constraintId: created.id }, options)).toMatchObject({ deleted: true, constraintId: created.id });
+			applyRigLayers(scene as any);
+		} finally {
+			resetRigLayerTemporalState(scene as any);
+			unregister();
+		}
+	});
+
+	test("configures, reads, filters, and clears bounded shared Animation Rig profiling", () => {
+		const skeleton = new Skeleton("Profile Character", "profile-character", scene);
+		const driven = new Bone("Driven", skeleton, null, Matrix.Identity(), Matrix.Identity());
+		const mesh = MeshBuilder.CreateBox("Profile Mesh", { size: 1 }, scene);
+		mesh.skeleton = skeleton;
+		const target = new TransformNode("Profile Target", scene);
+		const layer = createRigLayer(scene, { id: "profile-layer", skeletonId: skeleton.id }, options);
+		createRigConstraint(
+			scene,
+			{ layerId: layer.id, id: "profile-constraint", type: "multiPosition", boneName: driven.name, sources: [{ nodeId: target.id }], maintainOffset: false },
+			options
+		);
+		expect(setAnimationRigProfile(scene, { enabled: true, sampleCapacity: 2, sampleEveryNEvaluations: 1 }, options)).toMatchObject({
+			settings: { enabled: true, sampleCapacity: 2, sampleEveryNEvaluations: 1 },
+		});
+		applyRigLayers(scene as any);
+		applyRigLayers(scene as any);
+		applyRigLayers(scene as any);
+		const profile = getAnimationRigProfile(scene, { skeletonId: skeleton.id, layerId: layer.id, includeSamples: true, sampleLimit: 1 });
+		expect(profile).toMatchObject({
+			evaluationCount: 3,
+			capturedSampleCount: 3,
+			retainedSampleCount: 2,
+			droppedSampleCount: 1,
+			pagination: { total: 2, count: 1, offset: 0, hasMore: true, nextOffset: 1 },
+			layerSummaries: [expect.objectContaining({ id: layer.id, sampleCount: 3, appliedCount: 3 })],
+			constraintSummaries: [expect.objectContaining({ id: "profile-constraint", layerId: layer.id, sampleCount: 3, appliedCount: 3 })],
+		});
+		expect(profile.samples[0].layers[0].constraints[0]).toMatchObject({ constraintId: "profile-constraint", status: "applied" });
+		expect(() => getAnimationRigProfile(scene, { constraintId: "profile-constraint" })).toThrow("requires layerId");
+		expect(() => getAnimationRigProfile(scene, { layerId: "missing" })).toThrow('Rig layer "missing" was not found');
+		expect(() => setAnimationRigProfile(scene, {}, options)).toThrow("Provide enabled");
+		expect(() => setAnimationRigProfile(scene, { sampleCapacity: 257 }, options)).toThrow("sampleCapacity");
+		expect(clearAnimationRigProfile(scene, {}, options)).toMatchObject({ evaluationCount: 0, retainedSampleCount: 0, settings: { enabled: true, sampleCapacity: 2 } });
+		expect(options.editor.layout.inspector.forceUpdate).toHaveBeenCalled();
 	});
 
 	test("authors, diagnoses, solves, and updates a bounded Chain IK constraint", () => {
@@ -481,5 +612,274 @@ describe("mcp/animation rig layers", () => {
 		expect(automatic.nodes.find((node: any) => node.id === `bone:${driven.name}`).position[0]).toBe(608);
 		deleteRigConstraint(scene, { layerId: layer.id, constraintId: "parent" }, options);
 		expect(listRigLayers(scene, { skeletonId: skeleton.id }).layers[0].graphPositions["constraint:parent"]).toBeUndefined();
+	});
+
+	test("inspects and deterministically bakes evaluated rig motion to ordinary skeleton curves while restoring the live pose", () => {
+		const skeleton = new Skeleton("Bake Character", "bake-character", scene);
+		const driven = new Bone("Driven", skeleton, null, Matrix.Identity(), Matrix.Identity());
+		const drivenNode = new TransformNode("Driven Linked Transform", scene);
+		driven.linkTransformNode(drivenNode);
+		const mesh = MeshBuilder.CreateBox("Bake Mesh", { size: 1 }, scene);
+		mesh.skeleton = skeleton;
+		const target = new TransformNode("Animated Target", scene);
+		const sourceAnimation = new Animation("Target Motion", "position", 30, Animation.ANIMATIONTYPE_VECTOR3, Animation.ANIMATIONLOOPMODE_CYCLE);
+		sourceAnimation.setKeys([
+			{ frame: 0, value: new Vector3(2, 0, 0) },
+			{ frame: 30, value: new Vector3(4, 0, 0) },
+		]);
+		const sourceGroup = new AnimationGroup("Source Motion", scene);
+		sourceGroup.addTargetedAnimation(sourceAnimation, target);
+		const layer = createRigLayer(scene, { id: "bake-rig", skeletonId: skeleton.id }, options);
+		createRigConstraint(
+			scene,
+			{ layerId: layer.id, id: "position", type: "multiPosition", boneName: driven.name, sources: [{ nodeId: target.id, weight: 1 }], maintainOffset: false },
+			options
+		);
+		target.position.copyFromFloats(9, 8, 7);
+		driven.setPosition(new Vector3(6, 5, 4));
+		const beforeTarget = target.position.clone();
+		const beforeBone = driven.getPosition();
+
+		const request = { skeletonId: skeleton.id, sourceAnimationGroupName: sourceGroup.name, layerIds: [layer.id], sampleRate: 30 };
+		const inspection = inspectRigToSkeletonBake(scene, request);
+		expect(inspection).toMatchObject({
+			algorithm: "bounded-rig-to-skeleton-bake-v1",
+			canBake: true,
+			layerCount: 1,
+			constraintCount: 1,
+			drivenBoneCount: 1,
+			sampleCount: 31,
+			trackCount: 3,
+			keyCount: 93,
+		});
+		expect(inspection.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+		const result = bakeRigToSkeletonAnimation(scene, { ...request, outputName: "Rig Baked", expectedFingerprint: inspection.fingerprint }, options);
+		expect(result).toMatchObject({ created: true, name: "Rig Baked", trackCount: 3, poseRestored: true, temporalStateReset: true });
+		const output = scene.getAnimationGroupByName("Rig Baked")!;
+		expect(output.metadata.babylonEditorRigBake).toMatchObject({
+			algorithm: "bounded-rig-to-skeleton-bake-v1",
+			skeletonId: skeleton.id,
+			sourceAnimationGroupName: sourceGroup.name,
+			layerIds: [layer.id],
+		});
+		const positionTrack = output.targetedAnimations.find((targeted) => targeted.animation.targetProperty === "position")!;
+		expect(positionTrack.target).toBe(drivenNode);
+		expect(positionTrack.animation.getKeys()[0].value.x).toBeCloseTo(2);
+		expect(positionTrack.animation.getKeys().at(-1)!.value.x).toBeCloseTo(4);
+		expect(target.position.asArray()).toEqual(beforeTarget.asArray());
+		expect(driven.getPosition().asArray()).toEqual(beforeBone.asArray());
+
+		setRigLayer(scene, { layerId: layer.id, weight: 0.5 }, options);
+		expect(() => bakeRigToSkeletonAnimation(scene, { ...request, outputName: "Stale", expectedFingerprint: inspection.fingerprint }, options)).toThrow(
+			"changed after inspection"
+		);
+		expect(scene.getAnimationGroupByName("Stale")).toBeNull();
+
+		setRigLayer(scene, { layerId: layer.id, weight: 1 }, options);
+		const failedInspection = inspectRigToSkeletonBake(scene, request);
+		driven.setPosition(new Vector3(7, 6, 5));
+		const beforeFailure = driven.getPosition();
+		target.dispose();
+		const blockedInspection = inspectRigToSkeletonBake(scene, request);
+		expect(blockedInspection).toMatchObject({ canBake: false, invalidConstraintIds: ["position"] });
+		expect(blockedInspection.errors[0]).toContain("source-node");
+		expect(() => bakeRigToSkeletonAnimation(scene, { ...request, outputName: "Failed", expectedFingerprint: failedInspection.fingerprint }, options)).toThrow(
+			"changed after inspection"
+		);
+		expect(scene.getAnimationGroupByName("Failed")).toBeNull();
+		expect(driven.getPosition().asArray()).toEqual(beforeFailure.asArray());
+	});
+
+	test("inspects and transfers skeleton motion to inverse-capable rig-control curves with exact forward validation", () => {
+		const skeleton = new Skeleton("Inverse Character", "inverse-character", scene);
+		const driven = new Bone("Driven", skeleton, null, Matrix.Identity(), Matrix.Identity());
+		const twist = new Bone("Twist", skeleton, driven, Matrix.Translation(0, 1, 0), Matrix.Translation(0, 1, 0));
+		const mesh = MeshBuilder.CreateBox("Inverse Mesh", { size: 1 }, scene);
+		mesh.skeleton = skeleton;
+		const control = new TransformNode("Inverse Control", scene);
+		control.position.copyFromFloats(9, 8, 7);
+		const sourceAnimation = new Animation("Skeleton Motion", "position", 30, Animation.ANIMATIONTYPE_VECTOR3, Animation.ANIMATIONLOOPMODE_CYCLE);
+		sourceAnimation.setKeys([
+			{ frame: 0, value: new Vector3(2, 0, 0) },
+			{ frame: 30, value: new Vector3(4, 0, 0) },
+		]);
+		const sourceGroup = new AnimationGroup("Skeleton Source", scene);
+		sourceGroup.addTargetedAnimation(sourceAnimation, driven);
+		const layer = createRigLayer(scene, { id: "inverse-rig", skeletonId: skeleton.id }, options);
+		createRigConstraint(
+			scene,
+			{ layerId: layer.id, id: "position", type: "multiPosition", boneName: driven.name, sources: [{ nodeId: control.id, weight: 1 }], maintainOffset: false },
+			options
+		);
+		createRigConstraint(
+			scene,
+			{ layerId: layer.id, id: "forward-only", type: "twist", sourceBoneName: driven.name, axis: [1, 0, 0], twistBones: [{ boneName: twist.name, weight: 1 }] },
+			options
+		);
+		driven.setPosition(new Vector3(6, 5, 4));
+		const beforeBone = driven.getPosition();
+		const beforeControl = control.position.clone();
+		const request = {
+			skeletonId: skeleton.id,
+			sourceAnimationGroupName: sourceGroup.name,
+			layerIds: [layer.id],
+			constraintRefs: [{ layerId: layer.id, constraintId: "position" }],
+			sampleRate: 30,
+		};
+		const inspection = inspectRigToConstraintBake(scene, request);
+		expect(inspection).toMatchObject({
+			algorithm: "bounded-skeleton-to-rig-controls-bake-v1",
+			canBake: true,
+			constraintCount: 1,
+			controlNodeCount: 1,
+			transferredTrackCount: 1,
+			preservedTrackCount: 0,
+			controlTrackCount: 1,
+			trackCount: 1,
+			sampleCount: 31,
+			keyCount: 31,
+		});
+		const unsupported = inspectRigToConstraintBake(scene, {
+			...request,
+			constraintRefs: [{ layerId: layer.id, constraintId: "forward-only" }],
+		});
+		expect(unsupported).toMatchObject({ canBake: false, unsupportedConstraintRefs: [{ layerId: layer.id, constraintId: "forward-only", type: "twist" }] });
+
+		const result = bakeRigToConstraintAnimation(scene, { ...request, outputName: "Control Baked", expectedFingerprint: inspection.fingerprint }, options);
+		expect(result).toMatchObject({
+			created: true,
+			name: "Control Baked",
+			trackCount: 1,
+			maximumPositionError: 0,
+			poseRestored: true,
+			temporalStateReset: true,
+		});
+		const output = scene.getAnimationGroupByName("Control Baked")!;
+		expect(output.metadata.babylonEditorConstraintBake).toMatchObject({
+			algorithm: "bounded-skeleton-to-rig-controls-bake-v1",
+			skeletonId: skeleton.id,
+			sourceAnimationGroupName: sourceGroup.name,
+			constraintRefs: [{ layerId: layer.id, constraintId: "position" }],
+		});
+		const positionTrack = output.targetedAnimations[0];
+		expect(positionTrack.target).toBe(control);
+		expect(positionTrack.animation.targetProperty).toBe("position");
+		expect(positionTrack.animation.getKeys()[0].value.x).toBeCloseTo(2);
+		expect(positionTrack.animation.getKeys().at(-1)!.value.x).toBeCloseTo(4);
+		expect(control.position.asArray()).toEqual(beforeControl.asArray());
+		expect(driven.getPosition().asArray()).toEqual(beforeBone.asArray());
+		sourceGroup.isAdditive = true;
+		expect(inspectRigToConstraintBake(scene, request)).toMatchObject({
+			canBake: false,
+			errors: [expect.stringContaining("Additive source AnimationGroups")],
+		});
+		sourceGroup.isAdditive = false;
+
+		control.position.x = 10;
+		expect(() => bakeRigToConstraintAnimation(scene, { ...request, outputName: "Stale Control", expectedFingerprint: inspection.fingerprint }, options)).toThrow(
+			"changed after inspection"
+		);
+		expect(scene.getAnimationGroupByName("Stale Control")).toBeNull();
+	});
+
+	test("inverse-bakes Multi-Parent position/rotation and representable Multi-Aim motion", () => {
+		const skeleton = new Skeleton("Inverse Multi Character", "inverse-multi-character", scene);
+		const parentDriven = new Bone("Parent Driven", skeleton, null, Matrix.Identity(), Matrix.Identity());
+		const aimDriven = new Bone("Aim Driven", skeleton, parentDriven, Matrix.Identity(), Matrix.Identity());
+		const mesh = MeshBuilder.CreateBox("Inverse Multi Mesh", { size: 1 }, scene);
+		mesh.skeleton = skeleton;
+		const parentControl = new TransformNode("Parent Control", scene);
+		parentControl.position.copyFromFloats(3, 2, 1);
+		const aimControl = new TransformNode("Aim Control", scene);
+		aimControl.position.copyFromFloats(5, 0, 0);
+
+		const position = new Animation("Parent Position", "position", 30, Animation.ANIMATIONTYPE_VECTOR3, Animation.ANIMATIONLOOPMODE_CYCLE);
+		position.setKeys([
+			{ frame: 0, value: Vector3.Zero() },
+			{ frame: 30, value: new Vector3(2, 3, 4) },
+		]);
+		const parentRotation = new Animation("Parent Rotation", "rotationQuaternion", 30, Animation.ANIMATIONTYPE_QUATERNION, Animation.ANIMATIONLOOPMODE_CYCLE);
+		parentRotation.setKeys([
+			{ frame: 0, value: Quaternion.Identity() },
+			{ frame: 30, value: Quaternion.RotationAxis(Vector3.Up(), Math.PI / 3) },
+		]);
+		const aimRotation = new Animation("Aim Rotation", "rotationQuaternion", 30, Animation.ANIMATIONTYPE_QUATERNION, Animation.ANIMATIONLOOPMODE_CYCLE);
+		aimRotation.setKeys([
+			{ frame: 0, value: Quaternion.Identity() },
+			{ frame: 30, value: Quaternion.RotationAxis(Vector3.Up(), Math.PI / 2) },
+		]);
+		const sourceGroup = new AnimationGroup("Inverse Multi Source", scene);
+		sourceGroup.addTargetedAnimation(position, parentDriven);
+		sourceGroup.addTargetedAnimation(parentRotation, parentDriven);
+		sourceGroup.addTargetedAnimation(aimRotation, aimDriven);
+		const layer = createRigLayer(scene, { id: "inverse-multi-rig", skeletonId: skeleton.id }, options);
+		createRigConstraint(
+			scene,
+			{ layerId: layer.id, id: "parent", type: "multiParent", boneName: parentDriven.name, sources: [{ nodeId: parentControl.id, weight: 1 }] },
+			options
+		);
+		createRigConstraint(
+			scene,
+			{
+				layerId: layer.id,
+				id: "aim",
+				type: "multiAim",
+				boneName: aimDriven.name,
+				sources: [{ nodeId: aimControl.id, weight: 1 }],
+				maintainOffset: false,
+				aimAxis: [1, 0, 0],
+				upAxis: [0, 1, 0],
+				worldUpAxis: [0, 1, 0],
+			},
+			options
+		);
+		const request = {
+			skeletonId: skeleton.id,
+			sourceAnimationGroupName: sourceGroup.name,
+			layerIds: [layer.id],
+			constraintRefs: [
+				{ layerId: layer.id, constraintId: "parent" },
+				{ layerId: layer.id, constraintId: "aim" },
+			],
+			sampleRate: 30,
+		};
+		const inspection = inspectRigToConstraintBake(scene, request);
+		expect(inspection).toMatchObject({ canBake: true, constraintCount: 2, controlNodeCount: 2, transferredTrackCount: 3, controlTrackCount: 3, trackCount: 3, keyCount: 93 });
+		const result = bakeRigToConstraintAnimation(scene, { ...request, outputName: "Inverse Multi Baked", expectedFingerprint: inspection.fingerprint }, options);
+		expect(result.maximumPositionError).toBeLessThanOrEqual(0.000001);
+		expect(result.maximumRotationErrorDegrees).toBeLessThanOrEqual(0.00001);
+		const output = scene.getAnimationGroupByName("Inverse Multi Baked")!;
+		expect(output.targetedAnimations).toHaveLength(3);
+		expect(
+			output.targetedAnimations
+				.filter((targeted) => targeted.target === parentControl)
+				.map((targeted) => targeted.animation.targetProperty)
+				.sort()
+		).toEqual(["position", "rotationQuaternion"]);
+		expect(output.targetedAnimations.find((targeted) => targeted.target === aimControl)?.animation.targetProperty).toBe("position");
+		expect(parentControl.rotationQuaternion).toBeNull();
+		parentDriven.setPosition(Vector3.Zero());
+		parentDriven.setRotationQuaternion(Quaternion.Identity());
+		aimDriven.setRotationQuaternion(Quaternion.Identity());
+		for (const targeted of output.targetedAnimations) {
+			const value = targeted.animation.evaluate(30);
+			if (targeted.animation.targetProperty === "position") {
+				targeted.target.position.copyFrom(value);
+			} else {
+				targeted.target.rotationQuaternion = value.clone();
+			}
+			targeted.target.computeWorldMatrix(true);
+		}
+		expect(
+			applyRigLayers(scene as any, {
+				skeletonId: skeleton.id,
+				layerIds: [layer.id],
+				constraintRefs: request.constraintRefs,
+			})
+		).toMatchObject({ appliedConstraintCount: 2, failedConstraintIds: [] });
+		skeleton.computeAbsoluteMatrices(true);
+		expect(parentDriven.getPosition(Space.WORLD, mesh).asArray()).toEqual([2, 3, 4]);
+		expect(rotationAngle(parentDriven.getRotationQuaternion(Space.WORLD, mesh), Quaternion.RotationAxis(Vector3.Up(), Math.PI / 3))).toBeLessThan(0.00001);
+		expect(rotationAngle(aimDriven.getRotationQuaternion(Space.WORLD, mesh), Quaternion.RotationAxis(Vector3.Up(), (Math.PI * 5) / 6))).toBeLessThan(0.00001);
 	});
 });

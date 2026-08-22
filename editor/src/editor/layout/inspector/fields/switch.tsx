@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../
 import { registerSimpleUndoRedo } from "../../../../tools/undoredo";
 import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../../../tools/property";
 
-import { IEditorInspectorFieldProps } from "./field";
+import { IEditorInspectorFieldProps, matchesInspectorSearch } from "./field";
 import { PrefabFieldOverrideActions, usePrefabFieldOverride } from "../prefab-property-overrides";
 
 export interface IEditorInspectorSwitchFieldProps extends IEditorInspectorFieldProps {
@@ -23,6 +23,9 @@ export function EditorInspectorSwitchField(props: IEditorInspectorSwitchFieldPro
 	useEffect(() => {
 		setValue(getInspectorPropertyValue(props.object, props.property) ?? false);
 	}, [props.object, props.property, prefab.refreshVersion]);
+	if (!matchesInspectorSearch(props.label, props.property, props.tooltip)) {
+		return null;
+	}
 
 	return (
 		<div

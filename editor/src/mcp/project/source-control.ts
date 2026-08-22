@@ -11,6 +11,7 @@ import { Scene } from "babylonjs";
 
 import { IMCPActionOptions } from "../action";
 import { getProjectCollaborationStatus, resolveProjectCollaborationActor } from "./collaboration";
+import { ISemanticMergeDocumentValue, mergeProjectSemanticDocument } from "./semantic-merge";
 
 const maximumGitOutputBytes = 1024 * 1024;
 const maximumStatusChanges = 2000;
@@ -20,6 +21,8 @@ const maximumConflictRollbackBytes = 2 * 1024 * 1024;
 const maximumConflictImageBytes = 8 * 1024 * 1024;
 const maximumConflictImagePixels = 4 * 1024 * 1024;
 const conflictImagePreviewSize = 128;
+const maximumSemanticConflictBlobBytes = 16 * 1024 * 1024;
+const maximumSemanticConflictRollbackBytes = 48 * 1024 * 1024;
 
 interface IGitContext {
 	projectRoot: string;
@@ -882,6 +885,106 @@ async function resolveCommit(context: IGitContext, value: unknown, field: string
 	return { name, hash };
 }
 
+async function sourceControlPathBlobHash(context: IGitContext, commitHash: string, path: string): Promise<string | null> {
+	const gitPath = context.projectPrefix ? `${context.projectPrefix}/${path}` : path;
+	const result = await requireGitSuccess(
+		context.gitRoot,
+		["ls-tree", "-z", commitHash, "--", gitPath],
+		`Unable to inspect ${path} at Git revision ${commitHash.slice(0, 12)}.`,
+		undefined,
+		true
+	);
+	const record = result.stdout.split("\0").find(Boolean);
+	if (!record) {
+		return null;
+	}
+	const separator = record.indexOf("\t");
+	const metadata = separator < 0 ? [] : record.slice(0, separator).split(" ");
+	const hash = metadata[2];
+	if (!/^[a-f0-9]{40,64}$/i.test(hash ?? "")) {
+		throw new Error(`Git returned malformed asset revision evidence for ${path}.`);
+	}
+	return hash.toLowerCase();
+}
+
+/** Reports exact local/known-remote destination freshness and optional retained-lock merge evidence without contacting a network. */
+export async function inspectProjectSourceControlLockFreshness(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const context = await gitContext(options);
+	const path = validatePath(data.path);
+	if (typeof data.destinationBranch !== "string" || !data.destinationBranch) {
+		throw new Error("destinationBranch is required for Smart Lock freshness inspection.");
+	}
+	const destinationBranch = await validateBranch(context, data.destinationBranch);
+	const destinationRemote =
+		data.destinationRemote === undefined || data.destinationRemote === null || data.destinationRemote === "" ? null : validateRemoteName(data.destinationRemote);
+	if (destinationRemote) {
+		await requireGitSuccess(context.gitRoot, ["remote", "get-url", destinationRemote], `Git remote is not configured: ${destinationRemote}`);
+	}
+	const currentBranchResult = await requireGitSuccess(context.gitRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"], "Smart Locks require a named current Git branch.");
+	const currentBranch = currentBranchResult.stdout.trim();
+	const head = await resolveCommit(context, "HEAD", "HEAD");
+	const destinationRef = destinationRemote ? `refs/remotes/${destinationRemote}/${destinationBranch}` : `refs/heads/${destinationBranch}`;
+	const destination = await resolveCommit(
+		context,
+		destinationRef,
+		destinationRemote
+			? `Known remote destination ${destinationRemote}/${destinationBranch}; fetch the remote before inspecting or acquiring a Smart Lock`
+			: `Local destination ${destinationBranch}`
+	);
+	const containsResult = await runGit(context.gitRoot, ["merge-base", "--is-ancestor", destination.hash, head.hash]);
+	if (containsResult.exitCode !== 0 && containsResult.exitCode !== 1) {
+		throwGitResult("Unable to compare the current branch with the Smart Lock destination", containsResult);
+	}
+	const [headAssetHash, destinationAssetHash] = await Promise.all([
+		sourceControlPathBlobHash(context, head.hash, path),
+		sourceControlPathBlobHash(context, destination.hash, path),
+	]);
+	const pathStatus = await requireGitSuccess(
+		context.projectRoot,
+		["status", "--porcelain=v1", "-z", "--", path],
+		`Unable to inspect Smart Lock worktree state for ${path}.`,
+		undefined,
+		true
+	);
+	let acquisitionMergedToDestination: boolean | null = null;
+	let retainedRevisionHash: string | null = null;
+	if (data.acquisitionHeadHash !== undefined) {
+		if (typeof data.acquisitionHeadHash !== "string" || !/^[a-f0-9]{40,64}$/i.test(data.acquisitionHeadHash)) {
+			throw new Error("acquisitionHeadHash must be an exact 40–64 character hexadecimal Git commit id.");
+		}
+		let acquisition = await resolveCommit(context, data.acquisitionHeadHash, "acquisitionHeadHash");
+		if (data.acquisitionBranch !== undefined) {
+			const acquisitionBranch = await validateBranch(context, data.acquisitionBranch);
+			acquisition = await resolveCommit(context, `refs/heads/${acquisitionBranch}`, "acquisitionBranch");
+		}
+		retainedRevisionHash = acquisition.hash;
+		const mergedResult = await runGit(context.gitRoot, ["merge-base", "--is-ancestor", acquisition.hash, destination.hash]);
+		if (mergedResult.exitCode !== 0 && mergedResult.exitCode !== 1) {
+			throwGitResult("Unable to evaluate retained Smart Lock merge evidence", mergedResult);
+		}
+		acquisitionMergedToDestination = mergedResult.exitCode === 0;
+	}
+	return {
+		path,
+		currentBranch,
+		headHash: head.hash,
+		headAssetHash,
+		destinationBranch,
+		destinationRemote,
+		destinationRef,
+		destinationHash: destination.hash,
+		destinationAssetHash,
+		containsDestination: containsResult.exitCode === 0,
+		sameAssetRevision: headAssetHash === destinationAssetHash,
+		pathClean: pathStatus.stdout.length === 0,
+		fresh: containsResult.exitCode === 0 && pathStatus.stdout.length === 0,
+		freshnessScope: destinationRemote ? "knownRemoteTrackingRef" : "localBranch",
+		networkContacted: false,
+		acquisitionMergedToDestination,
+		retainedRevisionHash,
+	};
+}
+
 function throwGitResult(message: string, result: IGitResult): never {
 	const details = (result.stderr || result.stdout).trim().slice(0, 512);
 	throw new Error(details ? `${message}: ${details}` : message);
@@ -1681,4 +1784,686 @@ export async function applyProjectSourceControlTextResolution(scene: Scene, data
 		byteLength: Buffer.byteLength(data.content, "utf-8"),
 		integration: await sourceControlConflictState(context),
 	};
+}
+
+interface ISemanticGitConflictStage {
+	document: ISemanticMergeDocumentValue;
+	summary: { stage: number; mode: string; hash: string; byteLength: number } | null;
+}
+
+function semanticGitConflictDescriptor(path: string): { kind: "scene" | "prefab"; file: string } {
+	if (/\.prefab$/i.test(path)) {
+		return { kind: "prefab", file: "prefab.json" };
+	}
+	const segments = path.split("/");
+	const sceneIndex = segments.findIndex((segment) => /\.scene$/i.test(segment));
+	if (sceneIndex >= 0 && sceneIndex < segments.length - 1) {
+		const file = segments.slice(sceneIndex + 1).join("/");
+		if (/\.json$/i.test(file)) {
+			return { kind: "scene", file };
+		}
+	}
+	throw new Error("Semantic Git conflict resolution supports .prefab JSON files and JSON manifests inside persisted .scene directories only.");
+}
+
+async function readSemanticGitConflictStage(
+	context: IGitContext,
+	stage: { stage: number; mode: string; hash: string } | undefined,
+	label: "base" | "ours" | "theirs"
+): Promise<ISemanticGitConflictStage> {
+	if (!stage) {
+		return { document: { exists: false }, summary: null };
+	}
+	if (!/^100(?:644|755)$/.test(stage.mode)) {
+		throw new Error(`Semantic Git conflict ${label} stage is not a regular file and cannot be merged safely.`);
+	}
+	const sizeResult = await requireGitSuccess(context.gitRoot, ["cat-file", "-s", stage.hash], `Unable to read semantic Git conflict ${label} blob size.`);
+	const byteLength = Number(sizeResult.stdout.trim());
+	if (!Number.isSafeInteger(byteLength) || byteLength < 0 || byteLength > maximumSemanticConflictBlobBytes) {
+		throw new Error(`Semantic Git conflict ${label} stage must contain at most ${maximumSemanticConflictBlobBytes} bytes.`);
+	}
+	const content = await runGitBytes(context.gitRoot, ["cat-file", "blob", stage.hash], maximumSemanticConflictBlobBytes + 1024);
+	if (content.exitCode !== 0) {
+		throw new Error(
+			content.stderr ? `Unable to read semantic Git conflict ${label} blob: ${content.stderr.slice(0, 512)}` : `Unable to read semantic Git conflict ${label} blob.`
+		);
+	}
+	let source: string;
+	try {
+		source = new TextDecoder("utf-8", { fatal: true }).decode(content.stdout);
+	} catch {
+		throw new Error(`Semantic Git conflict ${label} stage is not valid UTF-8 JSON.`);
+	}
+	let value: unknown;
+	try {
+		value = JSON.parse(source);
+	} catch {
+		throw new Error(`Semantic Git conflict ${label} stage contains invalid JSON.`);
+	}
+	return { document: { exists: true, value }, summary: { stage: stage.stage, mode: stage.mode, hash: stage.hash, byteLength } };
+}
+
+async function semanticGitConflictForContext(context: IGitContext, data: any, options: IMCPActionOptions): Promise<any> {
+	const { integration, path, conflict, fingerprint } = await conflictIdentityForContext(context, data.path);
+	const descriptor = semanticGitConflictDescriptor(path);
+	const stage = (number: number): any => conflict.stages.find((candidate: any) => candidate.stage === number);
+	const [base, ours, theirs] = await Promise.all([
+		readSemanticGitConflictStage(context, stage(1), "base"),
+		readSemanticGitConflictStage(context, stage(2), "ours"),
+		readSemanticGitConflictStage(context, stage(3), "theirs"),
+	]);
+	const semantic = await mergeProjectSemanticDocument(
+		data,
+		{ kind: descriptor.kind, file: descriptor.file, base: base.document, ours: ours.document, theirs: theirs.document },
+		options
+	);
+	return {
+		mergedValue: semantic.mergedValue,
+		result: {
+			operation: integration.operation,
+			path,
+			fingerprint,
+			limits: { maximumBlobBytes: maximumSemanticConflictBlobBytes },
+			stages: { base: base.summary, ours: ours.summary, theirs: theirs.summary },
+			merge: semantic.result,
+		},
+	};
+}
+
+/** Previews a Babylon-aware three-way merge directly from one active Git conflict's stage blobs. */
+export async function inspectProjectSourceControlSemanticConflict(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const context = await gitContext(options);
+	requireProjectOwnsWorktree(context, "Semantic Git conflict inspection");
+	return (await semanticGitConflictForContext(context, data, options)).result;
+}
+
+/** Atomically writes and stages an exact-fingerprint, exact-output Babylon-aware Git conflict resolution. */
+export async function applyProjectSourceControlSemanticConflict(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	await requireSourceControlRole(scene, data, options, true);
+	requireConfirmation(data, "apply a semantic Git conflict resolution");
+	if (typeof data.expectedFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(data.expectedFingerprint)) {
+		throw new Error("expectedFingerprint must be the exact lowercase SHA-256 returned by semantic conflict inspection.");
+	}
+	if (typeof data.expectedOutputHash !== "string" || !/^[a-f0-9]{64}$/.test(data.expectedOutputHash)) {
+		throw new Error("expectedOutputHash must be the exact lowercase SHA-256 returned by semantic conflict inspection.");
+	}
+	const context = await gitContext(options);
+	requireProjectOwnsWorktree(context, "Semantic Git conflict resolution");
+	const preview = await semanticGitConflictForContext(context, data, options);
+	if (preview.result.fingerprint !== data.expectedFingerprint) {
+		throw new Error("The Git conflict stages changed since semantic inspection. Inspect the conflict again before applying the merge.");
+	}
+	if (preview.result.merge.outputHash !== data.expectedOutputHash) {
+		throw new Error("The semantic merge output changed since inspection. Reinspect the conflict and its selected resolutions or rules.");
+	}
+	if (preview.result.merge.summary.unresolvedConflicts > 0) {
+		throw new Error(
+			`Semantic merge has ${preview.result.merge.summary.unresolvedConflicts} unresolved conflict(s). Provide exact resolutions or selected rules before applying it.`
+		);
+	}
+	const worktreePath = await safeConflictWorktreePath(context, preview.result.path);
+	if (worktreePath.size > maximumSemanticConflictRollbackBytes) {
+		throw new Error("Current semantic conflict worktree content is too large for rollback-safe replacement.");
+	}
+	const previousContent = worktreePath.exists ? await readFile(worktreePath.target) : null;
+	const deleted = preview.result.merge.deleted === true;
+	let content: Buffer | null = null;
+	if (deleted) {
+		await unlink(worktreePath.target).catch((error: any) => {
+			if (error?.code !== "ENOENT") {
+				throw error;
+			}
+		});
+	} else {
+		content = Buffer.from(`${JSON.stringify(preview.mergedValue, null, "\t")}\n`, "utf-8");
+		if (content.length > maximumSemanticConflictBlobBytes) {
+			throw new Error(`Merged semantic conflict output exceeds the ${maximumSemanticConflictBlobBytes}-byte safety limit.`);
+		}
+		const stageMode = preview.result.stages.ours?.mode ?? preview.result.stages.theirs?.mode ?? preview.result.stages.base?.mode;
+		const mode = worktreePath.exists ? worktreePath.mode : stageMode ? parseInt(stageMode, 8) & 0o777 : 0o644;
+		await atomicConflictWrite(worktreePath.target, content, mode);
+	}
+	try {
+		await requireGitSuccess(context.gitRoot, ["add", "-A", "--", preview.result.path], `Unable to stage semantic conflict resolution ${preview.result.path}.`);
+	} catch (error) {
+		if (previousContent) {
+			await atomicConflictWrite(worktreePath.target, previousContent, worktreePath.mode);
+		} else {
+			await unlink(worktreePath.target).catch(() => undefined);
+		}
+		throw error;
+	}
+	return {
+		applied: true,
+		path: preview.result.path,
+		fingerprint: preview.result.fingerprint,
+		outputHash: preview.result.merge.outputHash,
+		deleted,
+		byteLength: content?.length ?? 0,
+		merge: preview.result.merge,
+		integration: await sourceControlConflictState(context),
+	};
+}
+
+const sourceControlWorkspaceLayoutStoragePrefix = "babylonjs-editor:source-control-workspace-layout:v1:";
+const sourceControlWorkspaceLayoutFallback = new Map<string, string>();
+const sourceControlZeroHash = "0000000000000000000000000000000000000000";
+
+interface ISourceControlWorkspaceLayout {
+	revision: string;
+	branchExplorerPercent: number;
+	changesPercent: number;
+	propertiesPercent: number;
+	activePanel: "pending" | "incoming" | "branches" | "shelvesets";
+}
+
+function exactCommitHash(value: unknown, name: string): string {
+	if (typeof value !== "string" || !/^[a-f0-9]{40}$/.test(value)) {
+		throw new Error(`${name} must be an exact lowercase 40-character Git object hash.`);
+	}
+	return value;
+}
+
+function boundedFilter(value: unknown, name: string): string {
+	if (value === undefined) {
+		return "";
+	}
+	if (typeof value !== "string" || value.length > 128 || hasControlCharacters(value)) {
+		throw new Error(`${name} must contain at most 128 characters without control characters.`);
+	}
+	return value.trim();
+}
+
+function boundedWorkspaceLimit(value: unknown, fallback: number): number {
+	const limit = value ?? fallback;
+	if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 200) {
+		throw new Error("limit must be an integer from 1 to 200.");
+	}
+	return limit;
+}
+
+async function sourceControlWorkspaceFingerprint(context: IGitContext): Promise<string> {
+	const [head, status] = await Promise.all([
+		runGit(context.gitRoot, ["rev-parse", "--verify", "HEAD"]),
+		requireGitSuccess(
+			context.projectRoot,
+			["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."],
+			"Unable to fingerprint the active project's Git workspace.",
+			undefined,
+			true
+		),
+	]);
+	return createHash("sha256")
+		.update(`${head.exitCode === 0 ? head.stdout.trim() : sourceControlZeroHash}\0${status.stdout}`)
+		.digest("hex");
+}
+
+async function requireWorkspaceFingerprint(context: IGitContext, value: unknown): Promise<string> {
+	if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
+		throw new Error("expectedWorkspaceFingerprint must be the exact 64-character fingerprint returned by workspace inspection.");
+	}
+	const actual = await sourceControlWorkspaceFingerprint(context);
+	if (actual !== value) {
+		throw new Error("The Git workspace changed after inspection. Refresh the source-control workspace and retry with its new fingerprint.");
+	}
+	return actual;
+}
+
+async function commitExists(context: IGitContext, hash: string, name: string): Promise<void> {
+	await requireGitSuccess(context.gitRoot, ["cat-file", "-e", `${hash}^{commit}`], `${name} is no longer a readable Git commit.`);
+}
+
+function projectRelativePath(context: IGitContext, gitPath: string): string | null {
+	const normalizedPath = gitPath.replace(/\\/g, "/");
+	if (!context.projectPrefix) {
+		return normalizedPath;
+	}
+	if (normalizedPath === context.projectPrefix) {
+		return ".";
+	}
+	return normalizedPath.startsWith(`${context.projectPrefix}/`) ? normalizedPath.slice(context.projectPrefix.length + 1) : null;
+}
+
+async function listSourceControlShelvesets(context: IGitContext): Promise<any[]> {
+	const result = await runGit(context.gitRoot, ["stash", "list", "--format=%H%x1f%gd%x1f%an%x1f%aI%x1f%gs"]);
+	if (result.exitCode !== 0) {
+		throw new Error("Unable to list Git shelvesets.");
+	}
+	return result.stdout
+		.split("\n")
+		.filter(Boolean)
+		.slice(0, 200)
+		.map((line) => {
+			const [hash, selector, author, date, subject] = line.split("\u001f");
+			return { hash, selector, author, date, subject: subject.slice(0, 500) };
+		});
+}
+
+async function requireShelveset(context: IGitContext, value: unknown): Promise<any> {
+	const hash = exactCommitHash(value, "shelvesetHash");
+	const shelveset = (await listSourceControlShelvesets(context)).find((candidate) => candidate.hash === hash);
+	if (!shelveset) {
+		throw new Error("shelvesetHash must identify a currently retained Git shelveset.");
+	}
+	return shelveset;
+}
+
+function sourceControlLayoutKey(context: IGitContext): string {
+	return `${sourceControlWorkspaceLayoutStoragePrefix}${createHash("sha256").update(context.gitRoot).digest("hex")}`;
+}
+
+function rendererLocalStorage(): Storage | null {
+	if (typeof window === "undefined") {
+		return null;
+	}
+	try {
+		return window.localStorage;
+	} catch {
+		return null;
+	}
+}
+
+function defaultSourceControlLayout(): ISourceControlWorkspaceLayout {
+	const values = { branchExplorerPercent: 32, changesPercent: 43, propertiesPercent: 25, activePanel: "pending" as const };
+	return { revision: createHash("sha256").update(JSON.stringify(values)).digest("hex"), ...values };
+}
+
+function readSourceControlLayout(context: IGitContext): ISourceControlWorkspaceLayout {
+	const key = sourceControlLayoutKey(context);
+	let serialized: string | null = null;
+	try {
+		serialized = rendererLocalStorage()?.getItem(key) ?? null;
+	} catch {
+		serialized = null;
+	}
+	serialized ??= sourceControlWorkspaceLayoutFallback.get(key) ?? null;
+	if (!serialized) {
+		return defaultSourceControlLayout();
+	}
+	try {
+		const value = JSON.parse(serialized);
+		if (
+			typeof value.branchExplorerPercent === "number" &&
+			typeof value.changesPercent === "number" &&
+			typeof value.propertiesPercent === "number" &&
+			["pending", "incoming", "branches", "shelvesets"].includes(value.activePanel)
+		) {
+			const settings = {
+				branchExplorerPercent: value.branchExplorerPercent,
+				changesPercent: value.changesPercent,
+				propertiesPercent: value.propertiesPercent,
+				activePanel: value.activePanel as ISourceControlWorkspaceLayout["activePanel"],
+			};
+			return { revision: createHash("sha256").update(JSON.stringify(settings)).digest("hex"), ...settings };
+		}
+	} catch {
+		// Invalid legacy renderer storage is ignored and replaced on the next explicit save.
+	}
+	return defaultSourceControlLayout();
+}
+
+/** Returns the persistent source-control workspace splitter and active-panel settings. */
+export async function getProjectSourceControlWorkspaceLayout(_scene: Scene, _data: any, options: IMCPActionOptions): Promise<any> {
+	return readSourceControlLayout(await gitContext(options));
+}
+
+/** Persists exact bounded source-control workspace splitter and active-panel settings in renderer-local storage. */
+export async function setProjectSourceControlWorkspaceLayout(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const context = await gitContext(options);
+	const current = readSourceControlLayout(context);
+	if (data.expectedRevision !== current.revision) {
+		throw new Error("The source-control workspace layout changed after inspection. Refresh it and retry with the current revision.");
+	}
+	for (const name of ["branchExplorerPercent", "changesPercent", "propertiesPercent"] as const) {
+		if (typeof data[name] !== "number" || !Number.isFinite(data[name]) || data[name] < 15 || data[name] > 70) {
+			throw new Error(`${name} must be a finite percentage from 15 to 70.`);
+		}
+	}
+	if (Math.abs(data.branchExplorerPercent + data.changesPercent + data.propertiesPercent - 100) > 0.001) {
+		throw new Error("The three source-control splitter percentages must total exactly 100.");
+	}
+	if (!["pending", "incoming", "branches", "shelvesets"].includes(data.activePanel)) {
+		throw new Error("activePanel must be pending, incoming, branches, or shelvesets.");
+	}
+	const settings = {
+		branchExplorerPercent: data.branchExplorerPercent,
+		changesPercent: data.changesPercent,
+		propertiesPercent: data.propertiesPercent,
+		activePanel: data.activePanel as ISourceControlWorkspaceLayout["activePanel"],
+	};
+	const value = { revision: createHash("sha256").update(JSON.stringify(settings)).digest("hex"), ...settings };
+	const key = sourceControlLayoutKey(context);
+	const serialized = JSON.stringify(settings);
+	sourceControlWorkspaceLayoutFallback.set(key, serialized);
+	try {
+		rendererLocalStorage()?.setItem(key, serialized);
+	} catch {
+		// The in-memory fallback keeps MCP and UI behavior deterministic when storage is unavailable.
+	}
+	return { saved: true, layout: value, persistence: "renderer-local-storage" };
+}
+
+function parseBranchExplorerLog(output: string, context: IGitContext, filter: string, limit: number): any[] {
+	const normalizedFilter = filter.toLowerCase();
+	return output
+		.split("\u001e")
+		.filter(Boolean)
+		.map((record) => record.replace(/^\n+/, "").split("\u001f"))
+		.filter((fields) => fields.length >= 7)
+		.map(([hash, shortHash, parents, author, date, subject, decorations]) => ({
+			hash,
+			shortHash,
+			parents: parents ? parents.split(" ") : [],
+			author,
+			date,
+			subject: subject.slice(0, 500),
+			refs: decorations
+				.split(",")
+				.map((value) => value.trim().replace(/^HEAD -> /, ""))
+				.filter(Boolean),
+			projectScoped: true,
+		}))
+		.filter((commit) => !normalizedFilter || `${commit.shortHash} ${commit.author} ${commit.subject} ${commit.refs.join(" ")}`.toLowerCase().includes(normalizedFilter))
+		.slice(0, limit)
+		.map((commit) => ({ ...commit, pathsScope: context.projectPrefix || "." }));
+}
+
+/** Returns the Unity-6.5-style portable Git workspace model without contacting remotes or mutating repository state. */
+export async function getProjectSourceControlWorkspace(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const pendingFilter = boundedFilter(data.pendingFilter, "pendingFilter");
+	const incomingFilter = boundedFilter(data.incomingFilter, "incomingFilter");
+	const branchFilter = boundedFilter(data.branchFilter, "branchFilter");
+	const limit = boundedWorkspaceLimit(data.limit, 100);
+	const context = await gitContext(options);
+	const [status, refs, shelvesets, fingerprint, branchLog] = await Promise.all([
+		statusForContext(context),
+		listProjectSourceControlRefs(_scene, {}, options),
+		listSourceControlShelvesets(context),
+		sourceControlWorkspaceFingerprint(context),
+		requireGitSuccess(
+			context.gitRoot,
+			[
+				"log",
+				"--branches",
+				"--remotes",
+				"--tags",
+				"--topo-order",
+				`--max-count=${Math.min(500, limit * 3)}`,
+				"--date=iso-strict",
+				"--format=%x1e%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1f%D",
+				"--",
+				context.projectPrefix || ".",
+			],
+			"Unable to read the Git branch explorer."
+		),
+	]);
+	const pendingQuery = pendingFilter.toLowerCase();
+	const pendingMatches = status.changes.filter((change: any) => !pendingQuery || `${change.index}${change.worktree} ${change.path}`.toLowerCase().includes(pendingQuery));
+	const pending = pendingMatches.slice(0, limit);
+	let incoming: any[] = [];
+	if (refs.upstream) {
+		const incomingLog = await requireGitSuccess(
+			context.gitRoot,
+			[
+				"log",
+				`--max-count=${Math.min(500, limit * 3)}`,
+				"--date=iso-strict",
+				"--format=%x1e%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1f%D",
+				`HEAD..${refs.upstream}`,
+				"--",
+				context.projectPrefix || ".",
+			],
+			"Unable to read incoming Git changes."
+		);
+		incoming = parseBranchExplorerLog(incomingLog.stdout, context, incomingFilter, limit);
+	}
+	const branchExplorer = parseBranchExplorerLog(branchLog.stdout, context, branchFilter, limit);
+	return {
+		contract: "portable-git-source-control-workspace-v1",
+		workspaceFingerprint: fingerprint,
+		projectOwnsWorktree: !context.projectPrefix,
+		status,
+		pending: {
+			filter: pendingFilter,
+			changes: pending,
+			totalMatching: pendingMatches.length,
+			emptyState: pending.length ? null : pendingFilter ? "No pending changes match the active filter." : "The active project has no pending changes.",
+		},
+		incoming: {
+			filter: incomingFilter,
+			upstream: refs.upstream,
+			commits: incoming,
+			emptyState: incoming.length
+				? null
+				: refs.upstream
+					? incomingFilter
+						? "No incoming changes match the active filter."
+						: "The active branch has no incoming changes."
+					: "Set an upstream branch, then fetch, to inspect incoming changes.",
+		},
+		branchExplorer: {
+			filter: branchFilter,
+			commits: branchExplorer,
+			edges: branchExplorer.flatMap((commit) => commit.parents.map((parent: string) => ({ child: commit.hash, parent }))),
+			refs,
+			emptyState: branchExplorer.length ? null : branchFilter ? "No branch changesets match the active filter." : "The repository history is empty.",
+		},
+		shelvesets: { entries: shelvesets, emptyState: shelvesets.length ? null : "No retained Git shelvesets." },
+		layout: readSourceControlLayout(context),
+		truncated: {
+			pending: status.truncated || pendingMatches.length > pending.length,
+			incoming: incoming.length === limit,
+			branchExplorer: branchExplorer.length === limit,
+			shelvesets: shelvesets.length === 200,
+		},
+		boundaries: {
+			provider: "Git",
+			unityVersionControlServiceIdentity: false,
+			remoteContacted: false,
+			shelvesetEquivalent: "git-stash",
+		},
+	};
+}
+
+/** Returns properties and a bounded first-parent changeset diff for one exact commit hash. */
+export async function inspectProjectSourceControlChangeset(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const hash = exactCommitHash(data.hash, "hash");
+	const context = await gitContext(options);
+	await commitExists(context, hash, "hash");
+	const header = await requireGitSuccess(
+		context.gitRoot,
+		["show", "-s", "--date=iso-strict", "--format=%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI%x1f%s%x1f%B", hash],
+		"Unable to inspect the Git changeset."
+	);
+	const fields = header.stdout.trim().split("\u001f");
+	const parents = fields[2] ? fields[2].split(" ") : [];
+	const pathScope = context.projectPrefix || ".";
+	const diffArgs = parents.length
+		? ["diff", "--no-ext-diff", "--unified=3", parents[0], hash, "--", pathScope]
+		: ["show", "--no-ext-diff", "--format=", "--root", "--unified=3", hash, "--", pathScope];
+	const [diff, names] = await Promise.all([
+		requireGitSuccess(context.gitRoot, diffArgs, "Unable to read the Git changeset diff."),
+		requireGitSuccess(context.gitRoot, ["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", hash, "--", pathScope], "Unable to list Git changeset paths."),
+	]);
+	const changedPaths = names.stdout
+		.split("\n")
+		.filter(Boolean)
+		.slice(0, 500)
+		.map((line) => {
+			const [status, ...pathParts] = line.split("\t");
+			const path = projectRelativePath(context, pathParts[pathParts.length - 1]);
+			return { status, path };
+		})
+		.filter((entry) => entry.path !== null);
+	const maximumCharacters = 100_000;
+	return {
+		changeset: {
+			hash: fields[0],
+			shortHash: fields[1],
+			parents,
+			author: { name: fields[3], email: fields[4], date: fields[5] },
+			committer: { name: fields[6], email: fields[7], date: fields[8] },
+			subject: fields[9],
+			message: fields.slice(10).join("\u001f").trim().slice(0, 10_000),
+		},
+		comparison: { from: parents[0] ?? null, to: hash, mode: parents.length ? "first-parent" : "root" },
+		changedPaths,
+		changedPathCount: changedPaths.length,
+		diff: diff.stdout.slice(0, maximumCharacters),
+		truncated: { paths: names.stdout.split("\n").filter(Boolean).length > 500, diff: diff.stdout.length > maximumCharacters },
+	};
+}
+
+/** Returns properties and bounded project-scoped diff metadata for one retained Git shelveset. */
+export async function inspectProjectSourceControlShelveset(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const context = await gitContext(options);
+	const shelveset = await requireShelveset(context, data.shelvesetHash);
+	const details = await inspectProjectSourceControlChangeset(_scene, { hash: shelveset.hash }, options);
+	return { shelveset, ...details, retainedAfterPartialApply: true, supportsUntrackedPartialApply: false };
+}
+
+async function validateProjectFolder(context: IGitContext, value: unknown): Promise<string> {
+	const path = validatePath(value);
+	const absolutePath = join(context.projectRoot, path);
+	const information = await lstat(absolutePath).catch(() => null);
+	if (!information?.isDirectory() || information.isSymbolicLink()) {
+		throw new Error("path must identify an existing non-symbolic-link folder inside the active project.");
+	}
+	const resolved = await realpath(absolutePath);
+	const containment = relative(context.projectRoot, resolved);
+	if (containment === ".." || containment.startsWith(`..${delimiter}`) || isAbsolute(containment)) {
+		throw new Error("The selected folder resolves outside the active project.");
+	}
+	return path;
+}
+
+/** Applies Project-browser-style Add to Source Control or destructive Undo Changes to one exact inspected folder. */
+export async function applyProjectSourceControlFolderAction(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	await requireSourceControlRole(scene, data, options, data.action === "undo");
+	if (data.action !== "add" && data.action !== "undo") {
+		throw new Error("action must be add or undo.");
+	}
+	const context = await gitContext(options);
+	const path = await validateProjectFolder(context, data.path);
+	await requireWorkspaceFingerprint(context, data.expectedWorkspaceFingerprint);
+	if (data.action === "add") {
+		await requireGitSuccess(context.projectRoot, ["add", "-A", "--", path], `Unable to add folder ${path} to source control.`, 30_000);
+		return { applied: true, action: "add", path, status: await statusForContext(context), workspaceFingerprint: await sourceControlWorkspaceFingerprint(context) };
+	}
+	requireConfirmation(data, `undo all tracked and staged changes under folder ${path}`);
+	await requireGitSuccess(context.gitRoot, ["rev-parse", "--verify", "HEAD"], "Undo Changes requires a repository with an initial commit.");
+	await requireGitSuccess(context.projectRoot, ["restore", "--source=HEAD", "--staged", "--worktree", "--", path], `Unable to undo changes under folder ${path}.`, 30_000);
+	const status = await statusForContext(context);
+	return {
+		applied: true,
+		action: "undo",
+		path,
+		status,
+		workspaceFingerprint: await sourceControlWorkspaceFingerprint(context),
+		untrackedFilesPreserved: status.changes
+			.filter((change: any) => change.index === "?" && (change.path === path || change.path.startsWith(`${path}/`)))
+			.map((change: any) => change.path),
+	};
+}
+
+/** Creates a retained tracked-change Git shelveset without modifying the index or worktree. */
+export async function createProjectSourceControlShelveset(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	await requireSourceControlRole(scene, data, options, true);
+	requireConfirmation(data, "create a retained Git shelveset");
+	if (typeof data.message !== "string" || !data.message.trim() || data.message.length > 500 || hasControlCharacters(data.message) || data.message.trim().startsWith("-")) {
+		throw new Error("message must contain 1–500 characters without control characters and must not begin with an option prefix.");
+	}
+	const context = await gitContext(options);
+	requireProjectOwnsWorktree(context, "Git shelveset creation");
+	await requireWorkspaceFingerprint(context, data.expectedWorkspaceFingerprint);
+	const created = await requireGitSuccess(context.gitRoot, ["stash", "create", data.message.trim()], "Unable to create the Git shelveset snapshot.");
+	const hash = created.stdout.trim();
+	if (!hash) {
+		throw new Error("There are no tracked pending changes to shelve. Untracked-only changes are intentionally unsupported.");
+	}
+	await requireGitSuccess(context.gitRoot, ["stash", "store", "--message", data.message.trim(), hash], "Unable to retain the Git shelveset snapshot.");
+	return { created: true, shelveset: await requireShelveset(context, hash), workspaceUnchanged: true, workspaceFingerprint: await sourceControlWorkspaceFingerprint(context) };
+}
+
+/** Applies selected paths from one exact retained Git shelveset into an unchanged collision-free worktree while retaining the shelveset. */
+export async function applyProjectSourceControlShelvesetPaths(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	await requireSourceControlRole(scene, data, options, true);
+	requireConfirmation(data, "partially apply a Git shelveset");
+	const paths = validatePaths({ paths: data.paths }).paths;
+	const context = await gitContext(options);
+	requireProjectOwnsWorktree(context, "Partial Git shelveset apply");
+	await requireWorkspaceFingerprint(context, data.expectedWorkspaceFingerprint);
+	const shelveset = await requireShelveset(context, data.shelvesetHash);
+	const status = await statusForContext(context);
+	const collisions = status.changes.filter((change: any) =>
+		paths.some((path) => change.path === path || change.path.startsWith(`${path}/`) || path.startsWith(`${change.path}/`))
+	);
+	if (collisions.length) {
+		throw new Error(`Partial shelveset apply rejected because ${collisions.length} selected path(s) overlap current pending changes.`);
+	}
+	const listed = await requireGitSuccess(context.gitRoot, ["diff", "--name-only", `${shelveset.hash}^1`, shelveset.hash], "Unable to inspect shelveset paths.");
+	const shelfPaths = new Set(listed.stdout.split("\n").filter(Boolean));
+	const absent = paths.filter((path) => !shelfPaths.has(path) && ![...shelfPaths].some((shelfPath) => shelfPath.startsWith(`${path}/`)));
+	if (absent.length) {
+		throw new Error(`The selected shelveset does not contain ${absent.length} requested path(s).`);
+	}
+	await requireGitSuccess(context.gitRoot, ["restore", `--source=${shelveset.hash}`, "--worktree", "--", ...paths], "Unable to partially apply the Git shelveset.", 30_000);
+	return {
+		applied: true,
+		paths,
+		shelveset,
+		retained: true,
+		status: await statusForContext(context),
+		workspaceFingerprint: await sourceControlWorkspaceFingerprint(context),
+	};
+}
+
+/** Deletes one exact retained Git shelveset without changing the index or worktree. */
+export async function deleteProjectSourceControlShelveset(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	await requireSourceControlRole(scene, data, options, true);
+	requireConfirmation(data, "delete a retained Git shelveset");
+	const context = await gitContext(options);
+	requireProjectOwnsWorktree(context, "Git shelveset deletion");
+	const shelveset = await requireShelveset(context, data.shelvesetHash);
+	await requireGitSuccess(context.gitRoot, ["stash", "drop", "--quiet", shelveset.selector], "Unable to delete the Git shelveset.");
+	return { deleted: true, shelvesetHash: shelveset.hash, shelvesets: await listSourceControlShelvesets(context) };
+}
+
+/** Renames one exact local branch or label (Git tag); intended for the workspace's F2 action. */
+export async function renameProjectSourceControlRef(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	await requireSourceControlRole(scene, data, options, true);
+	requireConfirmation(data, `rename Git ${data.kind === "label" ? "label" : "branch"} ${String(data.name ?? "")}`);
+	if (data.kind !== "branch" && data.kind !== "label") {
+		throw new Error("kind must be branch or label.");
+	}
+	const context = await gitContext(options);
+	requireProjectOwnsWorktree(context, "Git ref rename");
+	const oldName = data.kind === "branch" ? await validateBranch(context, data.name) : await validateTag(context, data.name);
+	const newName = data.kind === "branch" ? await validateBranch(context, data.newName) : await validateTag(context, data.newName);
+	if (oldName === newName) {
+		throw new Error("newName must differ from name.");
+	}
+	const expectedHash = exactCommitHash(data.expectedHash, "expectedHash");
+	const namespace = data.kind === "branch" ? "heads" : "tags";
+	const sourceRef = `refs/${namespace}/${oldName}`;
+	const targetRef = `refs/${namespace}/${newName}`;
+	const inspected = await requireGitSuccess(context.gitRoot, ["rev-parse", "--verify", sourceRef], `Git ${data.kind} ${oldName} does not exist.`);
+	if (inspected.stdout.trim() !== expectedHash) {
+		throw new Error(`Git ${data.kind} ${oldName} changed after inspection. Refresh the branch explorer before renaming it.`);
+	}
+	const targetExists = await runGit(context.gitRoot, ["show-ref", "--verify", "--quiet", targetRef]);
+	if (targetExists.exitCode === 0) {
+		throw new Error(`Git ${data.kind} ${newName} already exists.`);
+	}
+	if (data.kind === "branch") {
+		await requireGitSuccess(context.gitRoot, ["branch", "--move", oldName, newName], `Unable to rename Git branch ${oldName}.`);
+	} else {
+		await requireGitSuccess(context.gitRoot, ["update-ref", targetRef, expectedHash, sourceControlZeroHash], `Unable to create renamed Git label ${newName}.`);
+		const removed = await runGit(context.gitRoot, ["update-ref", "-d", sourceRef, expectedHash]);
+		if (removed.exitCode !== 0) {
+			await runGit(context.gitRoot, ["update-ref", "-d", targetRef, expectedHash]);
+			throw new Error(`Unable to complete Git label rename ${oldName}; the temporary target was rolled back.`);
+		}
+	}
+	return { renamed: true, kind: data.kind, oldName, newName, hash: expectedHash, refs: await listProjectSourceControlRefs(scene, {}, options) };
 }

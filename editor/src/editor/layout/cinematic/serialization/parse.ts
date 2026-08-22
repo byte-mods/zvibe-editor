@@ -1,5 +1,14 @@
 import { Scene, Vector3, Animation } from "babylonjs";
-import { ICinematic, ICinematicKey, ICinematicKeyCut, ICinematicTrack, parseCinematicKeyValue, getAnimationTypeForObject } from "babylonjs-editor-tools";
+import {
+	ICinematic,
+	ICinematicDocument,
+	ICinematicKey,
+	ICinematicKeyCut,
+	ICinematicTrack,
+	parseCinematicKeyValue,
+	getAnimationTypeForObject,
+	toLegacyCinematic,
+} from "babylonjs-editor-tools";
 
 import { getInspectorPropertyValue } from "../../../../tools/property";
 
@@ -7,16 +16,18 @@ import { getDefaultRenderingPipeline } from "../../../rendering/default-pipeline
 
 import { SoundNode } from "../../../nodes/sound";
 
-export function parseCinematic(data: ICinematic, scene: Scene) {
-	const tracks = data.tracks.map((track) => {
+/** Resolves canonical or original serialized references into live objects for the original panels. */
+export function parseCinematic(data: ICinematic | ICinematicDocument, scene: Scene): ICinematic {
+	const legacyData = "version" in data ? toLegacyCinematic(data) : data;
+	const tracks = legacyData.tracks.map((track) => {
 		return parseCinematicTrack(track, scene);
 	});
 
 	return {
-		name: data.name,
-		framesPerSecond: data.framesPerSecond,
+		name: legacyData.name,
+		framesPerSecond: legacyData.framesPerSecond,
 		tracks: tracks.filter((track) => track !== null),
-		outputFramesPerSecond: data.outputFramesPerSecond,
+		outputFramesPerSecond: legacyData.outputFramesPerSecond,
 	} as ICinematic;
 }
 
@@ -48,6 +59,7 @@ export function parseCinematicTrack(track: ICinematicTrack, scene: Scene) {
 	}
 
 	return {
+		_id: track._id,
 		node,
 		sound,
 		propertyPath: track.propertyPath,

@@ -8,7 +8,7 @@ export interface ICreateGeometryFilesOptions {
 	sceneFile: string;
 	sceneName: string;
 	publicDir: string;
-	geometryFiles: string[];
+	geometryFiles: { sourceFile: string; outputFile: string }[];
 	exportedAssets: string[];
 	babylonjsEditorToolsVersion: string;
 
@@ -23,8 +23,8 @@ export async function createGeometryFiles(options: ICreateGeometryFilesOptions) 
 
 		await Promise.all(
 			options.geometryFiles.map(async (file) => {
-				const destination = join(options.publicDir, options.sceneName, file);
-				await fs.copyFile(join(options.sceneFile, "geometries", file), destination);
+				const destination = join(options.publicDir, options.sceneName, file.outputFile);
+				await fs.copyFile(join(options.sceneFile, file.sourceFile), destination);
 				options.exportedAssets.push(destination);
 			})
 		);
@@ -92,6 +92,16 @@ export function configureMeshBinaryInfo(mesh: any, geometriesOffset: number) {
 		offset += mesh._binaryInfo.matricesWeightsAttrDesc.count * Float32Array.BYTES_PER_ELEMENT;
 	}
 
+	if (mesh._binaryInfo.matricesIndicesExtraAttrDesc) {
+		mesh._binaryInfo.matricesIndicesExtraAttrDesc.offset += geometriesOffset;
+		offset += mesh._binaryInfo.matricesIndicesExtraAttrDesc.count * Uint32Array.BYTES_PER_ELEMENT;
+	}
+
+	if (mesh._binaryInfo.matricesWeightsExtraAttrDesc) {
+		mesh._binaryInfo.matricesWeightsExtraAttrDesc.offset += geometriesOffset;
+		offset += mesh._binaryInfo.matricesWeightsExtraAttrDesc.count * Float32Array.BYTES_PER_ELEMENT;
+	}
+
 	if (mesh._binaryInfo.indicesAttrDesc) {
 		mesh._binaryInfo.indicesAttrDesc.offset += geometriesOffset;
 		offset += mesh._binaryInfo.indicesAttrDesc.count * Uint32Array.BYTES_PER_ELEMENT;
@@ -117,6 +127,8 @@ export function getGeometryBuffers(binaryInfo: any, buffer: Buffer) {
 		colors?: Float32Array;
 		matricesIndices?: Uint32Array;
 		matricesWeights?: Float32Array;
+		matricesIndicesExtra?: Uint32Array;
+		matricesWeightsExtra?: Float32Array;
 		indices?: Uint32Array;
 		subMeshes?: Int32Array;
 	} = {};
@@ -160,6 +172,23 @@ export function getGeometryBuffers(binaryInfo: any, buffer: Buffer) {
 
 	if (binaryInfo.matricesWeightsAttrDesc) {
 		result.matricesWeights = new Float32Array(buffer.buffer, binaryInfo.matricesWeightsAttrDesc.offset, binaryInfo.matricesWeightsAttrDesc.count);
+	}
+
+	if (binaryInfo.matricesIndicesExtraAttrDesc) {
+		const matricesIndices = new Uint32Array(buffer.buffer, binaryInfo.matricesIndicesExtraAttrDesc.offset, binaryInfo.matricesIndicesExtraAttrDesc.count);
+		const floatIndices: number[] = [];
+		for (let i = 0; i < matricesIndices.length; i++) {
+			const index = matricesIndices[i];
+			floatIndices.push(index & 0x000000ff);
+			floatIndices.push((index & 0x0000ff00) >> 8);
+			floatIndices.push((index & 0x00ff0000) >> 16);
+			floatIndices.push((index >> 24) & 0xff);
+		}
+		result.matricesIndicesExtra = new Uint32Array(floatIndices);
+	}
+
+	if (binaryInfo.matricesWeightsExtraAttrDesc) {
+		result.matricesWeightsExtra = new Float32Array(buffer.buffer, binaryInfo.matricesWeightsExtraAttrDesc.offset, binaryInfo.matricesWeightsExtraAttrDesc.count);
 	}
 
 	if (binaryInfo.indicesAttrDesc) {

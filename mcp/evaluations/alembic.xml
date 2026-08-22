@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>After comparing Alembic capabilities with an inspected project cache, which external authoring application converts real `.abc` archives while remaining unnecessary in generated Web/Desktop players?</question>
+      <answer>Blender</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>How many Alembic object families are retained by the portable cache when mesh geometry, particles represented as points, authored curves, and shot cameras are all enabled?</question>
+      <answer>4</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which interpolation policy applies to a cache object whose vertex/index correspondence remains identical across adjacent samples?</question>
+      <answer>Linear interpolation</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which sampling policy is enforced when an Alembic object's topology changes between adjacent samples?</question>
+      <answer>Discrete hold</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>After inspecting capabilities and a live player's residency evidence, what is the maximum number of decoded Alembic frames retained by one player?</question>
+      <answer>2</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the hard maximum number of object descriptors accepted by one portable Alembic cache?</question>
+      <answer>4096</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the hard maximum number of sampled frames accepted by one portable Alembic cache?</question>
+      <answer>10000</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which read-only MCP tool returns the exact source/settings lease, current-or-stale artifact state, and bounded object/frame evidence before conversion?</question>
+      <answer>inspect_alembic_import</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which read-only MCP tool pages one selected player's object descriptors after list_alembic_players identifies it?</question>
+      <answer>get_alembic_player</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which digest algorithm independently binds Alembic source bytes, importer settings, compressed frames, and the published cache artifact?</question>
+      <answer>SHA-256</answer>
+   </qa_pair>
+</evaluation>

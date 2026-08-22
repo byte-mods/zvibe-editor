@@ -1,9 +1,9 @@
 import { clipboard } from "electron";
 import { FSWatcher } from "chokidar";
 import { join, dirname } from "path/posix";
-import { pathExists, stat } from "fs-extra";
+import { pathExists, remove, stat } from "fs-extra";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { FaCopy } from "react-icons/fa";
 import { SiTypescript } from "react-icons/si";
@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { Vector2, Vector3, Color3, Color4, Texture, CubeTexture } from "babylonjs";
 import {
 	VisibleInInspectorDecoratorEntityConfiguration,
+	VisibleInInspectorDecoratorCollectionConfiguration,
 	VisibleInInspectorDecoratorStringConfiguration,
 	VisibleInspectorDecoratorAssetConfiguration,
 } from "babylonjs-editor-tools";
@@ -39,6 +40,7 @@ import { EditorInspectorKeyField } from "../fields/key";
 import { EditorInspectorListField } from "../fields/list";
 import { EditorInspectorColorField } from "../fields/color";
 import { EditorInspectorAssetField } from "../fields/asset";
+import { EditorInspectorArrayField } from "../fields/array";
 import { EditorInspectorSwitchField } from "../fields/switch";
 import { EditorInspectorNumberField } from "../fields/number";
 import { EditorInspectorVectorField } from "../fields/vector";
@@ -80,8 +82,12 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 	const [watcher, setWatcher] = useState<FSWatcher | null>(null);
 
 	const [updateId, setUpdateId] = useState(0); // Used to force re-render when a texture is changed
+	const disposedRef = useRef(false);
+	const parseRequestRef = useRef(0);
+	const parseQueueRef = useRef<Promise<void>>(Promise.resolve());
 
 	useEffect(() => {
+		disposedRef.current = false;
 		const output = cachedScripts[srcAbsolutePath]?.output;
 		if (output) {
 			computeDefaultValuesForObject(props.script, output);
@@ -89,6 +95,8 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 		}
 
 		return () => {
+			disposedRef.current = true;
+			parseRequestRef.current++;
 			textures.forEach((texture) => {
 				texture.dispose();
 			});
@@ -120,6 +128,9 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 
 		const src = join(dirname(projectConfiguration.path), "src", props.script.key);
 		const exists = await pathExists(src);
+		if (disposedRef.current) {
+			return;
+		}
 
 		setExists(exists);
 
@@ -132,8 +143,22 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 		}
 	}
 
-	async function handleParseVisibleProperties() {
+	function handleParseVisibleProperties(): Promise<void> {
+		const request = ++parseRequestRef.current;
+		const parse = parseQueueRef.current.then(() => parseVisibleProperties(request));
+		parseQueueRef.current = parse.catch((error) => {
+			if (!disposedRef.current) {
+				props.editor.layout.console.error(`An unexpected error occurred while reading the script Inspector:\n ${error instanceof Error ? error.message : String(error)}`);
+			}
+		});
+		return parseQueueRef.current;
+	}
+
+	async function parseVisibleProperties(request: number): Promise<void> {
 		if (!projectConfiguration.path) {
+			return;
+		}
+		if (disposedRef.current || request !== parseRequestRef.current || !(await pathExists(srcAbsolutePath))) {
 			return;
 		}
 
@@ -149,15 +174,35 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 				srcAbsolutePath,
 				outputAbsolutePath,
 			});
+			if (disposedRef.current) {
+				await remove(outputAbsolutePath);
+				return;
+			}
+			if (request !== parseRequestRef.current) {
+				return;
+			}
 
 			if (!compilationSuccess.success) {
+				if (!(await pathExists(srcAbsolutePath))) {
+					await remove(outputAbsolutePath);
+					setExists(false);
+					return;
+				}
 				return props.editor.layout.console.error(`An unexpected error occurred while compiling the script:\n ${compilationSuccess.error}`);
+			}
+			if (!(await pathExists(srcAbsolutePath)) || !(await pathExists(outputAbsolutePath))) {
+				await remove(outputAbsolutePath);
+				setExists(false);
+				return;
 			}
 
 			const extractOutput = await executeSimpleWorker<VisibleInInspectorDecoratorObject[] | null>("workers/script.js", {
 				action: "extract",
 				outputAbsolutePath,
 			});
+			if (disposedRef.current || request !== parseRequestRef.current) {
+				return;
+			}
 
 			cachedScripts[srcAbsolutePath] = {
 				time: fStat.mtimeMs,
@@ -169,7 +214,9 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 			}
 		}
 
-		setOutput(cachedScripts[srcAbsolutePath]?.output);
+		if (!disposedRef.current && request === parseRequestRef.current) {
+			setOutput(cachedScripts[srcAbsolutePath]?.output);
+		}
 	}
 
 	function getEntityInspector(value: VisibleInInspectorDecoratorObject) {
@@ -445,6 +492,28 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 										typeRestriction={(value.configuration as VisibleInspectorDecoratorAssetConfiguration).typeRestriction}
 									/>
 								);
+
+							case "array":
+							case "list": {
+								const configuration = value.configuration as VisibleInInspectorDecoratorCollectionConfiguration;
+								return (
+									<EditorInspectorArrayField
+										key={value.propertyKey}
+										object={props.script[scriptValues][value.propertyKey]}
+										property="value"
+										label={value.label ?? value.propertyKey}
+										tooltip={configuration.description}
+										collectionKind={configuration.type}
+										elementType={configuration.elementType}
+										minItems={configuration.minItems}
+										maxItems={configuration.maxItems}
+										defaultItem={configuration.defaultItem}
+										styleType={configuration.styleType}
+										style={configuration.style}
+										onChange={() => onNodeModifiedObservable.notifyObservers(props.object)}
+									/>
+								);
+							}
 
 							default:
 								return null;

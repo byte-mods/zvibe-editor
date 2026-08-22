@@ -2,7 +2,7 @@ import { Component, ReactNode } from "react";
 
 import { AbstractMesh, Node, Observer, TransformNode } from "babylonjs";
 
-import { isTransformNode } from "../../../tools/guards/nodes";
+import { isAbstractMesh, isTransformNode } from "../../../tools/guards/nodes";
 import { isSceneLinkNode } from "../../../tools/guards/scene";
 import { onNodeModifiedObservable } from "../../../tools/observables";
 
@@ -17,6 +17,9 @@ import { onGizmoNodeChangedObservable } from "../preview/gizmo/gizmo";
 
 import { IEditorInspectorImplementationProps } from "./inspector";
 import { EditorInspectorSwitchField } from "./fields/switch";
+import { Physics2DBodyInspector } from "./mesh/physics2d-body";
+import { ALEMBIC_PLAYER_METADATA_KEY } from "babylonjs-editor-tools";
+import { AlembicPlayerInspector } from "./alembic";
 
 export class EditorTransformNodeInspector extends Component<IEditorInspectorImplementationProps<AbstractMesh>> {
 	/**
@@ -64,6 +67,12 @@ export class EditorTransformNodeInspector extends Component<IEditorInspectorImpl
 						}
 					/>
 				</EditorInspectorSectionField>
+
+				{isTransformNode(this.props.object) && !isAbstractMesh(this.props.object) && (
+					<Physics2DBodyInspector node={this.props.object} editor={this.props.editor} onChanged={() => this.forceUpdate()} />
+				)}
+
+				{this.props.object.metadata?.[ALEMBIC_PLAYER_METADATA_KEY] && <AlembicPlayerInspector node={this.props.object} editor={this.props.editor} />}
 
 				<ScriptInspectorComponent editor={this.props.editor} object={this.props.object} />
 

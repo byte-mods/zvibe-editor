@@ -4,7 +4,7 @@ import { createHash } from "crypto";
 
 import { Camera, FreeCamera, Scene, Vector3 } from "babylonjs";
 
-import { saveProject, saveProjectConfiguration } from "../../project/save/save";
+import { saveProjectConfiguration, saveProjectForRestart } from "../../project/save/save";
 import { ensureSceneFolders, saveScene as saveSceneToDisk } from "../../project/save/scene";
 import { createNewSceneDefaultNodes } from "../../project/load/default";
 import { replaceWithSingleSceneWorkspace } from "../../project/load/workspace";
@@ -68,11 +68,29 @@ function getProjectDirectory(): string {
 	return dirname(projectConfiguration.path);
 }
 
+/** Removes a scene directory while tolerating short-lived watcher/generated-geometry writes. */
+export async function removeSceneDirectory(scenePath: string, removeDirectory: (path: string) => Promise<void> = remove): Promise<void> {
+	for (let attempt = 0; attempt < 4; attempt++) {
+		try {
+			await removeDirectory(scenePath);
+			return;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if ((code !== "ENOTEMPTY" && code !== "EBUSY" && code !== "EPERM") || attempt === 3) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+		}
+	}
+}
+
 function resolveScenePath(path: string): string {
 	const directory = getProjectDirectory();
 	const scenePath = normalize(join(directory, path));
-	if (!scenePath.startsWith(`${directory}/`) || !scenePath.endsWith(".scene")) {
-		throw new Error("Scene paths must be project-relative paths ending in .scene.");
+	const relativeScenePath = relative(directory, scenePath);
+	const containsHiddenSegment = relativeScenePath.split("/").some((segment) => segment.startsWith("."));
+	if (!scenePath.startsWith(`${directory}/`) || !scenePath.endsWith(".scene") || containsHiddenSegment) {
+		throw new Error("Scene paths must be discoverable project-relative paths ending in .scene; hidden path segments are not supported.");
 	}
 
 	return scenePath;
@@ -163,7 +181,7 @@ export async function createProjectSceneTemplate(_scene: Scene, data: any, optio
 	const directory = getProjectDirectory();
 	const sourceAbsolutePath = resolveScenePath(data.sourcePath);
 	if (sourceAbsolutePath === options.editor.state.lastOpenedScenePath) {
-		await saveProject(options.editor);
+		await saveProjectForRestart(options.editor);
 	}
 	const template = await createSceneTemplate(directory, data);
 	options.editor.layout.assets.refresh();
@@ -208,7 +226,7 @@ export function getActiveScene(scene: Scene, _data: any, options: IMCPActionOpti
  * Saves the current scene/project.
  */
 export async function saveScene(_scene: Scene, _data: any, options: IMCPActionOptions): Promise<any> {
-	await saveProject(options.editor);
+	await saveProjectForRestart(options.editor);
 
 	return { saved: true };
 }
@@ -297,7 +315,7 @@ export async function deleteScene(_scene: Scene, data: any, options: IMCPActionO
 		throw new Error(`Scene not found: ${data.path}`);
 	}
 
-	await remove(scenePath);
+	await removeSceneDirectory(scenePath);
 	const sceneBuildSettings = removeSceneFromBuildSettings(options.editor.state.sceneBuildSettings, relative(getProjectDirectory(), scenePath));
 	await new Promise<void>((resolve) => options.editor.setState({ sceneBuildSettings }, resolve));
 	await saveProjectConfiguration(options.editor);
@@ -424,7 +442,10 @@ export function set2DSceneMode(scene: Scene, data: any, options: IMCPActionOptio
 
 /** Reads the persisted named 3D physics collision layers for this scene. */
 export function getPhysicsCollisionLayers(scene: Scene): any {
-	return structuredClone(scene.metadata?.babylonEditorPhysicsCollisionLayers ?? { layers: [{ name: "Default", bit: 1, collidesWith: 0xffffffff }] });
+	const value = structuredClone(scene.metadata?.babylonEditorPhysicsCollisionLayers ?? { layers: [{ name: "Default", bit: 1, collidesWith: 0xffff }] });
+	return {
+		layers: value.layers.map((layer: IPhysicsCollisionLayer) => ({ ...layer, collidesWith: Number.isInteger(layer.collidesWith) ? layer.collidesWith & 0xffff : 0xffff })),
+	};
 }
 
 /** Resolves a named collision layer, including the implicit default layer of a new scene. */

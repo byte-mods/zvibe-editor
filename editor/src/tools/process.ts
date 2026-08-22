@@ -15,12 +15,18 @@ export function getFilePathArgument(argv?: string[] | null): string | null {
 		return null;
 	}
 
-	let index = platform() === "darwin" ? 2 : 2;
-	while (index < argv.length && argv[index].startsWith("--")) {
-		index += 1;
-	}
+	// Development Electron argv contains the editor application directory before
+	// the project path, whereas a packaged app receives the project at argv[1].
+	// Locate the actual project file instead of relying on one platform index.
+	return argv.slice(1).find((value) => !value.startsWith("--") && value.toLowerCase().endsWith(".bjseditor")) ?? null;
+}
 
-	return index < argv.length ? argv[index] : null;
+/** Builds relaunch arguments for one exact project, replacing any stale project arguments from the original application launch. */
+export function getProjectRelaunchArguments(argv: string[], projectPath: string, excludedArgumentPrefixes: readonly string[] = []): string[] {
+	return [
+		...argv.slice(1).filter((argument) => !argument.toLowerCase().endsWith(".bjseditor") && !excludedArgumentPrefixes.some((prefix) => argument.startsWith(prefix))),
+		projectPath,
+	];
 }
 
 let envPathComputed = false;

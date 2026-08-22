@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Divider } from "@blueprintjs/core";
 
 import { AbstractMesh, PhysicsAggregate, PhysicsShape, PhysicsShapeType, PhysicsMotionType, PhysicsMassProperties, Mesh } from "babylonjs";
+import { createDefaultVehicleDrivetrain } from "babylonjs-editor-tools";
 
 import { registerUndoRedo } from "../../../../tools/undoredo";
 import { isInstancedMesh, isMesh } from "../../../../tools/guards/nodes";
@@ -20,9 +21,20 @@ import { Button } from "../../../../ui/shadcn/ui/button";
 import { setMeshPhysics } from "../../../../mcp/meshes/meshes";
 import { addGameObjectComponent, inspectGameObjectComponents, removeGameObjectComponent } from "../../../../mcp/components/components";
 import { getPhysicsCollisionLayers, IPhysicsCollisionLayer } from "../../../../mcp/scene/scene";
-import { createDefaultVehicleWheels, createVehicle, deleteVehicle, listVehicles, setVehicle, setVehicleWheels } from "../../../../mcp/physics/vehicles";
+import {
+	createDefaultVehicleFrictionCurve,
+	createDefaultVehicleWheels,
+	createVehicle,
+	deleteVehicle,
+	listVehicles,
+	setVehicle,
+	setVehicleWheels,
+} from "../../../../mcp/physics/vehicles";
 import { listInputActionMaps } from "../../../../mcp/input/input";
 import { Editor } from "../../../main";
+
+// Radix Select reserves the empty string for clearing, so the UI needs a non-empty persisted-null sentinel.
+const noVehicleInputMapValueBase = "__zvibe_no_vehicle_input_map__";
 
 export interface IEditorMeshPhysicsInspectorProps {
 	mesh: AbstractMesh;
@@ -68,22 +80,47 @@ export class EditorMeshPhysicsInspector extends Component<IEditorMeshPhysicsInsp
 		);
 	}
 
+	/** Renders canonical vehicle actions so Inspector edits share validation and transient evidence with MCP. */
 	private _getVehicleControllerInspector(): ReactNode {
 		const scene = this.props.mesh.getScene();
 		const vehicle = listVehicles(scene).vehicles.find((candidate: any) => candidate.chassisNodeId === this.props.mesh.id);
 		const inputMaps = listInputActionMaps(scene).maps;
+		let noVehicleInputMapValue = noVehicleInputMapValueBase;
+		while (inputMaps.some((map: any) => map.name === noVehicleInputMapValue)) {
+			noVehicleInputMapValue += "_";
+		}
+		const antiRollGroups = new Set(
+			(vehicle?.wheels ?? []).map((wheel: any) => wheel.antiRollGroup).filter((group: unknown): group is string => typeof group === "string" && !!group)
+		).size;
+		const maximumLiveAntiRollForce = Math.max(0, ...Object.values(vehicle?.wheelStates ?? {}).map((state: any) => Math.abs(state.antiRollForce ?? 0)));
+		const maximumForwardSlip = Math.max(0, ...Object.values(vehicle?.wheelStates ?? {}).map((state: any) => Math.abs(state.forwardSlip ?? 0)));
+		const maximumSidewaysSlip = Math.max(0, ...Object.values(vehicle?.wheelStates ?? {}).map((state: any) => Math.abs(state.sidewaysSlip ?? 0)));
+		const maximumWheelTorque = Math.max(0, ...Object.values(vehicle?.wheelStates ?? {}).map((state: any) => Math.abs(state.totalTorque ?? 0)));
+		const drivetrainState = vehicle?.drivetrainState;
+		const gearLabel = drivetrainState?.currentGear === -1 ? "R" : drivetrainState?.currentGear === 0 ? "N" : (drivetrainState?.currentGear ?? "-");
 		const settings = vehicle
 			? {
 					enabled: vehicle.enabled,
-					actionMapName: vehicle.actionMapName ?? "",
+					actionMapName: vehicle.actionMapName ?? noVehicleInputMapValue,
 					maxEngineForce: vehicle.maxEngineForce,
 					maxBrakeForce: vehicle.maxBrakeForce,
 					maxSpeed: vehicle.maxSpeed,
 					maxSteerAngle: vehicle.maxSteerAngle,
 					wheelBase: vehicle.wheelBase,
 					lateralGrip: vehicle.lateralGrip,
+					forwardFriction: structuredClone(vehicle.forwardFriction ?? createDefaultVehicleFrictionCurve()),
+					sidewaysFriction: structuredClone(vehicle.sidewaysFriction ?? createDefaultVehicleFrictionCurve()),
+					antiRollStiffness: vehicle.antiRollStiffness ?? 0,
+					maxAntiRollForce: vehicle.maxAntiRollForce ?? 100000,
+					drivetrain: structuredClone(vehicle.drivetrain ?? createDefaultVehicleDrivetrain()),
 				}
 			: null;
+		/** Persists a detached complete object because drivetrain relation validation is intentionally atomic. */
+		const persistDrivetrain = (): void => {
+			if (vehicle && settings) {
+				setVehicle(scene, { id: vehicle.id, drivetrain: structuredClone(settings.drivetrain) }, { editor: this.props.editor });
+			}
+		};
 		return (
 			<>
 				<Divider />
@@ -118,9 +155,20 @@ export class EditorMeshPhysicsInspector extends Component<IEditorMeshPhysicsInsp
 				{vehicle && settings && (
 					<>
 						<div className="flex items-center justify-between gap-2 px-2 text-xs text-muted-foreground">
-							<span>
-								{vehicle.wheels?.length ?? 0} wheels · {Object.values(vehicle.wheelStates ?? {}).filter((state: any) => state.grounded).length} grounded
-							</span>
+							<div>
+								<div>
+									{vehicle.wheels?.length ?? 0} wheels · {Object.values(vehicle.wheelStates ?? {}).filter((state: any) => state.grounded).length} grounded · F/S
+									slip {maximumForwardSlip.toFixed(2)}/{maximumSidewaysSlip.toFixed(2)} · {antiRollGroups} anti-roll axle{antiRollGroups === 1 ? "" : "s"} ·{" "}
+									{maximumLiveAntiRollForce.toFixed(0)} anti-roll force
+								</div>
+								{vehicle.drivetrain && (
+									<div>
+										{(drivetrainState?.engineRpm ?? vehicle.drivetrain.idleRpm).toFixed(0)} RPM · Gear {gearLabel} ·{" "}
+										{((drivetrainState?.clutch ?? 0) * 100).toFixed(0)}% clutch · {Math.abs(drivetrainState?.outputTorque ?? 0).toFixed(0)} N·m output ·{" "}
+										{maximumWheelTorque.toFixed(0)} N·m max wheel
+									</div>
+								)}
+							</div>
 							<Button
 								size="sm"
 								variant="ghost"
@@ -142,17 +190,21 @@ export class EditorMeshPhysicsInspector extends Component<IEditorMeshPhysicsInsp
 							object={settings}
 							property="actionMapName"
 							label="Input Map"
-							items={[{ text: "None (script/MCP)", value: "" }, ...inputMaps.map((map: any) => ({ text: map.name, value: map.name }))]}
-							onChange={(value) => setVehicle(scene, { id: vehicle.id, actionMapName: value || null }, { editor: this.props.editor })}
+							items={[{ text: "None (script/MCP)", value: noVehicleInputMapValue }, ...inputMaps.map((map: any) => ({ text: map.name, value: map.name }))]}
+							onChange={(value) =>
+								setVehicle(scene, { id: vehicle.id, actionMapName: value === noVehicleInputMapValue ? null : value }, { editor: this.props.editor })
+							}
 						/>
-						<EditorInspectorNumberField
-							noUndoRedo
-							object={settings}
-							property="maxEngineForce"
-							label="Engine Force"
-							min={0}
-							onFinishChange={(value) => setVehicle(scene, { id: vehicle.id, maxEngineForce: value }, { editor: this.props.editor })}
-						/>
+						{!vehicle.drivetrain && (
+							<EditorInspectorNumberField
+								noUndoRedo
+								object={settings}
+								property="maxEngineForce"
+								label="Legacy Engine Force"
+								min={0}
+								onFinishChange={(value) => setVehicle(scene, { id: vehicle.id, maxEngineForce: value }, { editor: this.props.editor })}
+							/>
+						)}
 						<EditorInspectorNumberField
 							noUndoRedo
 							object={settings}
@@ -190,9 +242,405 @@ export class EditorMeshPhysicsInspector extends Component<IEditorMeshPhysicsInsp
 							noUndoRedo
 							object={settings}
 							property="lateralGrip"
-							label="Lateral Grip"
+							label="Legacy Lateral Grip"
 							min={0}
 							onFinishChange={(value) => setVehicle(scene, { id: vehicle.id, lateralGrip: value }, { editor: this.props.editor })}
+						/>
+						{!vehicle.drivetrain ? (
+							<div className="flex items-center justify-between gap-2 px-2 py-1 text-xs">
+								<span className="text-muted-foreground">Legacy direct-force vehicle; upgrade to author engine RPM, gears, clutch, and differential.</span>
+								<Button
+									size="sm"
+									variant="secondary"
+									className="h-6 px-2"
+									onClick={() => setVehicle(scene, { id: vehicle.id, drivetrain: createDefaultVehicleDrivetrain() }, { editor: this.props.editor })}
+								>
+									Upgrade Drivetrain
+								</Button>
+							</div>
+						) : (
+							<>
+								<div className="px-2 pt-1 text-xs font-medium">Engine & Transmission</div>
+								<EditorInspectorSwitchField noUndoRedo object={settings.drivetrain} property="automatic" label="Automatic" onChange={persistDrivetrain} />
+								<EditorInspectorNumberField
+									noUndoRedo
+									object={settings.drivetrain}
+									property="idleRpm"
+									label="Idle RPM"
+									min={Math.max(100, settings.drivetrain.engineTorqueCurve[0].rpm)}
+									max={Math.min(5000, settings.drivetrain.redlineRpm - 100, settings.drivetrain.downshiftRpm)}
+									step={10}
+									onFinishChange={persistDrivetrain}
+								/>
+								<EditorInspectorNumberField
+									noUndoRedo
+									object={settings.drivetrain}
+									property="redlineRpm"
+									label="Redline RPM"
+									min={Math.max(settings.drivetrain.idleRpm + 100, settings.drivetrain.upshiftRpm)}
+									max={Math.min(30000, settings.drivetrain.engineTorqueCurve.at(-1)?.rpm ?? 30000)}
+									step={10}
+									onFinishChange={persistDrivetrain}
+								/>
+								<EditorInspectorNumberField
+									noUndoRedo
+									object={settings.drivetrain}
+									property="engineInertia"
+									label="Engine Inertia"
+									min={0.01}
+									max={100}
+									onFinishChange={persistDrivetrain}
+								/>
+								<EditorInspectorNumberField
+									noUndoRedo
+									object={settings.drivetrain}
+									property="engineBrakingTorque"
+									label="Engine Brake (N·m)"
+									min={0}
+									max={5000}
+									onFinishChange={persistDrivetrain}
+								/>
+								<EditorInspectorNumberField
+									noUndoRedo
+									object={settings.drivetrain}
+									property="shiftDuration"
+									label="Shift Duration (s)"
+									min={0}
+									max={5}
+									onFinishChange={persistDrivetrain}
+								/>
+								<EditorInspectorNumberField
+									noUndoRedo
+									object={settings.drivetrain}
+									property="clutchEngagementRate"
+									label="Clutch Rate"
+									min={0.1}
+									max={100}
+									onFinishChange={persistDrivetrain}
+								/>
+								{settings.drivetrain.automatic && (
+									<>
+										<EditorInspectorNumberField
+											noUndoRedo
+											object={settings.drivetrain}
+											property="downshiftRpm"
+											label="Downshift RPM"
+											min={settings.drivetrain.idleRpm}
+											max={settings.drivetrain.upshiftRpm - 100}
+											step={10}
+											onFinishChange={persistDrivetrain}
+										/>
+										<EditorInspectorNumberField
+											noUndoRedo
+											object={settings.drivetrain}
+											property="upshiftRpm"
+											label="Upshift RPM"
+											min={settings.drivetrain.downshiftRpm + 100}
+											max={settings.drivetrain.redlineRpm}
+											step={10}
+											onFinishChange={persistDrivetrain}
+										/>
+									</>
+								)}
+								<div className="px-2 pt-1 text-xs font-medium">Engine Torque Curve</div>
+								{settings.drivetrain.engineTorqueCurve.map((key: any, index: number) => (
+									<div key={`engine-torque-${index}`}>
+										<EditorInspectorNumberField
+											noUndoRedo
+											object={key}
+											property="rpm"
+											label={`Key ${index + 1} RPM`}
+											min={
+												index === 0
+													? 0
+													: Math.max(
+															settings.drivetrain.engineTorqueCurve[index - 1].rpm + 1,
+															index === settings.drivetrain.engineTorqueCurve.length - 1 ? settings.drivetrain.redlineRpm : 0
+														)
+											}
+											max={
+												index === 0
+													? Math.min(settings.drivetrain.idleRpm, settings.drivetrain.engineTorqueCurve[index + 1].rpm - 1)
+													: index === settings.drivetrain.engineTorqueCurve.length - 1
+														? 30000
+														: settings.drivetrain.engineTorqueCurve[index + 1].rpm - 1
+											}
+											step={10}
+											onFinishChange={persistDrivetrain}
+										/>
+										<EditorInspectorNumberField
+											noUndoRedo
+											object={key}
+											property="torque"
+											label={`Key ${index + 1} Torque`}
+											min={0}
+											max={5000}
+											onFinishChange={persistDrivetrain}
+										/>
+									</div>
+								))}
+								<div className="flex justify-end gap-2 px-2 py-1">
+									<Button
+										size="sm"
+										variant="ghost"
+										className="h-6 px-2"
+										disabled={settings.drivetrain.engineTorqueCurve.length <= 2}
+										onClick={() => {
+											settings.drivetrain.engineTorqueCurve.splice(settings.drivetrain.engineTorqueCurve.length - 2, 1);
+											persistDrivetrain();
+										}}
+									>
+										Remove Peak Key
+									</Button>
+									<Button
+										size="sm"
+										variant="secondary"
+										className="h-6 px-2"
+										disabled={
+											settings.drivetrain.engineTorqueCurve.length >= 16 ||
+											settings.drivetrain.engineTorqueCurve.at(-1).rpm - settings.drivetrain.engineTorqueCurve.at(-2).rpm < 2
+										}
+										onClick={() => {
+											const last = settings.drivetrain.engineTorqueCurve.at(-1);
+											const previous = settings.drivetrain.engineTorqueCurve.at(-2);
+											settings.drivetrain.engineTorqueCurve.splice(-1, 0, {
+												rpm: Math.floor((previous.rpm + last.rpm) / 2),
+												torque: (previous.torque + last.torque) / 2,
+											});
+											persistDrivetrain();
+										}}
+									>
+										Add Torque Key
+									</Button>
+								</div>
+								<div className="px-2 pt-1 text-xs font-medium">Gearbox</div>
+								{settings.drivetrain.forwardGearRatios.map((ratio: number, index: number) => {
+									const value = { ratio };
+									return (
+										<EditorInspectorNumberField
+											key={`gear-ratio-${index}`}
+											noUndoRedo
+											object={value}
+											property="ratio"
+											label={`Gear ${index + 1} Ratio`}
+											min={settings.drivetrain.forwardGearRatios[index + 1] + 0.001 || 0.1}
+											max={settings.drivetrain.forwardGearRatios[index - 1] - 0.001 || 20}
+											onFinishChange={(nextRatio) => {
+												settings.drivetrain.forwardGearRatios[index] = nextRatio;
+												persistDrivetrain();
+											}}
+										/>
+									);
+								})}
+								<div className="flex justify-end gap-2 px-2 py-1">
+									<Button
+										size="sm"
+										variant="ghost"
+										className="h-6 px-2"
+										disabled={settings.drivetrain.forwardGearRatios.length <= 1}
+										onClick={() => {
+											settings.drivetrain.forwardGearRatios.pop();
+											persistDrivetrain();
+										}}
+									>
+										Remove Gear
+									</Button>
+									<Button
+										size="sm"
+										variant="secondary"
+										className="h-6 px-2"
+										disabled={settings.drivetrain.forwardGearRatios.length >= 12 || settings.drivetrain.forwardGearRatios.at(-1) <= 0.1}
+										onClick={() => {
+											settings.drivetrain.forwardGearRatios.push(Math.max(0.1, settings.drivetrain.forwardGearRatios.at(-1) * 0.8));
+											persistDrivetrain();
+										}}
+									>
+										Add Gear
+									</Button>
+								</div>
+								<EditorInspectorNumberField
+									noUndoRedo
+									object={settings.drivetrain}
+									property="reverseGearRatio"
+									label="Reverse Ratio"
+									min={0.1}
+									max={20}
+									onFinishChange={persistDrivetrain}
+								/>
+								<EditorInspectorNumberField
+									noUndoRedo
+									object={settings.drivetrain}
+									property="finalDriveRatio"
+									label="Final Drive"
+									min={0.1}
+									max={20}
+									onFinishChange={persistDrivetrain}
+								/>
+								<EditorInspectorNumberField
+									noUndoRedo
+									object={settings.drivetrain}
+									property="transmissionEfficiency"
+									label="Efficiency"
+									min={0}
+									max={1}
+									onFinishChange={persistDrivetrain}
+								/>
+								<div className="px-2 pt-1 text-xs font-medium">Differential</div>
+								<EditorInspectorListField
+									noUndoRedo
+									object={settings.drivetrain}
+									property="differentialType"
+									label="Type"
+									items={[
+										{ text: "Open", value: "open" },
+										{ text: "Limited Slip", value: "limited-slip" },
+										{ text: "Locked", value: "locked" },
+									]}
+									onChange={persistDrivetrain}
+								/>
+								{settings.drivetrain.differentialType === "limited-slip" && (
+									<EditorInspectorNumberField
+										noUndoRedo
+										object={settings.drivetrain}
+										property="limitedSlipBias"
+										label="Torque Bias"
+										min={1}
+										max={10}
+										onFinishChange={persistDrivetrain}
+									/>
+								)}
+								{settings.drivetrain.differentialType === "locked" && (
+									<EditorInspectorNumberField
+										noUndoRedo
+										object={settings.drivetrain}
+										property="differentialLockStrength"
+										label="Lock N·m/RPM"
+										min={0}
+										max={1000}
+										onFinishChange={persistDrivetrain}
+									/>
+								)}
+							</>
+						)}
+						<div className="px-2 pt-1 text-xs font-medium">Forward Tire Friction</div>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings.forwardFriction}
+							property="extremumSlip"
+							label="Peak Slip"
+							min={0.001}
+							max={Math.min(10, settings.forwardFriction.asymptoteSlip - 0.001)}
+							onFinishChange={() => setVehicle(scene, { id: vehicle.id, forwardFriction: structuredClone(settings.forwardFriction) }, { editor: this.props.editor })}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings.forwardFriction}
+							property="extremumValue"
+							label="Peak Grip"
+							min={0}
+							max={10}
+							onFinishChange={() => setVehicle(scene, { id: vehicle.id, forwardFriction: structuredClone(settings.forwardFriction) }, { editor: this.props.editor })}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings.forwardFriction}
+							property="asymptoteSlip"
+							label="Slide Slip"
+							min={Math.max(0.001, settings.forwardFriction.extremumSlip + 0.001)}
+							max={20}
+							onFinishChange={() => setVehicle(scene, { id: vehicle.id, forwardFriction: structuredClone(settings.forwardFriction) }, { editor: this.props.editor })}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings.forwardFriction}
+							property="asymptoteValue"
+							label="Slide Grip"
+							min={0}
+							max={10}
+							onFinishChange={() => setVehicle(scene, { id: vehicle.id, forwardFriction: structuredClone(settings.forwardFriction) }, { editor: this.props.editor })}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings.forwardFriction}
+							property="stiffness"
+							label="Stiffness"
+							min={0}
+							max={10}
+							onFinishChange={() => setVehicle(scene, { id: vehicle.id, forwardFriction: structuredClone(settings.forwardFriction) }, { editor: this.props.editor })}
+						/>
+						<div className="px-2 pt-1 text-xs font-medium">Sideways Tire Friction</div>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings.sidewaysFriction}
+							property="extremumSlip"
+							label="Peak Slip"
+							min={0.001}
+							max={Math.min(10, settings.sidewaysFriction.asymptoteSlip - 0.001)}
+							onFinishChange={() =>
+								setVehicle(scene, { id: vehicle.id, sidewaysFriction: structuredClone(settings.sidewaysFriction) }, { editor: this.props.editor })
+							}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings.sidewaysFriction}
+							property="extremumValue"
+							label="Peak Grip"
+							min={0}
+							max={10}
+							onFinishChange={() =>
+								setVehicle(scene, { id: vehicle.id, sidewaysFriction: structuredClone(settings.sidewaysFriction) }, { editor: this.props.editor })
+							}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings.sidewaysFriction}
+							property="asymptoteSlip"
+							label="Slide Slip"
+							min={Math.max(0.001, settings.sidewaysFriction.extremumSlip + 0.001)}
+							max={20}
+							onFinishChange={() =>
+								setVehicle(scene, { id: vehicle.id, sidewaysFriction: structuredClone(settings.sidewaysFriction) }, { editor: this.props.editor })
+							}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings.sidewaysFriction}
+							property="asymptoteValue"
+							label="Slide Grip"
+							min={0}
+							max={10}
+							onFinishChange={() =>
+								setVehicle(scene, { id: vehicle.id, sidewaysFriction: structuredClone(settings.sidewaysFriction) }, { editor: this.props.editor })
+							}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings.sidewaysFriction}
+							property="stiffness"
+							label="Stiffness"
+							min={0}
+							max={10}
+							onFinishChange={() =>
+								setVehicle(scene, { id: vehicle.id, sidewaysFriction: structuredClone(settings.sidewaysFriction) }, { editor: this.props.editor })
+							}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings}
+							property="antiRollStiffness"
+							label="Anti-roll Stiffness"
+							min={0}
+							max={1000000}
+							onFinishChange={(value) => setVehicle(scene, { id: vehicle.id, antiRollStiffness: value }, { editor: this.props.editor })}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo
+							object={settings}
+							property="maxAntiRollForce"
+							label="Anti-roll Force Cap"
+							min={0}
+							max={1000000}
+							onFinishChange={(value) => setVehicle(scene, { id: vehicle.id, maxAntiRollForce: value }, { editor: this.props.editor })}
 						/>
 					</>
 				)}

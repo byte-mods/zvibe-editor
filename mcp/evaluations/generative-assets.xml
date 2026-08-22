@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which MCP tool reports image, sprite, PBR material, animation, and audio generation support plus queue, staging, preview, and publication limits without mutating the project?</question>
+      <answer>get_generative_asset_capabilities</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool returns provider readiness, classification, and exact inventory/provider fingerprints without exposing credential values?</question>
+      <answer>list_generative_asset_providers</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which three provider classifications prevent procedural generators and fixtures from being mislabeled as AI?</question>
+      <answer>generative-ai, procedural, and test-fixture</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Where can provider credential values be supplied?</question>
+      <answer>Only through the environment variables named by the provider manifest</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What exact fingerprint algorithm leases provider manifests, references, results, previews, and publication plans?</question>
+      <answer>SHA-256</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does a succeeded generation job automatically add its outputs to the normal project asset registry? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool revalidates a candidate and returns an immutable collision-safe plan without changing project assets?</question>
+      <answer>inspect_generative_asset_publication</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool transactionally adds validated generated files through normal asset importers and records provenance?</question>
+      <answer>publish_generative_asset_candidate</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>If publication fails after replacing files, what happens to asset bytes, metadata sidecars, and importer caches?</question>
+      <answer>They are rolled back together</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does delete_generative_asset_job delete assets that were already published normally? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+</evaluation>

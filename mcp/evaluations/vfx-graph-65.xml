@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<evaluation>
+  <name>Portable Unity 6.5 VFX template and batch-release workflow</name>
+  <qa_pair><question>How do I search the portable VFX template catalog?</question><answer>Call list_vfx_graph_templates with an optional query, category, offset, and limit. It returns deterministic Starter, Environment, and Impact matches plus the exact catalogRevision required for creation.</answer></qa_pair>
+  <qa_pair><question>How do I filter templates for smoke or rain?</question><answer>Call list_vfx_graph_templates with category Environment and an optional query such as smoke, plume, rain, or weather.</answer></qa_pair>
+  <qa_pair><question>Which tool creates an editable Node Particle asset from a template?</question><answer>create_vfx_graph_from_template compile-checks and writes a real project-contained .npss asset under the exact previously searched catalog revision.</answer></qa_pair>
+  <qa_pair><question>What protects template creation from a stale catalog?</question><answer>Pass expectedCatalogRevision from list_vfx_graph_templates. Creation rejects if it differs from the current deterministic catalog revision.</answer></qa_pair>
+  <qa_pair><question>How do I inspect release-on-disable for a Node Particle VFX node?</question><answer>Call get_node_particle_batch_release with its nodeId or nodeName. It returns policyEnabled, state, batchPresent, systemCount, releaseCount, rebuildCount, lastError, and an exact revision.</answer></qa_pair>
+  <qa_pair><question>How do I enable VFX batch release on disable?</question><answer>Inspect first, then call set_node_particle_batch_release with the exact expectedRevision and releaseOnDisable true.</answer></qa_pair>
+  <qa_pair><question>What happens when an opted-in VFX node is disabled?</question><answer>The live Babylon ParticleSystemSet is detached and disposed while the editable NodeParticleSystemSet graph is retained for reconstruction.</answer></qa_pair>
+  <qa_pair><question>What happens when the released VFX node is enabled again?</question><answer>The runtime atomically rebuilds a fresh particle-system batch from the retained graph, starts it, and publishes rebuild evidence.</answer></qa_pair>
+  <qa_pair><question>What happens if changing the batch-release policy cannot rebuild the effect?</question><answer>The mutation reports the build error and attempts to restore the previous policy and live allocation rather than silently publishing broken state.</answer></qa_pair>
+  <qa_pair><question>Does this workflow claim Unity VFX Graph or VFXManager identity?</question><answer>No. It is a portable Babylon Node Particle template and batch lifecycle and explicitly does not claim Unity package, API, GPU batch, serialization, or binary identity.</answer></qa_pair>
+</evaluation>

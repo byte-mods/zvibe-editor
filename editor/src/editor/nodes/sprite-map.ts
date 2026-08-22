@@ -21,7 +21,7 @@ import {
 	Vector3,
 	GetClass,
 } from "babylonjs";
-import { ISpriteMapTile, normalizeAtlasJson } from "babylonjs-editor-tools";
+import { configureAdvancedSpriteMap, getSpriteMapTileGridConfiguration, ISpriteMapTile, normalizeAtlasJson, rebuildAdvancedSpriteMapTiles } from "babylonjs-editor-tools";
 
 import { UniqueNumber } from "../../tools/tools";
 import { setNodeSerializable, setNodeVisibleInGraph } from "../../tools/node/metadata";
@@ -85,7 +85,9 @@ export class SpriteMapNode extends TransformNode {
 
 		if (!spritesheet) {
 			const imagePath = join(dirname(absolutePath), atlasJson!.meta!["image"]);
-			spritesheet = new Texture(imagePath, this._scene, false, false, Texture.NEAREST_NEAREST, null, null, null, false, Engine.TEXTUREFORMAT_RGBA);
+			// SpriteMap atlases are sampled with nearest filtering. Keep them mip-free as Babylon's
+			// float frame/tile lookup textures are, avoiding unsupported mip generation on WebGL.
+			spritesheet = new Texture(imagePath, this._scene, true, false, Texture.NEAREST_NEAREST, null, null, null, false, Engine.TEXTUREFORMAT_RGBA);
 			configureImportedTexture(spritesheet, true);
 		}
 
@@ -130,6 +132,7 @@ export class SpriteMapNode extends TransformNode {
 
 	private _configureSpriteMap(spriteMap: SpriteMap): void {
 		const output = spriteMap["_output"] as Mesh;
+		configureAdvancedSpriteMap(spriteMap, getSpriteMapTileGridConfiguration(this).layout);
 
 		setNodeSerializable(output, false);
 		setNodeVisibleInGraph(output, false);
@@ -190,30 +193,11 @@ export class SpriteMapNode extends TransformNode {
 		if (!this._spriteMap) {
 			return;
 		}
-
-		this.tiles.forEach((tileConfiguration) => {
-			const frame = this._spriteMap!.atlasJSON.frames[tileConfiguration.tile];
-			if (!frame) {
-				return;
-			}
-
-			if (layer !== undefined && tileConfiguration.layer !== layer) {
-				return;
-			}
-
-			for (let x = 0, lenX = tileConfiguration.repeatCount.x + 1; x < lenX; ++x) {
-				for (let y = 0, lenY = tileConfiguration.repeatCount.y + 1; y < lenY; ++y) {
-					const offsetX = x * (tileConfiguration.repeatOffset.x + 1);
-					const offsetY = y * (tileConfiguration.repeatOffset.y + 1);
-
-					this._spriteMap!.changeTiles(
-						tileConfiguration.layer,
-						new Vector2(tileConfiguration.position.x + offsetX, (this._spriteMap!.options.stageSize?.y ?? 0) - 1 - tileConfiguration.position.y - offsetY),
-						tileConfiguration.tile
-					);
-				}
-			}
-		});
+		void layer;
+		rebuildAdvancedSpriteMapTiles(
+			this._spriteMap,
+			this.tiles.filter((tile) => Boolean(this._spriteMap!.atlasJSON.frames[tile.tile]))
+		);
 	}
 
 	/**

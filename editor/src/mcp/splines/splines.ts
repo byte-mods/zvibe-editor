@@ -26,15 +26,21 @@ type ISplineAsset = {
 };
 
 function getProjectDirectory(): string {
-	if (!projectConfiguration.path) throw new Error("No project is currently open.");
+	if (!projectConfiguration.path) {
+		throw new Error("No project is currently open.");
+	}
 	return dirname(projectConfiguration.path);
 }
 
 function resolveSplineAssetPath(path: string): string {
 	const projectDirectory = getProjectDirectory();
 	const absolutePath = normalize(isAbsolute(path) ? path : join(projectDirectory, path));
-	if (absolutePath !== projectDirectory && !absolutePath.startsWith(`${projectDirectory}/`)) throw new Error("Spline asset paths must stay inside the open project directory.");
-	if (!absolutePath.endsWith(".spline.json")) throw new Error("Spline assets must use the .spline.json extension.");
+	if (absolutePath !== projectDirectory && !absolutePath.startsWith(`${projectDirectory}/`)) {
+		throw new Error("Spline asset paths must stay inside the open project directory.");
+	}
+	if (!absolutePath.endsWith(".spline.json")) {
+		throw new Error("Spline assets must use the .spline.json extension.");
+	}
 	return absolutePath;
 }
 
@@ -44,14 +50,20 @@ function toProjectRelativePath(path: string): string {
 
 function getSplineMesh(scene: Scene, data: any): Mesh {
 	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
-	if (!isMesh(node) || node.metadata?.type !== "Spline") throw new Error(`Node "${node.name}" is not an editor spline.`);
+	if (!isMesh(node) || node.metadata?.type !== "Spline") {
+		throw new Error(`Node "${node.name}" is not an editor spline.`);
+	}
 	return node;
 }
 
 function getSplinePoints(data: any): Vector3[] {
-	if (!Array.isArray(data.points) || data.points.length < 2) throw new Error("A spline requires at least two control points.");
+	if (!Array.isArray(data.points) || data.points.length < 2) {
+		throw new Error("A spline requires at least two control points.");
+	}
 	return data.points.map((point: unknown) => {
-		if (!Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite)) throw new Error("Spline control points must be finite [x, y, z] coordinates.");
+		if (!Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite)) {
+			throw new Error("Spline control points must be finite [x, y, z] coordinates.");
+		}
 		return toVector3(point);
 	});
 }
@@ -59,11 +71,14 @@ function getSplinePoints(data: any): Vector3[] {
 type IBezierKnot = { position: number[]; inTangent: number[]; outTangent: number[] };
 
 function getSplineKnots(data: any): IBezierKnot[] {
-	if (!Array.isArray(data.knots) || data.knots.length < 2) throw new Error("A Bezier spline requires at least two knots.");
+	if (!Array.isArray(data.knots) || data.knots.length < 2) {
+		throw new Error("A Bezier spline requires at least two knots.");
+	}
 	return data.knots.map((knot: any, index: number) => {
 		const values = [knot?.position, knot?.inTangent ?? [0, 0, 0], knot?.outTangent ?? [0, 0, 0]];
-		if (!values.every((value) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite)))
+		if (!values.every((value) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite))) {
 			throw new Error(`Bezier knot ${index} position and tangents must be finite [x, y, z] coordinates.`);
+		}
 		return { position: [...knot.position], inTangent: [...(knot.inTangent ?? [0, 0, 0])], outTangent: [...(knot.outTangent ?? [0, 0, 0])] };
 	});
 }
@@ -82,14 +97,18 @@ function evaluateBezier(start: IBezierKnot, end: IBezierKnot, t: number): Vector
 }
 
 function getSplinePath(metadata: any): Vector3[] {
-	if (!Array.isArray(metadata.knots)) return getTubePath(getSplinePoints(metadata), metadata.closed);
+	if (!Array.isArray(metadata.knots)) {
+		return getTubePath(getSplinePoints(metadata), metadata.closed);
+	}
 	const knots = getSplineKnots(metadata);
 	const segmentCount = metadata.closed ? knots.length : knots.length - 1;
 	const points: Vector3[] = [];
 	for (let segment = 0; segment < segmentCount; segment++) {
 		const start = knots[segment];
 		const end = knots[(segment + 1) % knots.length];
-		for (let step = 0; step < 12; step++) points.push(evaluateBezier(start, end, step / 12));
+		for (let step = 0; step < 12; step++) {
+			points.push(evaluateBezier(start, end, step / 12));
+		}
 	}
 	points.push(
 		(metadata.closed ? knots[0] : knots[knots.length - 1]).position ? Vector3.FromArray((metadata.closed ? knots[0] : knots[knots.length - 1]).position) : Vector3.Zero()
@@ -109,8 +128,11 @@ function setFollowerPreviewTransform(
 ): number | null {
 	const sample = evaluateSpline(spline.getScene(), { nodeId: spline.id, t });
 	const position = Vector3.TransformCoordinates(Vector3.FromArray(sample.position), spline.getWorldMatrix());
-	if (follower.setAbsolutePosition) follower.setAbsolutePosition(position);
-	else follower.position?.copyFrom(position);
+	if (follower.setAbsolutePosition) {
+		follower.setAbsolutePosition(position);
+	} else {
+		follower.position?.copyFrom(position);
+	}
 	if (orientToPath && follower.rotation) {
 		const tangent = Vector3.TransformNormal(Vector3.FromArray(sample.tangent), spline.getWorldMatrix()).normalize();
 		follower.rotationQuaternion = null;
@@ -122,7 +144,9 @@ function setFollowerPreviewTransform(
 function ensureSplineFollowerPreview(scene: Scene): Map<string, { t: number }> {
 	const state = splineFollowerPreviewState.get(scene) ?? new Map<string, { t: number }>();
 	splineFollowerPreviewState.set(scene, state);
-	if (splineFollowerPreviewConfigured.has(scene)) return state;
+	if (splineFollowerPreviewConfigured.has(scene)) {
+		return state;
+	}
 	splineFollowerPreviewConfigured.add(scene);
 	scene.onBeforeRenderObservable.add(() => {
 		const elapsedSeconds = scene.getEngine().getDeltaTime() / 1000;
@@ -130,12 +154,18 @@ function ensureSplineFollowerPreview(scene: Scene): Map<string, { t: number }> {
 			Node & { position?: Vector3; rotation?: Vector3; rotationQuaternion?: unknown; setAbsolutePosition?: (position: Vector3) => void }
 		>) {
 			const configuration = follower.metadata?.babylonEditorSplineFollower;
-			if (!configuration) continue;
+			if (!configuration) {
+				continue;
+			}
 			const spline = scene.getNodeById(configuration.splineId);
-			if (!isMesh(spline) || spline.metadata?.type !== "Spline") continue;
+			if (!isMesh(spline) || spline.metadata?.type !== "Spline") {
+				continue;
+			}
 			const playback = state.get(follower.id) ?? { t: configuration.t };
 			const length = setFollowerPreviewTransform(spline, follower, playback.t, configuration.orientToPath);
-			if (!length) continue;
+			if (!length) {
+				continue;
+			}
 			const delta = (configuration.speed * elapsedSeconds) / length;
 			playback.t = configuration.loop ? (playback.t + delta) % 1 : Math.min(1, playback.t + delta);
 			state.set(follower.id, playback);
@@ -150,8 +180,12 @@ function rebuildSpline(spline: Mesh): void {
 	const points = getSplinePath(metadata);
 	const radius = metadata.radius;
 	const tessellation = metadata.tessellation;
-	if (!Number.isFinite(radius) || radius <= 0) throw new Error("Spline radius must be greater than zero.");
-	if (!Number.isInteger(tessellation) || tessellation < 3) throw new Error("Spline tessellation must be an integer of at least 3.");
+	if (!Number.isFinite(radius) || radius <= 0) {
+		throw new Error("Spline radius must be greater than zero.");
+	}
+	if (!Number.isInteger(tessellation) || tessellation < 3) {
+		throw new Error("Spline tessellation must be an integer of at least 3.");
+	}
 	// Tube instances cannot safely change path length (for example when toggling closed),
 	// so generate fresh vertex data and apply it to the persisted mesh identity instead.
 	const generated = MeshBuilder.CreateTube(`${spline.name}__generated`, { path: points, radius, tessellation, cap: Mesh.CAP_ALL }, spline.getScene());
@@ -168,7 +202,9 @@ function projectPointToTerrain(spline: Mesh, terrain: Mesh, point: number[], off
 	const bounds = terrain.getBoundingInfo().boundingBox;
 	const padding = Math.max(1_000, bounds.maximumWorld.y - bounds.minimumWorld.y + 100);
 	const hit = terrain.intersects(new Ray(new Vector3(worldPoint.x, bounds.maximumWorld.y + padding, worldPoint.z), Vector3.Down(), padding * 2), false);
-	if (!hit.hit || !hit.pickedPoint) throw new Error(`Spline point at [${point.join(", ")}] does not intersect Ground terrain "${terrain.name}".`);
+	if (!hit.hit || !hit.pickedPoint) {
+		throw new Error(`Spline point at [${point.join(", ")}] does not intersect Ground terrain "${terrain.name}".`);
+	}
 	hit.pickedPoint.y += offset;
 	return Vector3.TransformCoordinates(hit.pickedPoint, Matrix.Invert(spline.getWorldMatrix()));
 }
@@ -177,7 +213,9 @@ function projectPointToTerrain(spline: Mesh, terrain: Mesh, point: number[], off
 export function createSpline(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const parent = data.parentId || data.parentName ? resolveNode({ scene, nodeId: data.parentId, nodeName: data.parentName }) : undefined;
 	const spline = addSplineMesh(options.editor, parent);
-	if (data.name) spline.name = data.name;
+	if (data.name) {
+		spline.name = data.name;
+	}
 	Object.assign(spline.metadata, {
 		points: (data.points ? getSplinePoints(data) : spline.metadata.points.map(toVector3)).map((point: Vector3) => point.asArray()),
 		knots: data.knots ? getSplineKnots(data) : undefined,
@@ -221,20 +259,31 @@ function toSplineAsset(spline: any): ISplineAsset {
 }
 
 function getSplineAsset(asset: any, path: string): ISplineAsset {
-	if (asset?.version !== 1 || asset?.type !== SPLINE_ASSET_TYPE || typeof asset.name !== "string")
+	if (asset?.version !== 1 || asset?.type !== SPLINE_ASSET_TYPE || typeof asset.name !== "string") {
 		throw new Error(`Spline asset at ${path} is not a valid Babylon.js Editor spline asset.`);
+	}
 	getSplinePoints(asset);
-	if (asset.knots !== null && asset.knots !== undefined) getSplineKnots(asset);
-	if (!Number.isFinite(asset.radius) || asset.radius <= 0) throw new Error(`Spline asset at ${path} has an invalid radius.`);
-	if (!Number.isInteger(asset.tessellation) || asset.tessellation < 3) throw new Error(`Spline asset at ${path} has an invalid tessellation.`);
-	if (typeof asset.closed !== "boolean") throw new Error(`Spline asset at ${path} has an invalid closed value.`);
+	if (asset.knots !== null && asset.knots !== undefined) {
+		getSplineKnots(asset);
+	}
+	if (!Number.isFinite(asset.radius) || asset.radius <= 0) {
+		throw new Error(`Spline asset at ${path} has an invalid radius.`);
+	}
+	if (!Number.isInteger(asset.tessellation) || asset.tessellation < 3) {
+		throw new Error(`Spline asset at ${path} has an invalid tessellation.`);
+	}
+	if (typeof asset.closed !== "boolean") {
+		throw new Error(`Spline asset at ${path} has an invalid closed value.`);
+	}
 	return { ...asset, knots: asset.knots ?? null };
 }
 
 /** Saves one editable spline's authoring data as a project-local reusable .spline.json asset. */
 export async function saveSplineAsset(scene: Scene, data: any): Promise<any> {
 	const absolutePath = resolveSplineAssetPath(data.path);
-	if ((await pathExists(absolutePath)) && data.overwrite !== true) throw new Error(`Spline asset exists at ${data.path}. Set overwrite: true to replace it.`);
+	if ((await pathExists(absolutePath)) && data.overwrite !== true) {
+		throw new Error(`Spline asset exists at ${data.path}. Set overwrite: true to replace it.`);
+	}
 	const spline = getSpline(scene, data);
 	const asset = toSplineAsset(spline);
 	await mkdir(dirname(absolutePath), { recursive: true });
@@ -260,7 +309,9 @@ export async function listSplineAssets(): Promise<any> {
 /** Instantiates a reusable spline asset into the active scene with an optional parent and name override. */
 export async function instantiateSplineAsset(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
 	const absolutePath = resolveSplineAssetPath(data.path);
-	if (!(await pathExists(absolutePath))) throw new Error(`Spline asset not found at ${data.path}.`);
+	if (!(await pathExists(absolutePath))) {
+		throw new Error(`Spline asset not found at ${data.path}.`);
+	}
 	const asset = getSplineAsset(await readJSON(absolutePath), data.path);
 	const spline = createSpline(
 		scene,
@@ -282,12 +333,23 @@ export async function instantiateSplineAsset(scene: Scene, data: any, options: I
 /** Replaces or updates persisted spline control points and tube settings. */
 export function setSpline(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const spline = getSplineMesh(scene, data);
-	if (data.points !== undefined) spline.metadata.points = getSplinePoints(data).map((point) => point.asArray());
-	if (data.knots === null) delete spline.metadata.knots;
-	else if (data.knots !== undefined) spline.metadata.knots = getSplineKnots(data);
-	if (data.radius !== undefined) spline.metadata.radius = data.radius;
-	if (data.tessellation !== undefined) spline.metadata.tessellation = data.tessellation;
-	if (data.closed !== undefined) spline.metadata.closed = data.closed;
+	if (data.points !== undefined) {
+		spline.metadata.points = getSplinePoints(data).map((point) => point.asArray());
+	}
+	if (data.knots === null) {
+		delete spline.metadata.knots;
+	} else if (data.knots !== undefined) {
+		spline.metadata.knots = getSplineKnots(data);
+	}
+	if (data.radius !== undefined) {
+		spline.metadata.radius = data.radius;
+	}
+	if (data.tessellation !== undefined) {
+		spline.metadata.tessellation = data.tessellation;
+	}
+	if (data.closed !== undefined) {
+		spline.metadata.closed = data.closed;
+	}
 	rebuildSpline(spline);
 	options.editor.layout.inspector.setEditedObject(spline);
 	options.editor.layout.inspector.forceUpdate();
@@ -298,15 +360,21 @@ export function setSpline(scene: Scene, data: any, options: IMCPActionOptions): 
 export function projectSplineToTerrain(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const spline = getSplineMesh(scene, data);
 	const terrain = resolveNode({ scene, nodeId: data.terrainId, nodeName: data.terrainName });
-	if (!isMesh(terrain) || terrain.metadata?.type !== "Ground") throw new Error(`Node "${terrain.name}" is not an editor Ground terrain.`);
+	if (!isMesh(terrain) || terrain.metadata?.type !== "Ground") {
+		throw new Error(`Node "${terrain.name}" is not an editor Ground terrain.`);
+	}
 	const offset = data.offset ?? 0;
-	if (!Number.isFinite(offset)) throw new Error("Terrain projection offset must be finite.");
+	if (!Number.isFinite(offset)) {
+		throw new Error("Terrain projection offset must be finite.");
+	}
 	const projectTangents = data.projectTangents ?? true;
 
 	if (Array.isArray(spline.metadata.knots)) {
 		const knots = getSplineKnots({ knots: spline.metadata.knots }).map((knot) => {
 			const position = projectPointToTerrain(spline, terrain, knot.position, offset);
-			if (!projectTangents) return { ...knot, position: position.asArray() };
+			if (!projectTangents) {
+				return { ...knot, position: position.asArray() };
+			}
 			const inHandle = projectPointToTerrain(spline, terrain, Vector3.FromArray(knot.position).add(Vector3.FromArray(knot.inTangent)).asArray(), offset);
 			const outHandle = projectPointToTerrain(spline, terrain, Vector3.FromArray(knot.position).add(Vector3.FromArray(knot.outTangent)).asArray(), offset);
 			return { position: position.asArray(), inTangent: inHandle.subtract(position).asArray(), outTangent: outHandle.subtract(position).asArray() };
@@ -333,7 +401,9 @@ export function evaluateSpline(scene: Scene, data: any): any {
 		lengths.push(length);
 		totalLength += length;
 	}
-	if (!totalLength) throw new Error("Cannot evaluate a zero-length spline.");
+	if (!totalLength) {
+		throw new Error("Cannot evaluate a zero-length spline.");
+	}
 	const target = Math.min(1, Math.max(0, data.t ?? 0)) * totalLength;
 	let travelled = 0;
 	for (let index = 0; index < lengths.length; index++) {
@@ -367,9 +437,15 @@ export function listSplineFollowers(scene: Scene): any {
 export function setSplineFollower(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const spline = getSplineMesh(scene, { nodeId: data.splineId, nodeName: data.splineName });
 	const follower = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName }) as Node & { position?: Vector3; rotation?: Vector3 };
-	if (!follower.position) throw new Error(`Node "${follower.name}" cannot follow a spline because it has no position.`);
-	if (data.speed !== undefined && (!Number.isFinite(data.speed) || data.speed < 0)) throw new Error("Spline follower speed must be zero or greater.");
-	if (data.t !== undefined && (!Number.isFinite(data.t) || data.t < 0 || data.t > 1)) throw new Error("Spline follower t must be between 0 and 1.");
+	if (!follower.position) {
+		throw new Error(`Node "${follower.name}" cannot follow a spline because it has no position.`);
+	}
+	if (data.speed !== undefined && (!Number.isFinite(data.speed) || data.speed < 0)) {
+		throw new Error("Spline follower speed must be zero or greater.");
+	}
+	if (data.t !== undefined && (!Number.isFinite(data.t) || data.t < 0 || data.t > 1)) {
+		throw new Error("Spline follower t must be between 0 and 1.");
+	}
 	follower.metadata ??= {};
 	follower.metadata.babylonEditorSplineFollower = {
 		splineId: spline.id,
@@ -389,7 +465,9 @@ export function setSplineFollower(scene: Scene, data: any, options: IMCPActionOp
 /** Removes a persisted spline-follower component from a node. */
 export function deleteSplineFollower(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const follower = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
-	if (!follower.metadata?.babylonEditorSplineFollower) throw new Error(`Node "${follower.name}" has no spline follower.`);
+	if (!follower.metadata?.babylonEditorSplineFollower) {
+		throw new Error(`Node "${follower.name}" has no spline follower.`);
+	}
 	delete follower.metadata.babylonEditorSplineFollower;
 	splineFollowerPreviewState.get(scene)?.delete(follower.id);
 	options.editor.layout.inspector.setEditedObject(follower);

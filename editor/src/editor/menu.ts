@@ -1,9 +1,99 @@
 import { platform } from "os";
-import { BrowserWindow, Menu, MenuItem, shell } from "electron";
+import { BrowserWindow, Menu, MenuItem, MenuItemConstructorOptions, shell } from "electron";
 
 import { cameraCommandItems, lightCommandItems, meshCommandItems, nodeCommandItems, spriteCommandItems } from "./dialogs/command-palette/shared-commands";
+import type { IEditorExtensionMenuDescriptor } from "../extensions/types";
 
-export function setupEditorMenu(options: { enableExperimentalFeatures: boolean; openedTabs?: string[] }): void {
+/** Serializable renderer-owned state used to rebuild the focused editor window's menu. */
+export interface ISetupEditorMenuOptions {
+	enableExperimentalFeatures: boolean;
+	openedTabs?: string[];
+	extensionMenus?: IEditorExtensionMenuDescriptor[];
+}
+
+interface IExtensionMenuTreeNode {
+	commandId?: string;
+	children: Map<string, IExtensionMenuTreeNode>;
+}
+
+const extensionContributionIdPattern = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
+
+function validExtensionMenuDescriptor(value: unknown): value is IEditorExtensionMenuDescriptor {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return false;
+	}
+	const descriptor = value as Partial<IEditorExtensionMenuDescriptor>;
+	if (
+		typeof descriptor.id !== "string" ||
+		descriptor.id.length > 160 ||
+		!extensionContributionIdPattern.test(descriptor.id) ||
+		typeof descriptor.path !== "string" ||
+		descriptor.path.length > 196
+	) {
+		return false;
+	}
+	const segments = descriptor.path.split("/");
+	return (
+		segments.length >= 1 &&
+		segments.length <= 4 &&
+		descriptor.path === segments.map((segment) => segment.trim()).join("/") &&
+		segments.every((segment) => {
+			const trimmed = segment.trim();
+			return trimmed.length >= 1 && trimmed.length <= 48 && ![...trimmed].some((character) => character.charCodeAt(0) <= 31 || character.charCodeAt(0) === 127);
+		})
+	);
+}
+
+function buildExtensionMenuItems(values: unknown): MenuItemConstructorOptions[] {
+	if (!Array.isArray(values) || values.length > 512 || !values.every(validExtensionMenuDescriptor)) {
+		return [];
+	}
+	const descriptors = [...values].sort((left, right) => left.path.localeCompare(right.path) || left.id.localeCompare(right.id));
+	if (
+		new Set(descriptors.map((descriptor) => descriptor.id)).size !== descriptors.length ||
+		new Set(descriptors.map((descriptor) => descriptor.path)).size !== descriptors.length
+	) {
+		return [];
+	}
+	const root: IExtensionMenuTreeNode = { children: new Map() };
+	for (const descriptor of descriptors) {
+		let node = root;
+		for (const segment of descriptor.path.split("/").map((entry) => entry.trim())) {
+			let child = node.children.get(segment);
+			if (!child) {
+				child = { children: new Map() };
+				node.children.set(segment, child);
+			}
+			node = child;
+		}
+		node.commandId = descriptor.id;
+	}
+	const children = (node: IExtensionMenuTreeNode): MenuItemConstructorOptions[] =>
+		[...node.children.entries()].map(([label, child]) => {
+			const nested = children(child);
+			if (nested.length) {
+				return {
+					label,
+					submenu: [
+						...(child.commandId
+							? [{ label: "Run", click: () => BrowserWindow.getFocusedWindow()?.webContents.send("editor:extension-command", child.commandId) }]
+							: []),
+						...nested,
+					],
+				};
+			}
+			return { label, click: () => BrowserWindow.getFocusedWindow()?.webContents.send("editor:extension-command", child.commandId) };
+		});
+	return children(root);
+}
+
+/** Rebuilds the native menu from built-ins plus validated declarative extension commands. */
+export function setupEditorMenu(options: ISetupEditorMenuOptions): void {
+	const extensionMenuItems = buildExtensionMenuItems(options?.extensionMenus);
+	const openedTabs =
+		Array.isArray(options?.openedTabs) && options.openedTabs.length <= 128 && options.openedTabs.every((tab) => typeof tab === "string" && tab.length <= 160)
+			? options.openedTabs
+			: [];
 	Menu.setApplicationMenu(
 		Menu.buildFromTemplate([
 			{
@@ -53,6 +143,10 @@ export function setupEditorMenu(options: { enableExperimentalFeatures: boolean; 
 					{
 						label: "Scene Manager...",
 						click: () => BrowserWindow.getFocusedWindow()?.webContents.send("editor:scene-manager"),
+					},
+					{
+						label: "Export Scene as FBX...",
+						click: () => BrowserWindow.getFocusedWindow()?.webContents.send("editor:export-scene-fbx"),
 					},
 					{
 						type: "separator",
@@ -126,7 +220,7 @@ export function setupEditorMenu(options: { enableExperimentalFeatures: boolean; 
 						type: "separator",
 					},
 					{
-						label: "Project...",
+						label: "Project Settings...",
 						click: () => BrowserWindow.getFocusedWindow()?.webContents.send("editor:edit-project"),
 					},
 				],
@@ -261,11 +355,19 @@ export function setupEditorMenu(options: { enableExperimentalFeatures: boolean; 
 					{
 						label: "Marketplace",
 						type: "checkbox" as MenuItem["type"],
-						checked: options.openedTabs?.includes("marketplace"),
+						checked: openedTabs.includes("marketplace"),
 						click: () => BrowserWindow.getFocusedWindow()?.webContents.send("editor:toggle-marketplace"),
 					},
 				],
 			},
+			...(extensionMenuItems.length
+				? [
+						{
+							label: "Extensions",
+							submenu: extensionMenuItems,
+						},
+					]
+				: []),
 			{
 				label: "Window",
 				submenu: [

@@ -63,6 +63,9 @@ export function createCamera(scene: Scene, data: any, options: IMCPActionOptions
  * Sets the scene's active camera.
  */
 export function setActiveCamera(scene: Scene, data: any, options: IMCPActionOptions): any {
+	if (scene.metadata?.babylonEditorActiveCameraStack) {
+		throw new Error("An active camera stack owns the ordered camera selection. Clear the active camera stack before selecting one standalone active camera.");
+	}
 	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
 
 	if (!isCamera(node)) {
@@ -80,7 +83,9 @@ export function setActiveCamera(scene: Scene, data: any, options: IMCPActionOpti
 
 export function getCamera(scene: Scene, data: any): any {
 	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
-	if (!isCamera(node)) throw new Error(`Node "${node.name}" is not a camera.`);
+	if (!isCamera(node)) {
+		throw new Error(`Node "${node.name}" is not a camera.`);
+	}
 	const camera = node as Camera;
 	return {
 		...toNodeSummary(camera),
@@ -107,10 +112,16 @@ export function getCamera(scene: Scene, data: any): any {
 /** Updates camera inspector properties including projection and ArcRotate pan controls. */
 export function setCameraProperties(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
-	if (!isCamera(node)) throw new Error(`Node "${node.name}" is not a camera.`);
+	if (!isCamera(node)) {
+		throw new Error(`Node "${node.name}" is not a camera.`);
+	}
 	const camera = node as any;
-	if (data.position && camera.position) camera.position.copyFrom(toVector3(data.position));
-	if (data.target && camera.setTarget) camera.setTarget(toVector3(data.target));
+	if (data.position && camera.position) {
+		camera.position.copyFrom(toVector3(data.position));
+	}
+	if (data.target && camera.setTarget) {
+		camera.setTarget(toVector3(data.target));
+	}
 	Object.assign(camera, data.properties ?? {});
 	options.editor.layout.inspector.setEditedObject(camera);
 	options.editor.layout.inspector.forceUpdate();

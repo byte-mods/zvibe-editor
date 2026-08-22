@@ -16,7 +16,7 @@ export interface ICinematicEditorSoundKeyInspectorProps {
 export function CinematicEditorSoundKeyInspector(props: ICinematicEditorSoundKeyInspectorProps) {
 	const node = props.track.sound as SoundNode | null;
 
-	if (!node || !node.sound?.buffer) {
+	if (!node || !node.sound) {
 		return null;
 	}
 

@@ -1,19 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { FreeCamera, MeshBuilder, NullEngine, RawTexture, Scene, Vector3 } from "babylonjs";
+import { Constants, FreeCamera, MeshBuilder, NullEngine, RawTexture, Scene, StandardMaterial, Vector3 } from "babylonjs";
 import { defaultCustomRenderPassComputeShader, disposeCustomRenderPassGraph, getCustomRenderPassPostProcesses } from "babylonjs-editor-tools";
 
 import {
+	captureCustomRenderPassFrameDebugger,
 	createCustomRenderPass,
 	deleteCustomRenderPass,
 	evaluateCustomRenderPassGraph,
 	getCustomRenderPassGraphDiagnostics,
 	getCustomRenderPassGpuProfiling,
+	getCustomRenderPassFrameDebugger,
 	listCustomRenderPasses,
 	readCustomComputeStorageBuffer,
 	setCustomComputeStorageBufferData,
 	setCustomComputeUniformBufferValues,
 	setCustomRenderPass,
+	setCustomRenderPassFrameIsolation,
 	setCustomRenderPassGpuProfiling,
 } from "../../src/mcp/rendering/custom-passes";
 
@@ -175,21 +178,56 @@ describe("mcp/custom-render-passes", () => {
 
 	test("persists and validates scene-raster pass targets", () => {
 		const mesh = MeshBuilder.CreateBox("Raster Mesh", {}, scene);
+		const child = MeshBuilder.CreateBox("Raster Child", {}, scene);
+		child.parent = mesh;
+		mesh.layerMask = child.layerMask = 0x08;
+		const material = new StandardMaterial("Raster Override", scene);
 		const raster = createCustomRenderPass(
 			scene,
 			{
 				name: "Raster",
 				passType: "raster",
 				output: "rasterColor",
-				rasterSettings: { meshIds: [mesh.id], clearColor: [0.1, 0.2, 0.3, 1], refreshRate: "everyTwoFrames" },
+				rasterSettings: {
+					meshIds: [mesh.id],
+					includeDescendants: true,
+					layerMask: 0x08,
+					materialId: material.id,
+					clearColor: [0.1, 0.2, 0.3, 1],
+					clearMode: "none",
+					depthTest: false,
+					depthWrite: false,
+					cullMode: "none",
+					blendMode: "premultiplied",
+					refreshRate: "everyTwoFrames",
+				},
 			},
 			options
 		);
-		expect(raster).toMatchObject({ passType: "raster", output: "rasterColor", preview: { applied: true }, rasterSettings: { cameraId: null, meshIds: [mesh.id] } });
+		expect(raster).toMatchObject({
+			passType: "raster",
+			output: "rasterColor",
+			preview: { applied: true },
+			rasterSettings: { cameraId: null, meshIds: [mesh.id], includeDescendants: true, materialId: material.id, blendMode: "premultiplied" },
+		});
 		expect(getCustomRenderPassGraphDiagnostics(scene)).toMatchObject({
 			ready: false,
-			sceneRasterTargets: [expect.objectContaining({ id: raster.id, output: "rasterColor", meshIds: [mesh.id], ready: false })],
+			sceneRasterTargets: [
+				expect.objectContaining({
+					id: raster.id,
+					output: "rasterColor",
+					meshIds: [mesh.id, child.id],
+					materialId: material.id,
+					clearMode: "none",
+					depthTest: false,
+					depthWrite: false,
+					cullMode: "none",
+					blendMode: "premultiplied",
+				}),
+			],
 		});
+		const clone = scene.materials.find((candidate) => candidate !== material && candidate.name.includes("graphics override"))!;
+		expect(clone).toMatchObject({ backFaceCulling: false, disableDepthWrite: true, depthFunction: Constants.ALWAYS, alphaMode: Constants.ALPHA_PREMULTIPLIED });
 		const updated = setCustomRenderPass(scene, { id: raster.id, rasterSettings: { refreshRate: "once", renderSprites: true } }, options);
 		expect(updated.rasterSettings).toMatchObject({ meshIds: [mesh.id], refreshRate: "once", renderSprites: true });
 		const unsupported = createCustomRenderPass(
@@ -199,6 +237,47 @@ describe("mcp/custom-render-passes", () => {
 		);
 		expect(unsupported.preview).toMatchObject({ applied: false, error: expect.stringContaining("missing mesh ids") });
 		expect(listCustomRenderPasses(scene).passes.find((pass: any) => pass.id === unsupported.id).rasterSettings.meshIds).toEqual(["missing"]);
+	});
+
+	test("captures paged frame-debug evidence and applies transient dependency-closure isolation", () => {
+		const mesh = MeshBuilder.CreateBox("Debugger Mesh", {}, scene);
+		const raster = createCustomRenderPass(scene, { name: "Debugger Raster", passType: "raster", output: "debuggerScene", rasterSettings: { meshIds: [mesh.id] } }, options);
+		const consumer = createCustomRenderPass(
+			scene,
+			{
+				name: "Debugger Consumer",
+				dependencies: [raster.id],
+				output: "debuggerFinal",
+				fragmentShader:
+					"precision highp float; varying vec2 vUV; uniform sampler2D textureSampler; uniform sampler2D sceneSampler; void main(void) { gl_FragColor = texture2D(textureSampler, vUV) + texture2D(sceneSampler, vUV); }",
+				inputs: { sceneSampler: { source: "pass", output: "debuggerScene" } },
+			},
+			options
+		);
+		createCustomRenderPass(scene, { name: "Debugger Culled", output: "debuggerCulled" }, options);
+		scene.render();
+		const captured = captureCustomRenderPassFrameDebugger(scene, { passLimit: 2, resourceLimit: 1 }, options);
+		expect(captured).toMatchObject({
+			captured: true,
+			captureId: 1,
+			authoredPassCount: 3,
+			activePassCount: 3,
+			passPage: { total: 3, count: 2, hasMore: true },
+			resourcePage: { total: 3, count: 1, hasMore: true },
+		});
+		expect(getCustomRenderPassFrameDebugger(scene, { passType: "raster", passLimit: 8 })).toMatchObject({
+			captured: true,
+			passPage: { total: 1 },
+			passes: [expect.objectContaining({ id: raster.id })],
+		});
+
+		const isolated = setCustomRenderPassFrameIsolation(scene, { id: consumer.id }, options);
+		expect(isolated).toMatchObject({ isolationPassId: consumer.id, executionOrder: [raster.id, consumer.id], activePassCount: 2, persisted: false, snapshotCleared: true });
+		expect(getCustomRenderPassFrameDebugger(scene, {})).toMatchObject({ captured: false, isolationPassId: consumer.id });
+		scene.render();
+		expect(captureCustomRenderPassFrameDebugger(scene, {}, options)).toMatchObject({ isolationPassId: consumer.id, activePassCount: 2, culledPassCount: 1 });
+		expect(listCustomRenderPasses(scene).passes.map((pass: any) => pass.enabled)).toEqual([true, true, true]);
+		expect(setCustomRenderPassFrameIsolation(scene, { clear: true }, options)).toMatchObject({ isolationPassId: null, activePassCount: 3 });
 	});
 
 	test("persists native compute passes and supports authored buffer workflows while reporting WebGPU capability", async () => {

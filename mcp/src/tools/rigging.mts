@@ -5,6 +5,21 @@ import { z } from "zod";
 import { callTextTool } from "./helpers.mjs";
 
 const vector = z.array(z.number()).length(3);
+const twoBoneIKUnityFields = {
+	targetPositionWeight: z.number().min(0).max(1).optional().describe("Unity-style target-position influence; defaults to 1."),
+	targetRotationWeight: z.number().min(0).max(1).optional().describe("Unity-style Tip world-rotation influence from the target; defaults to 0 and requires a child Tip bone."),
+	hintWeight: z
+		.number()
+		.min(0)
+		.max(1)
+		.optional()
+		.describe("Unity-style pole/hint influence; 0 preserves the original animated bend plane and 1 points fully toward the authored pole target. Defaults to 1."),
+	maintainTargetPositionOffset: z
+		.boolean()
+		.optional()
+		.describe("Capture the effective chain endpoint in target-local space and preserve that position offset as the target moves/rotates."),
+	maintainTargetRotationOffset: z.boolean().optional().describe("Capture the Tip-to-target quaternion offset and preserve it while applying target rotation."),
+};
 const humanoidMapping = z.record(z.string(), z.string().nullable()).describe("Human-role to skeleton bone-name map. Use null to clear a role when patching.");
 const humanoidBodyParts = z
 	.object({
@@ -33,6 +48,57 @@ const rigFullBodyEffector = z
 		rotationWeight: z.number().min(0).max(1).optional().describe("Target world-rotation influence; defaults to 0."),
 	})
 	.strict();
+const rigCustomJobData = z
+	.record(z.string().min(1).max(128), z.unknown())
+	.describe("Bounded JSON data copied into the registered TypeScript job on each update. The editor enforces depth, entry-count, finite-number, safe-key, and 64-KiB limits.");
+const rigCustomJobFields = {
+	jobType: z
+		.string()
+		.regex(/^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$/)
+		.optional()
+		.describe("Project-script job registration id from list_animation_rig_job_types; required for customJob creation."),
+	jobVersion: z.number().int().min(1).max(100000).optional().describe("Serialized job-data version; defaults to the registered type version or 1."),
+	boneNames: z.array(z.string().min(1).max(512)).max(64).optional().describe("Ordered, unique skeleton-bone handles exposed to the custom job."),
+	nodeIds: z.array(z.string().min(1).max(512)).max(64).optional().describe("Ordered, unique TransformNode handles exposed to the custom job."),
+	jobData: rigCustomJobData.optional(),
+};
+const rigBakeFields = {
+	skeletonId: z.string().min(1).max(512).describe("Skeleton whose selected rig layers are evaluated and baked."),
+	sourceAnimationGroupName: z.string().min(1).max(256).describe("Existing AnimationGroup sampled before the post-animation rig layers are evaluated."),
+	layerIds: z.array(z.string().min(1).max(256)).min(1).max(64).optional().describe("Optional exact rig-layer subset. Omit to use every layer belonging to the skeleton."),
+	from: z.number().min(-1000000000).max(1000000000).optional().describe("Optional first source frame, contained within the AnimationGroup range."),
+	to: z.number().min(-1000000000).max(1000000000).optional().describe("Optional last source frame, greater than from and contained within the AnimationGroup range."),
+	sampleRate: z.number().min(1).max(120).optional().describe("Samples per second; defaults to the source clip frame rate. Bounded to 1–120."),
+};
+const rigConstraintBakeFields = {
+	...rigBakeFields,
+	constraintRefs: z
+		.array(z.object({ layerId: z.string().min(1).max(256), constraintId: z.string().min(1).max(256) }).strict())
+		.min(1)
+		.max(256)
+		.optional()
+		.describe("Optional exact inverse-capable layer/constraint pairs. Omit to use all supported enabled constraints in the selected layers."),
+};
+const twoBoneIKBakeSchema = z
+	.object({
+		skeletonId: z.string().min(1).max(512).describe("Skeleton whose enabled native Two-Bone IK controllers are inverted into control curves."),
+		sourceAnimationGroupName: z.string().min(1).max(256).describe("Existing ordinary skeleton AnimationGroup sampled as the desired pose."),
+		ikControllerIds: z
+			.array(z.string().min(1).max(256))
+			.min(1)
+			.max(128)
+			.optional()
+			.describe("Optional exact native IK controller ids. Omit to use every enabled native Two-Bone IK controller on the skeleton."),
+		from: z.number().min(-1000000000).max(1000000000).optional().describe("Optional first source frame, contained within the AnimationGroup range."),
+		to: z.number().min(-1000000000).max(1000000000).optional().describe("Optional last source frame, greater than from and contained within the AnimationGroup range."),
+		sampleRate: z.number().min(1).max(120).optional().describe("Samples per second; defaults to the source clip frame rate. Bounded to 1–120."),
+	})
+	.strict()
+	.superRefine((value, context) => {
+		if (value.ikControllerIds && new Set(value.ikControllerIds).size !== value.ikControllerIds.length) {
+			context.addIssue({ code: "custom", path: ["ikControllerIds"], message: "ikControllerIds must not contain duplicates." });
+		}
+	});
 const skinWeightInfluence = z
 	.object({
 		boneName: z.string().min(1).max(512).describe("Exact bone name from the mesh's bound skeleton."),
@@ -423,15 +489,172 @@ export function registerRiggingTools(server: McpServer): void {
 		async (): Promise<CallToolResult> => callTextTool("list_sprite_ik_controllers", {})
 	);
 	server.registerTool(
+		"list_animation_rig_job_types",
+		{
+			title: "List Custom Animation Rig Job Types",
+			description:
+				"List Unity-style custom weighted Animation Rig job definitions registered by loaded project TypeScript modules. Returns stable id, display name, description, serialized data version, root-motion support, and bounded default data for authoring customJob constraints.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("list_animation_rig_job_types", args)
+	);
+	server.registerTool(
+		"get_animation_rig_profile",
+		{
+			title: "Get Animation Rig CPU Profile",
+			description:
+				"Read opt-in CPU timing from the exact shared Animation Rig evaluator used by editor preview, manual/bake evaluation, and exported projects. Returns bounded newest-first timeline samples, scene/layer/constraint min/max/average/last duration summaries, applied/failed/skipped counters, sampling settings, pagination, and explicit dropped/truncated evidence. Timings are CPU wall-clock measurements and are never presented as GPU timing.",
+			inputSchema: z
+				.object({
+					skeletonId: z.string().min(1).max(512).optional().describe("Optional exact skeleton id filter."),
+					layerId: z.string().min(1).max(256).optional().describe("Optional exact rig-layer id filter."),
+					constraintId: z.string().min(1).max(256).optional().describe("Optional exact constraint id; requires layerId."),
+					includeSamples: z.boolean().optional().describe("Include bounded newest-first hierarchical timeline samples; defaults to false."),
+					sampleOffset: z.number().int().min(0).optional().describe("Matching retained samples to skip; defaults to 0."),
+					sampleLimit: z.number().int().min(1).max(120).optional().describe("Maximum returned timeline samples; defaults to 20."),
+				})
+				.strict()
+				.superRefine((value, context) => {
+					if (value.constraintId && !value.layerId) {
+						context.addIssue({ code: "custom", path: ["constraintId"], message: "constraintId requires layerId." });
+					}
+				}),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_animation_rig_profile", args)
+	);
+	server.registerTool(
+		"set_animation_rig_profile",
+		{
+			title: "Set Animation Rig CPU Profiling",
+			description:
+				"Enable or disable transient CPU profiling around the shared Animation Rig evaluator and configure a 1–256-sample ring plus a 1–120-evaluation sampling interval. Enabling is opt-in because fine-grained per-layer/per-constraint timers add CPU overhead. Existing history is retained; reducing capacity drops oldest samples with an explicit counter.",
+			inputSchema: z
+				.object({
+					enabled: z.boolean().optional(),
+					sampleCapacity: z.number().int().min(1).max(256).optional().describe("Retained newest timeline sample capacity; defaults to 120."),
+					sampleEveryNEvaluations: z.number().int().min(1).max(120).optional().describe("Capture one detailed sample every N rig evaluations; defaults to 1."),
+				})
+				.strict()
+				.refine((value) => value.enabled !== undefined || value.sampleCapacity !== undefined || value.sampleEveryNEvaluations !== undefined, {
+					message: "Provide enabled, sampleCapacity, or sampleEveryNEvaluations.",
+				}),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_animation_rig_profile", args)
+	);
+	server.registerTool(
+		"clear_animation_rig_profile",
+		{
+			title: "Clear Animation Rig CPU Profile",
+			description:
+				"Clear transient Animation Rig timeline samples, summaries, overflow counters, and evaluation counters while retaining the current enabled/capacity/interval settings.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("clear_animation_rig_profile", args)
+	);
+	server.registerTool(
 		"list_rig_layers",
 		{
 			title: "List Animation Rig Layers",
 			description:
-				"List persisted post-animation rig layers in deterministic evaluation order, including layer weights, enabled state, all supported constraints, captured offsets/rest rotations, and validity. Results include Chain IK evidence, weighted position/aim diagnostics, and Full-Body IK per-effector reachability plus average/maximum error.",
+				"List persisted post-animation rig layers in deterministic evaluation order, including layer weights, enabled state, all built-in and custom constraints, captured offsets/rest rotations, and validity. Custom jobs report registration/version validation plus create/update/root-motion/animation/error/timing lifecycle evidence.",
 			inputSchema: z.object({ skeletonId: z.string().min(1).optional().describe("Optional skeleton id filter.") }).strict(),
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("list_rig_layers", args)
+	);
+	server.registerTool(
+		"inspect_rig_to_skeleton_bake",
+		{
+			title: "Inspect Rig To Skeleton Bake",
+			description:
+				"Plan a Unity-style Bake To Skeleton operation without changing the scene. Resolves the source AnimationGroup, ordered rig-layer subset, constrained bone closure, temporal Damped Transform count, exact sample/track/key bounds, invalid references, and an exact SHA-256 lease. The bake samples source motion, evaluates the real post-animation rig backend at a fixed step, and produces ordinary editable bone position/quaternion/scale curves.",
+			inputSchema: z.object(rigBakeFields).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("inspect_rig_to_skeleton_bake", args)
+	);
+	server.registerTool(
+		"bake_rig_to_skeleton_animation",
+		{
+			title: "Bake Rig To Skeleton Animation",
+			description:
+				"Execute an inspected Unity-style Bake To Skeleton plan into a new ordinary editable AnimationGroup. Requires the exact fingerprint from inspect_rig_to_skeleton_bake, never overwrites an existing group, bounds work to 4,096 samples/256 bones/1,000,000 keys, uses deterministic fixed-step Damped Transform history, preserves quaternion continuity, and restores the complete source properties, skeleton pose, and temporal state on success or failure.",
+			inputSchema: z
+				.object({
+					...rigBakeFields,
+					outputName: z.string().min(1).max(256).describe("Unique name for the new editable AnimationGroup."),
+					expectedFingerprint: z
+						.string()
+						.regex(/^[a-f0-9]{64}$/)
+						.describe("Exact current fingerprint from inspect_rig_to_skeleton_bake using identical plan options."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("bake_rig_to_skeleton_animation", args)
+	);
+	server.registerTool(
+		"inspect_rig_to_constraint_bake",
+		{
+			title: "Inspect Rig To Constraint Bake",
+			description:
+				"Plan Unity-style Bake To Constraint without changing the scene. Selects only inverse-capable Multi-Parent, Multi-Position, and Multi-Aim constraints, identifies exact skeleton curves transferred to rig controls and source tracks preserved, validates full-weight/axis/reference requirements, bounds samples/controls/keys, and returns an exact SHA-256 lease. Forward-only constraint types are explicitly reported rather than falsely inverted.",
+			inputSchema: z.object(rigConstraintBakeFields).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("inspect_rig_to_constraint_bake", args)
+	);
+	server.registerTool(
+		"bake_rig_to_constraint_animation",
+		{
+			title: "Bake Rig To Constraint Animation",
+			description:
+				"Execute an exact inspected skeleton-to-rig-control transfer into a new ordinary editable AnimationGroup. Removes only the selected constraints' driven skeleton channels, preserves unrelated source tracks, bakes local control position/quaternion curves, forward-validates every sample through the real rig evaluator within 0.05 cm/0.25 degrees, never overwrites, and restores source properties, controls, skeleton pose, and temporal state on success or failure.",
+			inputSchema: z
+				.object({
+					...rigConstraintBakeFields,
+					outputName: z.string().min(1).max(256).describe("Unique name for the new editable control AnimationGroup."),
+					expectedFingerprint: z
+						.string()
+						.regex(/^[a-f0-9]{64}$/)
+						.describe("Exact current fingerprint from inspect_rig_to_constraint_bake using identical plan options."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("bake_rig_to_constraint_animation", args)
+	);
+	server.registerTool(
+		"inspect_two_bone_ik_constraint_bake",
+		{
+			title: "Inspect Two-Bone IK Constraint Bake",
+			description:
+				"Plan an exact native Two-Bone IK Bake To Constraint transfer without changing the scene. Resolves root/mid/tip chains and target plus optional pole/hint controls, identifies root/mid and enabled Tip rotation tracks removed, reports target position/quaternion and hint position curves to create, supports captured target position/rotation offsets, requires exact inverse-capable weights, rejects overlapping controls/chains, bounds samples/controllers/keys, and returns an exact SHA-256 lease for deterministic forward validation through the real shared runtime.",
+			inputSchema: twoBoneIKBakeSchema,
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("inspect_two_bone_ik_constraint_bake", args)
+	);
+	server.registerTool(
+		"bake_two_bone_ik_constraint_animation",
+		{
+			title: "Bake Two-Bone IK Constraint Animation",
+			description:
+				"Execute an inspected native Two-Bone IK skeleton-to-control transfer into a new ordinary editable AnimationGroup. Writes local target position/quaternion and optional pole/hint position curves, exactly inverts captured target offsets, removes only selected root/mid and enabled Tip rotation tracks, preserves unrelated source tracks, forward-validates every sample within 0.05 cm and 0.25 degrees through the shared runtime, never overwrites, and restores source, skeleton, mesh, and control state on success or failure.",
+			inputSchema: twoBoneIKBakeSchema.extend({
+				outputName: z.string().min(1).max(256).describe("Unique name for the new editable IK-control AnimationGroup."),
+				expectedFingerprint: z
+					.string()
+					.regex(/^[a-f0-9]{64}$/)
+					.describe("Exact current fingerprint from inspect_two_bone_ik_constraint_bake using identical plan options."),
+			}),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("bake_two_bone_ik_constraint_animation", args)
 	);
 	server.registerTool(
 		"create_rig_layer",
@@ -485,13 +708,24 @@ export function registerRiggingTools(server: McpServer): void {
 		{
 			title: "Create Animation Rig Constraint",
 			description:
-				"Append an ordered constraint to one rig layer. Supports multiParent, twist, chainIk, multiPosition, multiAim, fullBodyIk, overrideTransform, dampedTransform, and blendTransform. Transform constraints support captured offsets, independent position/rotation weights and channel masks; damping is temporal and blend uses two sources.",
+				"Append an ordered constraint to one rig layer. Supports all built-ins plus customJob, which binds serialized JSON and ordered bone/node handles to a project-registered TypeScript Animation Rig job. The shared preview/export runtime runs create, update, ProcessRootMotion, ProcessAnimation, and destroy lifecycle stages with the layer/constraint weight.",
 			inputSchema: z
 				.object({
 					layerId: z.string().min(1).max(256),
 					id: z.string().min(1).max(256).optional(),
 					name: z.string().min(1).max(256).optional(),
-					type: z.enum(["multiParent", "twist", "chainIk", "multiPosition", "multiAim", "fullBodyIk", "overrideTransform", "dampedTransform", "blendTransform"]),
+					type: z.enum([
+						"multiParent",
+						"twist",
+						"chainIk",
+						"multiPosition",
+						"multiAim",
+						"fullBodyIk",
+						"overrideTransform",
+						"dampedTransform",
+						"blendTransform",
+						"customJob",
+					]),
 					weight: z.number().min(0).max(1).optional(),
 					enabled: z.boolean().optional(),
 					boneName: z.string().min(1).max(512).optional().describe("Target bone for multiParent, multiPosition, or multiAim."),
@@ -521,6 +755,7 @@ export function registerRiggingTools(server: McpServer): void {
 					positionDamping: z.number().min(0).max(1).optional().describe("dampedTransform position damping; 0 is responsive and 1 is slow."),
 					rotationDamping: z.number().min(0).max(1).optional().describe("dampedTransform rotation damping; 0 is responsive and 1 is slow."),
 					blend: z.number().min(0).max(1).optional().describe("blendTransform source interpolation; 0 selects A and 1 selects B."),
+					...rigCustomJobFields,
 				})
 				.strict(),
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -532,7 +767,7 @@ export function registerRiggingTools(server: McpServer): void {
 		{
 			title: "Set Animation Rig Constraint",
 			description:
-				"Rename, enable/disable, or reweight one constraint. Structural edits recapture/validate type-specific data, including Full-Body IK effectors and Override/Damped/Blend sources, offsets, weights, masks, damping, or blend.",
+				"Rename, enable/disable, or reweight one constraint. Structural edits recapture/validate type-specific data, including custom job type/version, ordered bone/node handles, and complete bounded JSON data.",
 			inputSchema: z
 				.object({
 					layerId: z.string().min(1).max(256),
@@ -567,6 +802,7 @@ export function registerRiggingTools(server: McpServer): void {
 					positionDamping: z.number().min(0).max(1).optional(),
 					rotationDamping: z.number().min(0).max(1).optional(),
 					blend: z.number().min(0).max(1).optional(),
+					...rigCustomJobFields,
 				})
 				.strict(),
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -778,8 +1014,8 @@ export function registerRiggingTools(server: McpServer): void {
 		{
 			title: "List IK controllers",
 			description: "List persistent native Babylon two-bone IK controllers and live status.",
-			inputSchema: z.object({}),
-			annotations: { readOnlyHint: true },
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (): Promise<CallToolResult> => callTextTool("list_ik_controllers", {})
 	);
@@ -788,20 +1024,24 @@ export function registerRiggingTools(server: McpServer): void {
 		{
 			title: "Create two-bone IK controller",
 			description:
-				"Create a persistent Babylon BoneIKController. The selected bone must have a parent and either a positive length or a child. Use an empty mesh or another transform node as target; all IDs come from the scene tools.",
-			inputSchema: z.object({
-				id: z.string().optional(),
-				skeletonId: z.string(),
-				boneName: z.string(),
-				meshId: z.string(),
-				targetNodeId: z.string(),
-				poleTargetNodeId: z.string().optional(),
-				poleAngle: z.number().optional(),
-				bendAxis: vector.optional(),
-				maxAngle: z.number().positive().optional(),
-				slerpAmount: z.number().min(0).max(1).optional(),
-				enabled: z.boolean().optional(),
-			}),
+				"Create a persistent native Two-Bone IK constraint shared by editor preview and exported games. The selected mid/lower bone needs a parent and length/child; target rotation additionally needs a child Tip. Supports Unity-style target position/rotation weights, pole/hint weight, and captured target-local position/quaternion offsets.",
+			inputSchema: z
+				.object({
+					id: z.string().optional(),
+					skeletonId: z.string(),
+					boneName: z.string(),
+					meshId: z.string(),
+					targetNodeId: z.string(),
+					poleTargetNodeId: z.string().optional(),
+					poleAngle: z.number().optional(),
+					bendAxis: vector.optional(),
+					maxAngle: z.number().positive().optional(),
+					slerpAmount: z.number().min(0).max(1).optional(),
+					...twoBoneIKUnityFields,
+					enabled: z.boolean().optional(),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("create_ik_controller", args)
 	);
@@ -809,22 +1049,37 @@ export function registerRiggingTools(server: McpServer): void {
 		"set_ik_controller",
 		{
 			title: "Set IK controller",
-			description: "Enable/disable an IK controller or update its pole target, pole angle, bend axis, maximum angle, or smoothing.",
-			inputSchema: z.object({
-				id: z.string(),
-				enabled: z.boolean().optional(),
-				poleTargetNodeId: z.string().optional().describe("Optional transform/mesh pole target; changes recreate only the live controller."),
-				poleAngle: z.number().optional(),
-				bendAxis: vector.optional(),
-				maxAngle: z.number().positive().optional(),
-				slerpAmount: z.number().min(0).max(1).optional(),
-			}),
+			description:
+				"Update a native Two-Bone IK constraint, including Unity-style target position/rotation/hint weights and maintain-offset toggles. Hint Weight blends from the original animated bend plane toward the pole target. Enabling a maintain-offset toggle recaptures the current target-local endpoint or Tip rotation offset. Null detaches the pole target.",
+			inputSchema: z
+				.object({
+					id: z.string(),
+					enabled: z.boolean().optional(),
+					poleTargetNodeId: z
+						.string()
+						.min(1)
+						.nullable()
+						.optional()
+						.describe("Transform/mesh pole target, or null to detach the current pole target; changes recreate only the live controller."),
+					poleAngle: z.number().optional(),
+					bendAxis: vector.optional(),
+					maxAngle: z.number().positive().optional(),
+					slerpAmount: z.number().min(0).max(1).optional(),
+					...twoBoneIKUnityFields,
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_ik_controller", args)
 	);
 	server.registerTool(
 		"delete_ik_controller",
-		{ title: "Delete IK controller", description: "Stop and delete a persistent IK controller.", inputSchema: z.object({ id: z.string() }) },
+		{
+			title: "Delete IK controller",
+			description: "Stop and delete a persistent IK controller.",
+			inputSchema: z.object({ id: z.string().min(1).max(256) }).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
 		async (args): Promise<CallToolResult> => callTextTool("delete_ik_controller", args)
 	);
 }

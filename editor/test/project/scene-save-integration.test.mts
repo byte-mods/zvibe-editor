@@ -1,7 +1,8 @@
 import { tmpdir } from "os";
 import { join } from "path/posix";
 
-import { FreeCamera, MeshBuilder, NullEngine, Scene, StandardMaterial, TransformNode, Vector3 } from "babylonjs";
+import { FreeCamera, Mesh, MeshBuilder, NullEngine, Scene, StandardMaterial, TransformNode, Vector3 } from "babylonjs";
+import { ALEMBIC_OBJECT_METADATA_KEY, ALEMBIC_PLAYER_METADATA_KEY } from "babylonjs-editor-tools";
 import { mkdir, mkdtemp, pathExists, readJSON, remove } from "fs-extra";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -39,6 +40,21 @@ describe("project/save additive scene integration", () => {
 		meshA.id = "shared-mesh-id";
 		const meshB = MeshBuilder.CreateBox("B Mesh", { size: 2 }, scene);
 		meshB.id = "shared-mesh-id";
+		const emptyMeshB = new Mesh("B Empty Mesh", scene);
+		emptyMeshB.id = "empty-mesh-id";
+		const alembicRoot = new TransformNode("Alembic Root", scene);
+		alembicRoot.id = "alembic-root-id";
+		alembicRoot.metadata = {
+			[ALEMBIC_PLAYER_METADATA_KEY]: { version: 1, id: alembicRoot.id, name: alembicRoot.name, assetPath: "assets/cache.abc", revision: 3 },
+		};
+		const generatedAlembicMesh = MeshBuilder.CreateBox("Generated Alembic Mesh", { size: 3 }, scene);
+		generatedAlembicMesh.id = "generated-alembic-mesh-id";
+		generatedAlembicMesh.parent = alembicRoot;
+		generatedAlembicMesh.metadata = { [ALEMBIC_OBJECT_METADATA_KEY]: { version: 1, objectId: "mesh-0" } };
+		const generatedAlembicCamera = new FreeCamera("Generated Alembic Camera", Vector3.Zero(), scene);
+		generatedAlembicCamera.id = "generated-alembic-camera-id";
+		generatedAlembicCamera.parent = alembicRoot;
+		generatedAlembicCamera.metadata = { [ALEMBIC_OBJECT_METADATA_KEY]: { version: 1, objectId: "camera-0" } };
 		const sharedMaterial = new StandardMaterial("Shared Material", scene);
 		sharedMaterial.id = "shared-material";
 		meshA.material = sharedMaterial;
@@ -52,7 +68,16 @@ describe("project/save additive scene integration", () => {
 			lightingScene: "assets/A.scene",
 		});
 		sceneWorkspace.claimObjects("assets/A.scene", [nodeA, meshA, meshA.geometry!, sharedMaterial]);
-		sceneWorkspace.claimObjects("assets/B.scene", [nodeB, meshB, meshB.geometry!]);
+		sceneWorkspace.claimObjects("assets/B.scene", [
+			nodeB,
+			meshB,
+			meshB.geometry!,
+			emptyMeshB,
+			alembicRoot,
+			generatedAlembicMesh,
+			generatedAlembicMesh.geometry!,
+			generatedAlembicCamera,
+		]);
 		sceneWorkspace.setLoadedSceneHandle("assets/A.scene", { configuration: {}, dispose: vi.fn() });
 		sceneWorkspace.setLoadedSceneHandle("assets/B.scene", {
 			configuration: {
@@ -89,6 +114,28 @@ describe("project/save additive scene integration", () => {
 		expect(serializedMesh.meshes[0].name).toBe("B Mesh");
 		expect(serializedMesh.meshes[0].boundingBoxMaximum).toEqual([1, 1, 1]);
 		expect(serializedMesh.materials).toContainEqual(expect.objectContaining({ id: "shared-material" }));
+		const editableSource = serializedMesh.meshes[0].metadata.babylonEditorEditableMeshSource;
+		expect(editableSource).toMatchObject({
+			version: 1,
+			model: "unity-editable-source-generated-export-v1",
+			revision: 1,
+			exportSettingsRevision: 1,
+			exportSettings: { optimize: true },
+			lastGenerated: {
+				file: "generatedGeometries/shared-mesh-id.babylonbinarymeshdata",
+				sourceFingerprint: expect.stringMatching(/^mesh-editable-source-fnv32x2-v1:/),
+				generatedFingerprint: expect.stringMatching(/^mesh-editable-source-fnv32x2-v1:/),
+			},
+		});
+		expect(await pathExists(join(sceneBPath, "geometries", `${meshB.geometry!.id}.babylonbinarymeshdata`))).toBe(true);
+		expect(await pathExists(join(sceneBPath, editableSource.lastGenerated.file))).toBe(true);
+		const serializedEmptyMesh = await readJSON(join(sceneBPath, "meshes/empty-mesh-id.json"));
+		expect(serializedEmptyMesh.meshes[0]).toMatchObject({ id: "empty-mesh-id", name: "B Empty Mesh" });
+		expect(serializedEmptyMesh.meshes[0].metadata?.babylonEditorEditableMeshSource).toBeUndefined();
+		const serializedAlembicRoot = await readJSON(join(sceneBPath, "nodes/alembic-root-id.json"));
+		expect(serializedAlembicRoot.metadata[ALEMBIC_PLAYER_METADATA_KEY]).toMatchObject({ id: "alembic-root-id", assetPath: "assets/cache.abc", revision: 3 });
+		expect(await pathExists(join(sceneBPath, "meshes/generated-alembic-mesh-id.json"))).toBe(false);
+		expect(await pathExists(join(sceneBPath, "cameras/generated-alembic-camera-id.json"))).toBe(false);
 		const configuration = await readJSON(join(sceneBPath, "config.json"));
 		expect(configuration).toMatchObject({
 			clearColor: [1, 0, 0, 1],

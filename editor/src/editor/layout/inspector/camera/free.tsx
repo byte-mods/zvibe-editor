@@ -10,6 +10,7 @@ import { onNodeModifiedObservable } from "../../../../tools/observables";
 import { onGizmoNodeChangedObservable } from "../../preview/gizmo/gizmo";
 
 import { IEditorInspectorImplementationProps } from "../inspector";
+import { NodeRenderingLayersInspector } from "../rendering-layers";
 
 import { EditorInspectorKeyField } from "../fields/key";
 import { EditorInspectorNumberField } from "../fields/number";
@@ -23,6 +24,7 @@ import { CustomMetadataInspector } from "../metadata/custom-metadata";
 import { CameraModeInspector } from "./utils/mode";
 import { FocalLengthInspector } from "./utils/focal";
 import { CameraDollyInspector } from "./utils/dolly";
+import { CameraCinemachineInspector } from "./utils/cinemachine";
 
 export class EditorFreeCameraInspector extends Component<IEditorInspectorImplementationProps<FreeCamera>> {
 	/**
@@ -49,6 +51,8 @@ export class EditorFreeCameraInspector extends Component<IEditorInspectorImpleme
 					<EditorInspectorNumberField object={this.props.object} property="speed" label="Speed" />
 				</EditorInspectorSectionField>
 
+				<NodeRenderingLayersInspector editor={this.props.editor} node={this.props.object} onUpdate={() => this.forceUpdate()} />
+
 				<EditorInspectorSectionField title="Transforms">
 					<EditorInspectorVectorField label={<div className="w-14">Position</div>} object={this.props.object} property="position" />
 					<EditorInspectorVectorField asDegrees label={<div className="w-14">Rotation</div>} object={this.props.object} property="rotation" step={0.1} />
@@ -63,6 +67,7 @@ export class EditorFreeCameraInspector extends Component<IEditorInspectorImpleme
 				<CameraModeInspector camera={this.props.object} onUpdate={() => this.forceUpdate()} />
 
 				<CameraDollyInspector editor={this.props.editor} camera={this.props.object} />
+				<CameraCinemachineInspector editor={this.props.editor} camera={this.props.object} />
 
 				<EditorInspectorSectionField title="Camera">
 					<EditorInspectorNumberField object={this.props.object} property="speed" label="Speed" min={0} />

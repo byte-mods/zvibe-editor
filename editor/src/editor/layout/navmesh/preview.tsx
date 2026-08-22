@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 
 import { RecastNavigationJSPluginV2 } from "babylonjs-addons";
-import { Engine, Scene, Mesh, StandardMaterial, Color3, Vector3, ArcRotateCamera } from "babylonjs";
+import { Engine, Scene, Mesh, Vector3, ArcRotateCamera } from "babylonjs";
+
+import { INavMeshAreaConfiguration } from "./types";
+import { createNavMeshAreaDebugMeshes } from "./debug";
 
 export interface INavMeshEditorPreviewProps {
-	mesh: Mesh | null;
+	meshes: readonly Mesh[];
 	plugin: RecastNavigationJSPluginV2;
+	areas: readonly INavMeshAreaConfiguration[];
 }
 
 export function NavMeshEditorPreview(props: INavMeshEditorPreviewProps) {
 	const [scene, setScene] = useState<Scene | null>(null);
-	const [mesh, setMesh] = useState<Mesh | null>(null);
+	const [meshes, setMeshes] = useState<Mesh[]>([]);
 	const [camera, setCamera] = useState<ArcRotateCamera | null>(null);
 
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -44,38 +48,35 @@ export function NavMeshEditorPreview(props: INavMeshEditorPreviewProps) {
 	}, []);
 
 	useEffect(() => {
-		if (mesh && scene && !camera) {
-			const bb = mesh.getBoundingInfo().boundingBox;
-			const distance = Vector3.Distance(bb.minimumWorld, bb.maximumWorld);
+		if (meshes.length && scene && !camera) {
+			const minimum = meshes.reduce(
+				(value, mesh) => Vector3.Minimize(value, mesh.getBoundingInfo().boundingBox.minimumWorld),
+				meshes[0].getBoundingInfo().boundingBox.minimumWorld
+			);
+			const maximum = meshes.reduce(
+				(value, mesh) => Vector3.Maximize(value, mesh.getBoundingInfo().boundingBox.maximumWorld),
+				meshes[0].getBoundingInfo().boundingBox.maximumWorld
+			);
+			const distance = Vector3.Distance(minimum, maximum);
 
-			const camera = new ArcRotateCamera("camera", Math.PI * 0.25, Math.PI * 0.25, distance, bb.center, scene, true);
+			const camera = new ArcRotateCamera("camera", Math.PI * 0.25, Math.PI * 0.25, distance, Vector3.Center(minimum, maximum), scene, true);
 			camera.wheelPrecision = 1;
 			camera.attachControl();
 
 			setCamera(camera);
 		}
-	}, [mesh, scene, camera]);
+	}, [meshes, scene, camera]);
 
 	useEffect(() => {
-		return () => {
-			mesh?.dispose();
-		};
-	}, [mesh]);
-
-	useEffect(() => {
-		if (scene && props.mesh) {
-			const mesh = props.plugin.createDebugNavMesh(scene);
-
-			const debugMaterial = new StandardMaterial("navmesh-debug-material", scene);
-			debugMaterial.emissiveColor = Color3.Magenta();
-			debugMaterial.disableLighting = true;
-			debugMaterial.transparencyMode = StandardMaterial.MATERIAL_ALPHABLEND;
-			debugMaterial.alpha = 0.35;
-			mesh.material = debugMaterial;
-
-			setMesh(mesh);
+		if (!scene || !props.meshes.length) {
+			return;
 		}
-	}, [props.mesh, props.plugin, scene]);
+		const debugMeshes = createNavMeshAreaDebugMeshes(props.plugin, scene, props.areas);
+		setMeshes(debugMeshes);
+		return () => {
+			debugMeshes.forEach((mesh) => mesh.dispose(false, true));
+		};
+	}, [props.meshes, props.plugin, props.areas, scene]);
 
 	return (
 		<div className="flex-1 h-full p-2">

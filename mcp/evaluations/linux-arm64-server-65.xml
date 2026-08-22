@@ -1,0 +1,42 @@
+<evaluation>
+	<qa_pair>
+		<question>Inspect a Headless Linux ARM64 source-build plan. Which public runtime major is fixed?</question>
+		<answer>Node 22</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the target metadata. Which exact container platform is emitted?</question>
+		<answer>linux/arm64</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the source-build artifacts. Which file contains the generated authoritative server host?</question>
+		<answer>server.mjs</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect scaffold ownership. Which game-authored hook file is preserved across regeneration and removal?</question>
+		<answer>server-game.mjs</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect generated build evidence. What descriptor filename contains the exact artifact hashes?</question>
+		<answer>zvibe-linux-arm64-source-build.json</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the runtime package restrictions. Which operating system and CPU values are declared?</question>
+		<answer>linux and arm64</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect exact verification. Which two leases must the caller provide?</question>
+		<answer>the exact Build Pipeline revision and source-build plan fingerprint</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect artifact verification. Which digest algorithm detects changed source-package files?</question>
+		<answer>SHA-256</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the native-dependency boundary. Does the portable builder cross-compile third-party native addons? Respond True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect the compatibility boundary. Does this flow use Unity source code, IL2CPP, or Unity internal build tools? Respond True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+</evaluation>

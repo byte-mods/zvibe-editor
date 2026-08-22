@@ -4,6 +4,7 @@ import { Tools } from "@babylonjs/core/Misc/tools.pure.js";
 import * as fflate from "fflate";
 
 import { ITextureImporterSettings, TextureImporterResizeAlgorithm } from "./texture-importer";
+import { textureImporterMipmapDimensions, textureImporterOutputDimensions } from "./texture-processing";
 
 export type HighDynamicRangeFormat = "hdr" | "exr";
 export type HighDynamicRangeCompression = "raw" | "rle" | "zips" | "zip" | "piz" | "pxr24";
@@ -37,6 +38,9 @@ export interface IHighDynamicRangeCubeFace {
 export interface IExecutedHighDynamicRangeMipmap {
 	image: IHighDynamicRangeImage;
 	bytes: Uint8Array;
+	alphaCoverageBefore?: number;
+	alphaCoverageAfter?: number;
+	alphaCoverageScale?: number;
 }
 
 export interface IExecutedHighDynamicRangeTextureImport {
@@ -45,6 +49,8 @@ export interface IExecutedHighDynamicRangeTextureImport {
 	outputBytes: Uint8Array;
 	resized: boolean;
 	alphaRemoved: boolean;
+	transparentColorsDilated: boolean;
+	normalMapGenerated: boolean;
 	equirectangular: boolean;
 	cubeFaceSize: number | null;
 	cubeFaces: IHighDynamicRangeCubeFace[];
@@ -488,6 +494,20 @@ export function resizeHighDynamicRange(image: IHighDynamicRangeImage, maximumSiz
 	const scale = Math.min(maximumSize / image.width, maximumSize / image.height);
 	const width = Math.max(1, Math.round(image.width * scale));
 	const height = Math.max(1, Math.round(image.height * scale));
+	return resizeHighDynamicRangeExact(image, width, height, algorithm);
+}
+
+/** Resamples linear RGBA32F pixels to exact dimensions so NPOT and complete-mip policies cannot drift from LDR builds. */
+export function resizeHighDynamicRangeExact(image: IHighDynamicRangeImage, width: number, height: number, algorithm: TextureImporterResizeAlgorithm): IHighDynamicRangeImage {
+	if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > maximumDimension || height > maximumDimension) {
+		throw new Error("High-dynamic-range target dimensions must be positive integers no larger than " + maximumDimension + ".");
+	}
+	if (width * height > maximumPixels) {
+		throw new Error("High-dynamic-range target dimensions may not exceed " + maximumPixels.toLocaleString() + " pixels.");
+	}
+	if (image.width === width && image.height === height) {
+		return image;
+	}
 	const horizontal = resampleContributions(image.width, width, algorithm);
 	const vertical = resampleContributions(image.height, height, algorithm);
 	const intermediate = new Float32Array(width * image.height * 4);
@@ -517,6 +537,164 @@ export function resizeHighDynamicRange(image: IHighDynamicRangeImage, maximumSiz
 		}
 	}
 	return { ...image, width, height, pixels, statistics: toStatistics(pixels) };
+}
+
+/** Measures float alpha-test coverage with an optional scale used by the bounded preservation search. */
+function highDynamicRangeAlphaCoverage(pixels: Float32Array, alphaTestReference: number, scale = 1): number {
+	let covered = 0;
+	for (let index = 3; index < pixels.length; index += 4) {
+		covered += Math.max(0, Math.min(1, pixels[index] * scale)) >= alphaTestReference ? 1 : 0;
+	}
+	return covered / (pixels.length / 4);
+}
+
+/** Rescales HDR mip alpha toward the base cutout coverage without clipping color values. */
+function preserveHighDynamicRangeAlphaCoverage(pixels: Float32Array, targetCoverage: number, alphaTestReference: number): { before: number; after: number; scale: number } {
+	const before = highDynamicRangeAlphaCoverage(pixels, alphaTestReference);
+	if (before === targetCoverage || targetCoverage === 0) {
+		return { before, after: before, scale: 1 };
+	}
+	let lower = 0;
+	let upper = 255;
+	for (let iteration = 0; iteration < 24; iteration++) {
+		const scale = (lower + upper) / 2;
+		if (highDynamicRangeAlphaCoverage(pixels, alphaTestReference, scale) < targetCoverage) {
+			lower = scale;
+		} else {
+			upper = scale;
+		}
+	}
+	for (let index = 3; index < pixels.length; index += 4) {
+		pixels[index] = Math.max(0, Math.min(1, pixels[index] * upper));
+	}
+	return { before, after: highDynamicRangeAlphaCoverage(pixels, alphaTestReference), scale: upper };
+}
+
+/** Resolves HDR height-map neighbors with the same per-axis wrap modes later applied by Babylon. */
+function highDynamicRangeWrappedCoordinate(value: number, size: number, mode: ITextureImporterSettings["wrapModeU"]): number {
+	if (mode === "clamp" || size === 1) {
+		return Math.max(0, Math.min(size - 1, value));
+	}
+	if (mode === "repeat") {
+		return ((value % size) + size) % size;
+	}
+	const period = size * 2;
+	const repeated = ((value % period) + period) % period;
+	return repeated < size ? repeated : period - repeated - 1;
+}
+
+/** Bleeds finite HDR edge colors through eight transparent texels without clamping color intensity. */
+function dilateHighDynamicRangeTransparentColors(pixels: Float32Array, width: number, height: number): boolean {
+	const resolvedPass = new Uint8Array(width * height);
+	for (let pixel = 0; pixel < resolvedPass.length; pixel++) {
+		resolvedPass[pixel] = pixels[pixel * 4 + 3] > 0 ? 1 : 0;
+	}
+	let changed = false;
+	for (let pass = 2; pass <= 9; pass++) {
+		let passChanged = false;
+		for (let y = 0; y < height; y++) {
+			for (let x = 0; x < width; x++) {
+				const pixel = y * width + x;
+				if (resolvedPass[pixel]) {
+					continue;
+				}
+				let red = 0;
+				let green = 0;
+				let blue = 0;
+				let samples = 0;
+				for (let offsetY = -1; offsetY <= 1; offsetY++) {
+					for (let offsetX = -1; offsetX <= 1; offsetX++) {
+						if ((!offsetX && !offsetY) || x + offsetX < 0 || x + offsetX >= width || y + offsetY < 0 || y + offsetY >= height) {
+							continue;
+						}
+						const neighbor = (y + offsetY) * width + x + offsetX;
+						if (!resolvedPass[neighbor] || resolvedPass[neighbor] >= pass) {
+							continue;
+						}
+						const index = neighbor * 4;
+						red += pixels[index];
+						green += pixels[index + 1];
+						blue += pixels[index + 2];
+						samples++;
+					}
+				}
+				if (samples) {
+					const index = pixel * 4;
+					pixels[index] = red / samples;
+					pixels[index + 1] = green / samples;
+					pixels[index + 2] = blue / samples;
+					resolvedPass[pixel] = pass;
+					passChanged = true;
+					changed = true;
+				}
+			}
+		}
+		if (!passChanged) {
+			break;
+		}
+	}
+	return changed;
+}
+
+interface IPreparedHighDynamicRangeSource {
+	image: IHighDynamicRangeImage;
+	alphaRemoved: boolean;
+	transparentColorsDilated: boolean;
+	normalMapGenerated: boolean;
+}
+
+/** Executes float-preserving alpha, edge, and height-to-normal semantics before resize and encoding. */
+function prepareHighDynamicRangeSource(source: IHighDynamicRangeImage, settings: ITextureImporterSettings): IPreparedHighDynamicRangeSource {
+	const alphaRemoved = source.hasAlpha && settings.alphaSource === "none";
+	const normalMapGenerated = settings.textureType === "normalMap" && settings.normalMapSource === "height";
+	const needsPixels = alphaRemoved || settings.alphaSource === "grayscale" || settings.alphaIsTransparency || normalMapGenerated;
+	if (!needsPixels) {
+		return { image: source, alphaRemoved, transparentColorsDilated: false, normalMapGenerated };
+	}
+	const pixels = source.pixels.slice();
+	// Sampling the untouched source prevents earlier normal writes from feeding later height gradients.
+	const luminance = (x: number, y: number): number => {
+		const resolvedX = highDynamicRangeWrappedCoordinate(x, source.width, settings.wrapModeU);
+		const resolvedY = highDynamicRangeWrappedCoordinate(y, source.height, settings.wrapModeV);
+		const index = (resolvedY * source.width + resolvedX) * 4;
+		return source.pixels[index] * 0.2126 + source.pixels[index + 1] * 0.7152 + source.pixels[index + 2] * 0.0722;
+	};
+	if (normalMapGenerated) {
+		for (let y = 0; y < source.height; y++) {
+			for (let x = 0; x < source.width; x++) {
+				const gradientX = (luminance(x + 1, y) - luminance(x - 1, y)) * settings.normalMapStrength * 2;
+				const gradientY = (luminance(x, y + 1) - luminance(x, y - 1)) * settings.normalMapStrength * 2;
+				const inverseLength = 1 / Math.hypot(gradientX, gradientY, 1);
+				const index = (y * source.width + x) * 4;
+				pixels[index] = -gradientX * inverseLength * 0.5 + 0.5;
+				pixels[index + 1] = -gradientY * inverseLength * 0.5 + 0.5;
+				pixels[index + 2] = inverseLength * 0.5 + 0.5;
+			}
+		}
+	}
+	for (let offset = 0; offset < pixels.length; offset += 4) {
+		pixels[offset + 3] =
+			settings.alphaSource === "none"
+				? 1
+				: settings.alphaSource === "grayscale"
+					? Math.max(0, Math.min(1, source.pixels[offset] * 0.2126 + source.pixels[offset + 1] * 0.7152 + source.pixels[offset + 2] * 0.0722))
+					: pixels[offset + 3];
+	}
+	const transparentColorsDilated =
+		settings.alphaIsTransparency && settings.alphaSource !== "none" ? dilateHighDynamicRangeTransparentColors(pixels, source.width, source.height) : false;
+	const hasAlpha = settings.alphaSource === "grayscale" || (settings.alphaSource === "input" && source.hasAlpha);
+	return {
+		image: {
+			...source,
+			channels: hasAlpha ? 4 : 3,
+			hasAlpha,
+			pixels,
+			statistics: toStatistics(pixels),
+		},
+		alphaRemoved,
+		transparentColorsDilated,
+		normalMapGenerated,
+	};
 }
 
 function floatToRgbe(red: number, green: number, blue: number, output: Uint8Array, offset: number): void {
@@ -779,31 +957,45 @@ export async function executeHighDynamicRangeTextureImport(
 	settings: ITextureImporterSettings
 ): Promise<IExecutedHighDynamicRangeTextureImport> {
 	const source = await decodeHighDynamicRange(bytes, format);
-	let prepared = source;
-	const alphaRemoved = source.hasAlpha && settings.alphaSource === "none";
-	if (alphaRemoved) {
-		const pixels = source.pixels.slice();
-		for (let offset = 3; offset < pixels.length; offset += 4) {
-			pixels[offset] = 1;
-		}
-		prepared = { ...source, channels: 3, hasAlpha: false, pixels, statistics: toStatistics(pixels) };
-	}
-	const output = resizeHighDynamicRange(prepared, settings.maxSize, settings.resizeAlgorithm);
+	const preparedSource = prepareHighDynamicRangeSource(source, settings);
+	const prepared = preparedSource.image;
+	const dimensions = textureImporterOutputDimensions(prepared.width, prepared.height, settings);
+	const output = resizeHighDynamicRangeExact(prepared, dimensions.width, dimensions.height, settings.resizeAlgorithm);
 	const resized = output.width !== source.width || output.height !== source.height;
 	const useRle = settings.compression !== "none";
 	const outputBytes = encodeHighDynamicRange(output, format, useRle);
+	const baseCoverage = settings.mipmapPreserveCoverage && settings.alphaSource !== "none" ? highDynamicRangeAlphaCoverage(output.pixels, settings.mipmapAlphaTestReference) : 0;
 	const mipmaps = settings.generateMipmaps
-		? [2 / 3, 1 / 3]
-				.map((scale) => Math.max(1, Math.floor(Math.max(output.width, output.height) * scale)))
-				.filter((size, index, values) => size !== Math.max(output.width, output.height) && values.indexOf(size) === index)
-				.map((size) => {
-					const image = resizeHighDynamicRange(output, size, settings.resizeAlgorithm);
-					return { image, bytes: encodeHighDynamicRange(image, format, useRle) };
-				})
+		? textureImporterMipmapDimensions(output.width, output.height).map((size) => {
+				const image = resizeHighDynamicRangeExact(output, size.width, size.height, settings.mipmapFilter === "box" ? "bilinear" : "lanczos3");
+				let coverage: ReturnType<typeof preserveHighDynamicRangeAlphaCoverage> | null = null;
+				if (settings.mipmapPreserveCoverage && settings.alphaSource !== "none") {
+					coverage = preserveHighDynamicRangeAlphaCoverage(image.pixels, baseCoverage, settings.mipmapAlphaTestReference);
+					image.statistics = toStatistics(image.pixels);
+				}
+				return {
+					image,
+					bytes: encodeHighDynamicRange(image, format, useRle),
+					...(coverage ? { alphaCoverageBefore: coverage.before, alphaCoverageAfter: coverage.after, alphaCoverageScale: coverage.scale } : {}),
+				};
+			})
 		: [];
 	const equirectangular = isEquirectangularPanorama(output.width, output.height);
 	const cubeFaceSize = equirectangular ? defaultCubeFaceSize(output.width, output.height) : null;
 	const cubeFaces = equirectangular ? convertHighDynamicRangePanoramaToCubeFaces(output, cubeFaceSize!) : [];
 	const environmentBytes = equirectangular ? encodeRadianceHdr(output, useRle) : null;
-	return { source, output, outputBytes, resized, alphaRemoved, equirectangular, cubeFaceSize, cubeFaces, environmentBytes, mipmaps };
+	return {
+		source,
+		output,
+		outputBytes,
+		resized,
+		alphaRemoved: preparedSource.alphaRemoved,
+		transparentColorsDilated: preparedSource.transparentColorsDilated,
+		normalMapGenerated: preparedSource.normalMapGenerated,
+		equirectangular,
+		cubeFaceSize,
+		cubeFaces,
+		environmentBytes,
+		mipmaps,
+	};
 }

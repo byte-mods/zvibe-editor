@@ -5,11 +5,19 @@ import { basename, dirname, extname, join } from "node:path/posix";
 import fs from "fs-extra";
 import {
 	createVideoProbeArguments,
+	createVideoEncoderListArguments,
 	createVideoTranscodeArguments,
+	evaluateImportedVideoCompatibility,
+	IVideoEncoderCapabilities,
+	IVideoEncoderSelection,
 	IVideoImporterSettings,
 	IVideoImportProbe,
 	IVideoImportResult,
+	parseVideoEncoderCapabilities,
 	parseVideoProbe,
+	resolveVideoCodec,
+	resolveVideoImporterPlatformSettings,
+	selectVideoEncoder,
 	videoImporterOutputExtension,
 	videoImportRequiresTranscode,
 } from "babylonjs-editor-tools";
@@ -54,23 +62,55 @@ async function probe(path: string): Promise<IVideoImportProbe> {
 	return parseVideoProbe(JSON.parse(await run(executable("ffprobe"), createVideoProbeArguments(path))));
 }
 
+/** Detects built FFmpeg encoders before accepting an explicit hardware backend. */
+export async function getExportedVideoEncoderCapabilities(): Promise<IVideoEncoderCapabilities> {
+	return parseVideoEncoderCapabilities(await run(executable("ffmpeg"), createVideoEncoderListArguments()));
+}
+
+async function transcode(sourcePath: string, outputPath: string, settings: IVideoImporterSettings, source: IVideoImportProbe): Promise<IVideoEncoderSelection> {
+	const capabilities = await getExportedVideoEncoderCapabilities();
+	const selection = selectVideoEncoder(resolveVideoCodec(sourcePath, settings, source), settings.encoder, capabilities);
+	await run(executable("ffmpeg"), createVideoTranscodeArguments(sourcePath, outputPath, settings, source, selection));
+	return selection;
+}
+
 /** Applies the video importer during CLI packing and returns probe evidence for the runtime sidecar. */
-export async function processExportedVideo(sourcePath: string, requestedOutputPath: string, settings: IVideoImporterSettings): Promise<IVideoImportResult> {
+export async function processExportedVideo(
+	sourcePath: string,
+	requestedOutputPath: string,
+	baseSettings: IVideoImporterSettings,
+	requestedPlatform: unknown = "default"
+): Promise<IVideoImportResult> {
+	const resolved = resolveVideoImporterPlatformSettings(baseSettings, requestedPlatform);
+	const settings = resolved.settings;
 	const source = await probe(sourcePath);
 	const outputPath = join(dirname(requestedOutputPath), `${basename(requestedOutputPath, extname(requestedOutputPath))}${videoImporterOutputExtension(sourcePath, settings)}`);
 	const temporary = `${outputPath}.${randomUUID()}.tmp${extname(outputPath)}`;
 	const sourceDetails = await fs.stat(sourcePath);
 	try {
 		const transcoded = videoImportRequiresTranscode(settings, source);
+		let encoder: IVideoEncoderSelection | null = null;
 		if (transcoded) {
-			await run(executable("ffmpeg"), createVideoTranscodeArguments(sourcePath, temporary, settings, source));
+			encoder = await transcode(sourcePath, temporary, settings, source);
 		} else {
 			await fs.copyFile(sourcePath, temporary);
 		}
 		const output = await probe(temporary);
 		const outputDetails = await fs.stat(temporary);
 		await fs.move(temporary, outputPath, { overwrite: true });
-		return { sourcePath, outputPath, transcoded, settings, source, output, sourceBytes: sourceDetails.size, outputBytes: outputDetails.size };
+		return {
+			sourcePath,
+			outputPath,
+			transcoded,
+			settings,
+			source,
+			output,
+			sourceBytes: sourceDetails.size,
+			outputBytes: outputDetails.size,
+			platform: resolved.platform,
+			compatibility: evaluateImportedVideoCompatibility(output, resolved.platform),
+			encoder,
+		};
 	} catch (error) {
 		await fs.remove(temporary).catch(() => undefined);
 		throw error;

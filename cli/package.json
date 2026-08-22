@@ -9,7 +9,7 @@
 		"test": "vitest run"
 	},
 	"typings": "declaration/src/export.d.mts",
-	"license": "(Apache-2.0)",
+	"license": "Apache-2.0",
 	"bin": {
 		"babylonjs-editor-cli": "./bin/babylonjs-editor-cli.js"
 	},

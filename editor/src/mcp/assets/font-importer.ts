@@ -37,6 +37,7 @@ import {
 } from "babylonjs-editor-tools";
 
 import { projectConfiguration } from "../../project/configuration";
+import { applyImporterArtifactWithAccelerator } from "./import-accelerator";
 import { readAssetMetadata } from "./registry";
 
 const { Msdfgen } = require("msdfgen-wasm") as typeof import("msdfgen-wasm");
@@ -5203,6 +5204,7 @@ export async function processFontImporterOutput(sourcePath: string, requestedOut
 			kernings: [],
 			missingCodepoints: [],
 			dynamicFontPath: basename(requestedOutputPath),
+			sourceFontPath: basename(requestedOutputPath),
 		};
 		await writeJSON(manifestPath, dynamicManifest, { spaces: "\t" });
 		return {
@@ -5217,9 +5219,11 @@ export async function processFontImporterOutput(sourcePath: string, requestedOut
 			missingCodepoints: [],
 			pages: [],
 			dynamicFontPath: requestedOutputPath,
+			sourceFontPath: requestedOutputPath,
 		};
 	}
 
+	await copyFile(sourcePath, requestedOutputPath);
 	const wasm = await readFile(require.resolve("msdfgen-wasm/wasm"));
 	const generator = await Msdfgen.create(wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength) as ArrayBuffer);
 	generator.loadFont(await readFile(sourcePath));
@@ -5285,6 +5289,7 @@ export async function processFontImporterOutput(sourcePath: string, requestedOut
 		kernings,
 		missingCodepoints,
 		dynamicFontPath: null,
+		sourceFontPath: basename(requestedOutputPath),
 	};
 	await writeJSON(manifestPath, manifest, { spaces: "\t" });
 	return {
@@ -5299,6 +5304,7 @@ export async function processFontImporterOutput(sourcePath: string, requestedOut
 		missingCodepoints,
 		pages,
 		dynamicFontPath: null,
+		sourceFontPath: requestedOutputPath,
 	};
 }
 
@@ -5333,6 +5339,16 @@ export async function getFontImporterArtifactStatus(path: string): Promise<IFont
 
 /** Applies one exact-fingerprint font importer and atomically replaces its project-local artifact directory. */
 export async function applyFontImporterArtifact(path: string, expectedFingerprint: string): Promise<IFontImporterArtifactStatus> {
+	return applyImporterArtifactWithAccelerator({
+		kind: "font",
+		sourcePath: path,
+		expectedFingerprint,
+		inspect: () => getFontImporterArtifactStatus(path),
+		applyLocal: () => applyFontImporterArtifactLocally(path, expectedFingerprint),
+	});
+}
+
+async function applyFontImporterArtifactLocally(path: string, expectedFingerprint: string): Promise<IFontImporterArtifactStatus> {
 	const status = await getFontImporterArtifactStatus(path);
 	if (status.fingerprint !== expectedFingerprint) {
 		throw new Error(`Font importer plan changed. Inspect again and use current fingerprint ${status.fingerprint}.`);
@@ -5354,6 +5370,7 @@ export async function applyFontImporterArtifact(path: string, expectedFingerprin
 			manifestPath: remap(generated.manifestPath),
 			pages: generated.pages.map((page) => ({ ...page, path: remap(page.path) })),
 			dynamicFontPath: generated.dynamicFontPath ? remap(generated.dynamicFontPath) : null,
+			sourceFontPath: generated.sourceFontPath ? remap(generated.sourceFontPath) : null,
 		};
 		await writeJSON(status.manifestPath, { version: 1, fingerprint: status.fingerprint, generatedAt: new Date().toISOString(), result }, { spaces: "\t" });
 		return { ...status, current: true, exists: true, result };

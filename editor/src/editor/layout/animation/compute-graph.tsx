@@ -354,10 +354,14 @@ export class EditorComputeGraphPanel extends Component<{ editor: Editor }, IComp
 					{graph.edges.map((edge, index) => {
 						const fromInstance = collapsedByNode.get(edge.from);
 						const toInstance = collapsedByNode.get(edge.to);
-						if (fromInstance && fromInstance === toInstance) return null;
+						if (fromInstance && fromInstance === toInstance) {
+							return null;
+						}
 						const from = fromInstance?.position ?? positions.get(edge.from);
 						const to = toInstance?.position ?? positions.get(edge.to);
-						if (!from || !to) return null;
+						if (!from || !to) {
+							return null;
+						}
 						return (
 							<line
 								key={`${edge.from}-${edge.to}-${edge.toPort}-${index}`}
@@ -414,7 +418,9 @@ export class EditorComputeGraphPanel extends Component<{ editor: Editor }, IComp
 
 	private _renderDebugSummary(): ReactNode {
 		const debug = this.state.computeDebug;
-		if (!debug) return null;
+		if (!debug) {
+			return null;
+		}
 		return (
 			<section className="grid grid-cols-4 gap-2 rounded border border-input p-3 text-xs">
 				<div>
@@ -455,7 +461,9 @@ export class EditorComputeGraphPanel extends Component<{ editor: Editor }, IComp
 
 	private _renderOutputPreview(): ReactNode {
 		const value = this.state.outputPreview;
-		if (!value) return null;
+		if (!value) {
+			return null;
+		}
 		return (
 			<section className="flex items-center gap-3 rounded border border-input p-3 text-xs">
 				{value.preview.imageBase64 && (
@@ -677,7 +685,9 @@ export class EditorComputeGraphPanel extends Component<{ editor: Editor }, IComp
 	private _initialize(scene: Scene, passId: string, replace: boolean): void {
 		try {
 			const result = initializeCustomComputeNodeGraph(scene, { id: passId, replace }, { editor: this.props.editor });
-			if (result.preview.error) toast.warning(result.preview.error);
+			if (result.preview.error) {
+				toast.warning(result.preview.error);
+			}
 			this.forceUpdate();
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : String(error));
@@ -687,8 +697,11 @@ export class EditorComputeGraphPanel extends Component<{ editor: Editor }, IComp
 	private _compile(scene: Scene, passId: string): void {
 		try {
 			const result = compileCustomComputeNodeGraph(scene, { id: passId }, { editor: this.props.editor });
-			if (result.preview.error) toast.warning(result.preview.error);
-			else toast.success(result.diagnostics[0].message);
+			if (result.preview.error) {
+				toast.warning(result.preview.error);
+			} else {
+				toast.success(result.diagnostics[0].message);
+			}
 			this.forceUpdate();
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : String(error));
@@ -700,7 +713,9 @@ export class EditorComputeGraphPanel extends Component<{ editor: Editor }, IComp
 			const result = debugCustomComputeNodeGraph(scene, { id: passId, invocationId: [0, 0, 0] });
 			const textures = await getCustomComputeTextureNodePreviews(scene, { id: passId, width: 96, height: 96, includeImage: true });
 			this.setState({ computeDebug: result, texturePreviews: textures.entries });
-			if (!result.analysis.complete) toast.warning("Compute graph has disconnected inputs. See the debug summary.");
+			if (!result.analysis.complete) {
+				toast.warning("Compute graph has disconnected inputs. See the debug summary.");
+			}
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : String(error));
 		}
@@ -709,8 +724,11 @@ export class EditorComputeGraphPanel extends Component<{ editor: Editor }, IComp
 	private async _enableGpuProfile(scene: Scene, passId: string): Promise<void> {
 		try {
 			const result = setCustomRenderPassGpuProfiling(scene, { enabled: true, sampleCapacity: 120 }, { editor: this.props.editor });
-			if (result.supported) toast.success(`GPU pass profiling enabled (${result.mode}). Render frames, then refresh Debug Graph.`);
-			else toast.warning(result.reason);
+			if (result.supported) {
+				toast.success(`GPU pass profiling enabled (${result.mode}). Render frames, then refresh Debug Graph.`);
+			} else {
+				toast.warning(result.reason);
+			}
 			await this._debug(scene, passId);
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : String(error));
@@ -728,13 +746,27 @@ export class EditorComputeGraphPanel extends Component<{ editor: Editor }, IComp
 
 	private _addNode(scene: Scene, pass: any, graph: IComputeNodeGraph, type: (typeof nodeTypes)[number]): void {
 		const node: any = { type, position: [40 + (graph.nodes.length % 4) * 190, 220 + Math.floor(graph.nodes.length / 4) * 90] };
-		if (type === "constant-color") node.value = [1, 1, 1, 1];
-		if (type === "constant-scalar") node.scalarValue = 1;
-		if (type === "split-component") node.component = "x";
-		if (type === "swizzle") node.swizzle = "xyzw";
-		if (type === "compare") node.comparison = "greater";
-		if (type === "texture-load") node.resourceName = Object.keys(pass.inputs)[0] ?? "textureInput";
-		if (type === "storage-load" || type === "storage-store") node.resourceName = pass.computeSettings.storageBuffers[0]?.name ?? "storageBuffer";
+		if (type === "constant-color") {
+			node.value = [1, 1, 1, 1];
+		}
+		if (type === "constant-scalar") {
+			node.scalarValue = 1;
+		}
+		if (type === "split-component") {
+			node.component = "x";
+		}
+		if (type === "swizzle") {
+			node.swizzle = "xyzw";
+		}
+		if (type === "compare") {
+			node.comparison = "greater";
+		}
+		if (type === "texture-load") {
+			node.resourceName = Object.keys(pass.inputs)[0] ?? "textureInput";
+		}
+		if (type === "storage-load" || type === "storage-store") {
+			node.resourceName = pass.computeSettings.storageBuffers[0]?.name ?? "storageBuffer";
+		}
 		if (type === "uniform-color") {
 			node.resourceName = pass.computeSettings.uniformBuffers[0]?.name ?? "params";
 			node.fieldName = pass.computeSettings.uniformBuffers[0]?.uniforms.find((uniform: any) => uniform.type === "vec4")?.name ?? "color";
@@ -786,13 +818,17 @@ export class EditorComputeGraphPanel extends Component<{ editor: Editor }, IComp
 
 	private _beginDrag(event: React.MouseEvent<SVGGElement>, node: IComputeNodeGraphNode): void {
 		const svg = event.currentTarget.ownerSVGElement;
-		if (!svg) return;
+		if (!svg) {
+			return;
+		}
 		const bounds = svg.getBoundingClientRect();
 		this.setState({ drag: { nodeId: node.id, offset: [event.clientX - bounds.left - node.position[0], event.clientY - bounds.top - node.position[1]] } });
 	}
 
 	private _move(scene: Scene, passId: string, event: React.MouseEvent<SVGSVGElement>): void {
-		if (!this.state.drag) return;
+		if (!this.state.drag) {
+			return;
+		}
 		const bounds = event.currentTarget.getBoundingClientRect();
 		const position: [number, number] = [
 			Math.max(0, event.clientX - bounds.left - this.state.drag.offset[0]),

@@ -14,6 +14,10 @@ let isBusy = false;
 let devAddress: string | null = null;
 let instance: NodePtyInstance | null = null;
 
+export function getProjectDevProcessStatus(): { busy: boolean; running: boolean; address: string | null } {
+	return { busy: isBusy, running: instance !== null, address: devAddress };
+}
+
 export async function startProjectDevProcess(editor: Editor) {
 	if (isBusy || !projectConfiguration.path) {
 		return;
@@ -99,6 +103,7 @@ export async function startProjectDevProcess(editor: Editor) {
 
 export async function stopProjectDevProcess() {
 	devAddress = null;
+	isBusy = false;
 
 	instance?.kill();
 	instance = null;

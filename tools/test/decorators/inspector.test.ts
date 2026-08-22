@@ -13,6 +13,8 @@ import {
 	visibleAsKeyMap,
 	visibleAsString,
 	visibleAsAsset,
+	visibleAsArray,
+	visibleAsList,
 } from "../../src/decorators/inspector";
 
 describe("decorators/inspector", () => {
@@ -224,6 +226,29 @@ describe("decorators/inspector", () => {
 				type: "asset",
 				assetType: "nodeParticleSystemSet",
 			});
+		});
+	});
+
+	describe("@visibleAsArray and @visibleAsList", () => {
+		test("should retain typed bounded collection styles", () => {
+			visibleAsArray("number", "Damage", { minItems: 1, maxItems: 8, defaultItem: 5, styleType: "damage", style: { icon: "DMG", accentColor: "#ff0000" } })(target, "damage");
+			visibleAsList("string", "Tags", { maxItems: 16, style: { striped: true } })(target, "tags");
+			expect(target.constructor._VisibleInInspector).toMatchObject([
+				{
+					propertyKey: "damage",
+					configuration: { type: "array", elementType: "number", minItems: 1, maxItems: 8, defaultItem: 5, styleType: "damage" },
+				},
+				{ propertyKey: "tags", configuration: { type: "list", elementType: "string", maxItems: 16, style: { striped: true } } },
+			]);
+		});
+
+		test("rejects unsafe collection bounds and styles", () => {
+			expect(() => visibleAsArray("number", "Invalid", { maxItems: 257 })).toThrow(/maxItems/);
+			expect(() => visibleAsList("string", "Invalid", { minItems: 2, maxItems: 1 })).toThrow(/cannot exceed/);
+			expect(() => visibleAsArray("number", "Invalid", { style: { accentColor: "red" } })).toThrow(/six-digit hex/);
+			expect(() => visibleAsArray("vector2", "Invalid", { defaultItem: [1] })).toThrow(/2 finite numbers/);
+			expect(() => visibleAsArray("number", "Invalid", { styleType: "bad style" })).toThrow(/styleType/);
+			expect(() => visibleAsArray("unknown" as "number", "Invalid")).toThrow(/Unsupported/);
 		});
 	});
 });

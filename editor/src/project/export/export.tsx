@@ -1,8 +1,9 @@
 import { join, dirname, basename, extname } from "path/posix";
-import { pathExists, readJSON, readdir, remove, writeJSON } from "fs-extra";
+import { createHash } from "crypto";
+import { pathExists, readFile, readJSON, readdir, remove, writeJSON } from "fs-extra";
 
 import { RenderTargetTexture, SceneSerializer } from "babylonjs";
-import { ModelImporterPlatform, TextureImporterPlatform } from "babylonjs-editor-tools";
+import { configureTerrainStreamingExport, ITerrainStreamingExportArtifact, ModelImporterPlatform, TextureImporterPlatform } from "babylonjs-editor-tools";
 
 import { toast } from "sonner";
 
@@ -23,6 +24,12 @@ import { ssaoRenderingPipelineCameraConfigurations } from "../../editor/renderin
 import { defaultPipelineCameraConfigurations } from "../../editor/rendering/default-pipeline";
 import { motionBlurPostProcessCameraConfigurations } from "../../editor/rendering/motion-blur";
 import { customColorPostProcessCameraConfigurations } from "../../editor/rendering/custom-color";
+import {
+	applyGeneratedEditableMeshToSerializedData,
+	buildGeneratedEditableMeshGeometry,
+	getEditableMeshSourceManifest,
+	stripEditableSourceMetadataForRuntime,
+} from "../../mcp/meshes/editable-source";
 
 import { Editor } from "../../editor/main";
 
@@ -35,9 +42,31 @@ import { configureMaterials } from "./materials";
 import { configureMeshesPhysics } from "./physics";
 import { configureClusteredLights } from "./light";
 import { configureParticleSystems } from "./particles";
+import { configurePhysics2DExportMetadata } from "./physics2d";
+import { configureMlTrainingExportMetadata } from "./ml-training";
+import { configureInputActionsExportMetadata } from "./input-actions";
+import { configureTouchControlsExportMetadata } from "./touch-controls";
+import { configureVisualScriptingExportMetadata } from "./visual-scripting";
+import { configureBehaviorGraphExportMetadata } from "./behavior-graphs";
 import { exportAddressables } from "./addressables";
 import { EditorExportProjectProgressComponent } from "./progress";
 import { ExportSceneProgressComponent, showExportSceneProgressDialog } from "./dialog";
+
+/** Removes editor-only profiling evidence from generated runtime scenes without mutating the authored editor scene. */
+export function stripProfilerStateFromRuntimeSceneData(data: any): void {
+	if (data?.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)) {
+		data.metadata = { ...data.metadata };
+		delete data.metadata.babylonEditorProfilerState;
+	}
+}
+
+/** Removes server deployment/provider authoring; the exported server consumes generated build/deploy descriptors instead. */
+export function stripConsoleServerStateFromRuntimeSceneData(data: any): void {
+	if (data?.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)) {
+		data.metadata = { ...data.metadata };
+		delete data.metadata.babylonEditorConsoleServer;
+	}
+}
 
 export type IExportProjectOptions = {
 	optimize: boolean;
@@ -45,6 +74,7 @@ export type IExportProjectOptions = {
 	assetPlatform?: TextureImporterPlatform;
 	noDialog?: boolean;
 	noProgress?: boolean;
+	throwOnError?: boolean;
 };
 
 let exporting = false;
@@ -69,6 +99,9 @@ export async function exportProject(editor: Editor, options: IExportProjectOptio
 
 		editor.layout.console.error(`Error exporting project:\n ${message}`);
 		toast.error("Error exporting project");
+		if (options.throwOnError) {
+			throw e;
+		}
 		return false;
 	} finally {
 		exporting = false;
@@ -131,6 +164,7 @@ async function _writeProjectExport(editor: Editor, options: IExportProjectOption
 
 	const savedGeometries: string[] = [];
 	const savedGeometryIds: string[] = [];
+	const terrainStreamingArtifacts: ITerrainStreamingExportArtifact[] = [];
 
 	storeTexturesBaseSize(scene);
 
@@ -141,6 +175,8 @@ async function _writeProjectExport(editor: Editor, options: IExportProjectOption
 	clusteredLightContainer.lights.forEach((light) => (light.doNotSerialize = light.metadata?.doNotSerialize ?? false));
 
 	const data = await SceneSerializer.SerializeAsync(scene);
+	stripProfilerStateFromRuntimeSceneData(data);
+	stripConsoleServerStateFromRuntimeSceneData(data);
 
 	scene.meshes.forEach((mesh) => (mesh.doNotSerialize = false));
 	scene.lights.forEach((light) => (light.doNotSerialize = false));
@@ -179,24 +215,34 @@ async function _writeProjectExport(editor: Editor, options: IExportProjectOption
 
 	data.metadata.physicsGravity = scene.getPhysicsEngine()?.gravity?.asArray();
 	data.metadata.babylonEditorPhysicsConstraints = structuredClone(scene.metadata?.babylonEditorPhysicsConstraints ?? []);
+	data.metadata.babylonEditorHybridPhysicsSolver = structuredClone(scene.metadata?.babylonEditorHybridPhysicsSolver ?? undefined);
+	data.metadata.babylonEditorHybridPhysicsSamples = structuredClone(scene.metadata?.babylonEditorHybridPhysicsSamples ?? []);
 	data.metadata.babylonEditorIKControllers = structuredClone(scene.metadata?.babylonEditorIKControllers ?? []);
 	data.metadata.babylonEditorRigLayers = structuredClone(scene.metadata?.babylonEditorRigLayers ?? []);
 	data.metadata.babylonEditorHumanoidAvatars = structuredClone(scene.metadata?.babylonEditorHumanoidAvatars ?? []);
 	data.metadata.babylonEditorHumanoidAvatarMasks = structuredClone(scene.metadata?.babylonEditorHumanoidAvatarMasks ?? []);
 	data.metadata.babylonEditorCloths = structuredClone(scene.metadata?.babylonEditorCloths ?? []);
 	data.metadata.babylonEditorPhysics2D = structuredClone(scene.metadata?.babylonEditorPhysics2D ?? []);
-	data.metadata.babylonEditorPhysics2DJoints = structuredClone(scene.metadata?.babylonEditorPhysics2DJoints ?? []);
 	data.metadata.babylonEditorPhysics2DMaterials = structuredClone(scene.metadata?.babylonEditorPhysics2DMaterials ?? []);
-	data.metadata.babylonEditorPhysics2DEffectors = structuredClone(scene.metadata?.babylonEditorPhysics2DEffectors ?? []);
+	configurePhysics2DExportMetadata(data, scene);
+	data.metadata.babylonEditorSpriteShapeProfiles = structuredClone(scene.metadata?.babylonEditorSpriteShapeProfiles ?? []);
 	data.metadata.babylonEditorNavAgents = structuredClone(scene.metadata?.babylonEditorNavAgents ?? []);
-	data.metadata.babylonEditorVisualScriptGraphs = structuredClone(scene.metadata?.babylonEditorVisualScriptGraphs ?? []);
-	data.metadata.babylonEditorBehaviorTrees = structuredClone(scene.metadata?.babylonEditorBehaviorTrees ?? []);
-	data.metadata.babylonEditorInputActionMaps = structuredClone(scene.metadata?.babylonEditorInputActionMaps ?? []);
+	data.metadata.babylonEditorNavCrowds = structuredClone(scene.metadata?.babylonEditorNavCrowds ?? []);
+	configureVisualScriptingExportMetadata(data, scene);
+	configureBehaviorGraphExportMetadata(data, scene);
+	configureMlTrainingExportMetadata(data, scene);
+	configureInputActionsExportMetadata(data, scene);
+	configureTouchControlsExportMetadata(data, scene);
 	data.metadata.babylonEditorAudioBuses = structuredClone(scene.metadata?.babylonEditorAudioBuses ?? []);
 	data.metadata.babylonEditorAudioMixerSnapshots = structuredClone(scene.metadata?.babylonEditorAudioMixerSnapshots ?? []);
 	data.metadata.babylonEditorAnimatorControllers = structuredClone(scene.metadata?.babylonEditorAnimatorControllers ?? []);
 	data.metadata.babylonEditorRenderingProfiles = structuredClone(scene.metadata?.babylonEditorRenderingProfiles ?? []);
 	data.metadata.babylonEditorRenderingVolumes = structuredClone(scene.metadata?.babylonEditorRenderingVolumes ?? []);
+	data.metadata.babylonEditorCameraStacks = structuredClone(scene.metadata?.babylonEditorCameraStacks ?? []);
+	data.metadata.babylonEditorActiveCameraStack = structuredClone(scene.metadata?.babylonEditorActiveCameraStack ?? null);
+	data.metadata.babylonEditorRenderingLayers = structuredClone(scene.metadata?.babylonEditorRenderingLayers ?? []);
+	data.metadata.babylonEditorRenderingGroups = structuredClone(scene.metadata?.babylonEditorRenderingGroups ?? []);
+	data.metadata.babylonEditorRendererLists = structuredClone(scene.metadata?.babylonEditorRendererLists ?? []);
 	data.metadata.babylonEditorVideoPlayers = structuredClone(scene.metadata?.babylonEditorVideoPlayers ?? []);
 	data.metadata.babylonEditorXR = structuredClone(scene.metadata?.babylonEditorXR ?? { enabled: false, referenceSpaceType: "local-floor", floorMeshIds: [], features: [] });
 	const localizationPath = join(projectDir, "localization.json");
@@ -281,7 +327,7 @@ async function _writeProjectExport(editor: Editor, options: IExportProjectOption
 			const geometry = data.geometries?.vertexData?.find((v) => v.id === mesh.geometryId);
 
 			if (geometry) {
-				const geometryFileName = `${geometry.id}.babylonbinarymeshdata`;
+				const geometryFileName = `${mesh.id}.babylonbinarymeshdata`;
 
 				mesh.delayLoadingFile = `${sceneName}/${geometryFileName}`;
 				mesh.boundingBoxMaximum = instantiatedMesh?.getBoundingInfo()?.maximum?.asArray() ?? [0, 0, 0];
@@ -291,18 +337,38 @@ async function _writeProjectExport(editor: Editor, options: IExportProjectOption
 				const geometryPath = join(scenePath, sceneName, geometryFileName);
 
 				try {
+					const geometryToWrite = { ...geometry };
+					if (instantiatedMesh && isMesh(instantiatedMesh)) {
+						const manifest = getEditableMeshSourceManifest(instantiatedMesh);
+						const generated = buildGeneratedEditableMeshGeometry(instantiatedMesh, manifest.exportSettings);
+						if (!generated.evidence.portableBinaryOutput) {
+							throw new Error(
+								`Mesh "${instantiatedMesh.name}" has unsupported generated binary streams: ${generated.evidence.unsupportedSerializedStreams.join(", ")}.`
+							);
+						}
+						applyGeneratedEditableMeshToSerializedData(mesh, geometryToWrite, generated);
+						stripEditableSourceMetadataForRuntime(mesh, generated.evidence, manifest.revision, manifest.exportSettingsRevision);
+					}
 					let writeGeometry = false;
-					if (!savedGeometryIds.includes(geometry.id)) {
+					if (!savedGeometryIds.includes(mesh.id)) {
 						writeGeometry = true;
-						savedGeometryIds.push(geometry.id);
+						savedGeometryIds.push(mesh.id);
 					}
 
 					await writeBinaryGeometry({
 						mesh,
-						geometry,
+						geometry: geometryToWrite,
 						sourceMesh: instantiatedMesh,
 						path: geometryPath,
 						write: writeGeometry,
+					});
+					const geometryBytes = await readFile(geometryPath);
+					terrainStreamingArtifacts.push({
+						terrainId: mesh.id,
+						url: `${sceneName}/${geometryFileName}`,
+						sha256: createHash("sha256").update(geometryBytes).digest("hex"),
+						byteLength: geometryBytes.byteLength,
+						binaryInfo: JSON.parse(JSON.stringify(mesh._binaryInfo)),
 					});
 
 					let geometryIndex = -1;
@@ -315,11 +381,15 @@ async function _writeProjectExport(editor: Editor, options: IExportProjectOption
 
 					savedGeometries.push(geometryFileName);
 				} catch (e) {
-					editor.layout.console.error(`Export: Failed to write geometry for mesh ${mesh.name}`);
+					const message = e instanceof Error ? e.message : String(e);
+					editor.layout.console.error(`Export: Failed to write geometry for mesh ${mesh.name}: ${message}`);
+					throw e;
 				}
 			}
 		})
 	);
+
+	configureTerrainStreamingExport(data, terrainStreamingArtifacts);
 
 	// Configure lights
 	data.shadowGenerators?.forEach((shadowGenerator) => {

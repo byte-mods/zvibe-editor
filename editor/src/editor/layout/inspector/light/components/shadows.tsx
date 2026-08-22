@@ -29,7 +29,9 @@ export interface IEditorLightShadowsInspectorState {
 export type SoftShadowType =
 	| "usePoissonSampling"
 	| "useExponentialShadowMap"
+	| "useBlurExponentialShadowMap"
 	| "useCloseExponentialShadowMap"
+	| "useBlurCloseExponentialShadowMap"
 	| "usePercentageCloserFiltering"
 	| "useContactHardeningShadow"
 	| "none";
@@ -260,19 +262,57 @@ export class EditorLightShadowsInspector extends Component<IEditorLightShadowsIn
 						updateLightShadowMapRefreshRate(this.props.light);
 					}}
 					items={[
-						{ text: "None", value: "none" },
-						...(isPointLight(this.props.light)
-							? [{ text: "Poisson Sampling", value: "usePoissonSampling" }]
-							: [
-									{ text: "Percentage Closer Filtering", value: "usePercentageCloserFiltering" },
-									{ text: "Contact Hardening Shadow", value: "useContactHardeningShadow" },
-								]),
+						{ text: "Hard", value: "none" },
+						...(isCascadedShadowGenerator(generator)
+							? [
+									{ text: "Percentage Closer Filtering (PCF)", value: "usePercentageCloserFiltering" },
+									{ text: "Contact Hardening (PCSS)", value: "useContactHardeningShadow" },
+								]
+							: isPointLight(this.props.light)
+								? [
+										{ text: "Poisson Sampling", value: "usePoissonSampling" },
+										{ text: "Exponential Shadow Map", value: "useExponentialShadowMap" },
+										{ text: "Close Exponential Shadow Map", value: "useCloseExponentialShadowMap" },
+									]
+								: [
+										{ text: "Poisson Sampling", value: "usePoissonSampling" },
+										{ text: "Exponential Shadow Map", value: "useExponentialShadowMap" },
+										{ text: "Blurred Exponential Shadow Map", value: "useBlurExponentialShadowMap" },
+										{ text: "Close Exponential Shadow Map", value: "useCloseExponentialShadowMap" },
+										{ text: "Blurred Close Exponential Shadow Map", value: "useBlurCloseExponentialShadowMap" },
+										{ text: "Percentage Closer Filtering (PCF)", value: "usePercentageCloserFiltering" },
+										{ text: "Contact Hardening (PCSS)", value: "useContactHardeningShadow" },
+									]),
 					]}
 				/>
 
 				{generator.usePoissonSampling && <EditorInspectorNumberField object={generator} property="blurScale" step={0.1} min={0} max={10} label="Blur Scale" />}
+				{(generator.useExponentialShadowMap ||
+					generator.useBlurExponentialShadowMap ||
+					generator.useCloseExponentialShadowMap ||
+					generator.useBlurCloseExponentialShadowMap) && (
+					<EditorInspectorNumberField
+						object={generator}
+						property="depthScale"
+						step={0.1}
+						min={0.0001}
+						max={1000}
+						label="Depth Scale"
+						onChange={() => updateLightShadowMapRefreshRate(this.props.light)}
+					/>
+				)}
+				{(generator.useBlurExponentialShadowMap || generator.useBlurCloseExponentialShadowMap) && (
+					<>
+						<EditorInspectorSwitchField object={generator} property="useKernelBlur" label="Kernel Blur" />
+						{generator.useKernelBlur ? (
+							<EditorInspectorNumberField object={generator} property="blurKernel" step={1} min={1} max={64} label="Blur Kernel" />
+						) : (
+							<EditorInspectorNumberField object={generator} property="blurBoxOffset" step={0.1} min={0} max={10} label="Blur Box Offset" />
+						)}
+					</>
+				)}
 
-				{generator.usePercentageCloserFiltering && !generator.useContactHardeningShadow && (
+				{(generator.usePercentageCloserFiltering || generator.useContactHardeningShadow) && (
 					<>
 						<EditorInspectorListField
 							object={generator}
@@ -290,8 +330,8 @@ export class EditorLightShadowsInspector extends Component<IEditorLightShadowsIn
 
 				{generator.useContactHardeningShadow && (
 					<EditorInspectorNumberField
-						object={generator.contactHardeningLightSizeUVRatio}
-						property="blurScale"
+						object={generator}
+						property="contactHardeningLightSizeUVRatio"
 						step={0.001}
 						min={0}
 						max={1}
@@ -370,7 +410,17 @@ export class EditorLightShadowsInspector extends Component<IEditorLightShadowsIn
 
 	private _getSoftShadowType(generator: IShadowGenerator | null): SoftShadowType {
 		if (generator && (isShadowGenerator(generator) || isCascadedShadowGenerator(generator))) {
-			if (generator.usePercentageCloserFiltering) {
+			if (generator.usePoissonSampling) {
+				return "usePoissonSampling";
+			} else if (generator.useExponentialShadowMap) {
+				return "useExponentialShadowMap";
+			} else if (generator.useBlurExponentialShadowMap) {
+				return "useBlurExponentialShadowMap";
+			} else if (generator.useCloseExponentialShadowMap) {
+				return "useCloseExponentialShadowMap";
+			} else if (generator.useBlurCloseExponentialShadowMap) {
+				return "useBlurCloseExponentialShadowMap";
+			} else if (generator.usePercentageCloserFiltering) {
 				return "usePercentageCloserFiltering";
 			} else if (generator.useContactHardeningShadow) {
 				return "useContactHardeningShadow";
@@ -390,7 +440,9 @@ export class EditorLightShadowsInspector extends Component<IEditorLightShadowsIn
 			this.state.generator.usePercentageCloserFiltering = false;
 			this.state.generator.useContactHardeningShadow = false;
 
-			this.state.generator[type] = true;
+			if (type !== "none") {
+				this.state.generator[type] = true;
+			}
 
 			this.forceUpdate();
 		}

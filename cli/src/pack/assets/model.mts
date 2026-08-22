@@ -1,6 +1,6 @@
 import "babylonjs-loaders";
 
-import { basename, dirname, extname, join, relative, resolve } from "node:path/posix";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path/posix";
 
 import assimpFactory from "assimpjs";
 import { LoadAssetContainerAsync, Material, NullEngine, Scene, SceneSerializer } from "babylonjs";
@@ -8,6 +8,7 @@ import fs from "fs-extra";
 import {
 	convertAssimpModelFileToGlb,
 	blendRequiresExternalConverter,
+	collectBabylonMaterialTextureCandidates,
 	configureSerializedModelGeneratedLods,
 	emptyExecutedModelImport,
 	executeModelImporterEntries,
@@ -18,6 +19,7 @@ import {
 	materialSearchRemaps,
 	planModelMaterialSearch,
 	prepareModelImporterSource,
+	resolveBabylonMaterialTextureReferencesForLoading,
 	resolveModelImporterPlatformSettings,
 } from "babylonjs-editor-tools";
 
@@ -150,7 +152,9 @@ async function loadModelMaterialRemaps(scene: Scene, settings: IModelImporterSet
 			continue;
 		}
 		try {
-			const material = Material.Parse(await fs.readJSON(canonical), scene, "");
+			const data = await fs.readJSON(canonical);
+			resolveBabylonMaterialTextureReferencesForLoading(materialPath, data, root);
+			const material = Material.Parse(data, scene, "");
 			if (!material) {
 				continue;
 			}
@@ -160,6 +164,24 @@ async function loadModelMaterialRemaps(scene: Scene, settings: IModelImporterSet
 		}
 	}
 	return result;
+}
+
+/** Maps absolute source-project texture URLs to the equivalent relative paths in the exported project. */
+function rebaseSerializedModelTexturePaths(serialized: Record<string, unknown>, projectRoot: string, sourcePath: string, outputPath: string): void {
+	const sourceRelativePath = relative(projectRoot, sourcePath);
+	const outputRoot = resolve(dirname(outputPath), relative(dirname(sourceRelativePath), "."));
+	for (const candidate of collectBabylonMaterialTextureCandidates(serialized)) {
+		const path = candidate.value.split(/[?#]/, 1)[0];
+		if (!isAbsolute(path)) {
+			continue;
+		}
+		const containment = relative(projectRoot, path);
+		if (containment === ".." || containment.startsWith("../") || isAbsolute(containment)) {
+			continue;
+		}
+		const exportedTexturePath = join(outputRoot, containment);
+		candidate.setValue?.(relative(dirname(outputPath), exportedTexturePath).replace(/\\/g, "/"));
+	}
 }
 
 async function resolveAutomaticMaterialSearch(
@@ -279,6 +301,8 @@ export async function processExportedModel(
 		await fs.ensureDir(dirname(outputPath));
 		const serialized = await SceneSerializer.SerializeAsync(scene);
 		configureSerializedModelGeneratedLods(serialized, scene, (meshes) => SceneSerializer.SerializeMesh(meshes));
+		const canonicalOutputPath = join(await fs.realpath(dirname(outputPath)), basename(outputPath));
+		rebaseSerializedModelTexturePaths(serialized, await fs.realpath(projectRoot), await fs.realpath(sourcePath), canonicalOutputPath);
 		await fs.writeJSON(outputPath, serialized, { spaces: "\t" });
 		const errors = [...new Set([...prepared.errors, ...executed.errors])];
 		return {

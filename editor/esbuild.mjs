@@ -21,6 +21,15 @@ const mainBuildOptions = {
 const configurations = [
 	{
 		...mainBuildOptions,
+		// The legacy serializer's UMD wrapper sees Electron's browser globals and
+		// otherwise publishes no CommonJS exports. Bundling it gives the renderer a
+		// deterministic CJS boundary while reusing the editor's Babylon instance.
+		entryPoints: ["babylonjs-serializers"],
+		outfile: "./build/babylonjs-serializers.cjs",
+		external: ["babylonjs"],
+	},
+	{
+		...mainBuildOptions,
 		entryPoints: ["@recast-navigation/core"],
 		outfile: "./build/recast-core.js",
 		external: ["@recast-navigation/generators"],

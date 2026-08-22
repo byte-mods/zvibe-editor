@@ -43,6 +43,7 @@ import {
 	configureOptimizedModelRigExposedTransforms,
 	configureGeneratedModelLodDeformations,
 	remapOptimizedModelRigExposureSkeletonId,
+	resolveBabylonMaterialTextureReferencesForLoading,
 } from "babylonjs-editor-tools";
 import { convertBlendFileToGlb } from "babylonjs-editor-cli";
 
@@ -137,7 +138,9 @@ export async function loadImportedSceneFile(scene: Scene, absolutePath: string, 
 				continue;
 			}
 			try {
-				const material = Material.Parse(await readJSON(canonical), scene, "");
+				const data = await readJSON(canonical);
+				resolveBabylonMaterialTextureReferencesForLoading(materialPath, data, projectRoot);
+				const material = Material.Parse(data, scene, "");
 				if (material) {
 					materialRemapMaterials[materialPath] = material;
 				}
@@ -209,6 +212,8 @@ export async function loadImportedSceneFile(scene: Scene, absolutePath: string, 
 	});
 
 	const configuredEmbeddedTextures: number[] = [];
+	const importedTextures: Texture[] = [];
+	const embeddedTextureTasks: Promise<unknown>[] = [];
 
 	result.meshes.forEach((mesh) => {
 		if (isMesh(mesh)) {
@@ -242,12 +247,16 @@ export async function loadImportedSceneFile(scene: Scene, absolutePath: string, 
 				}
 
 				configuredEmbeddedTextures.push(texture.uniqueId);
+				importedTextures.push(texture);
 
 				configureImportedTexture(texture);
-				configureEmbeddedTexture(texture, absolutePath);
+				embeddedTextureTasks.push(configureEmbeddedTexture(texture, absolutePath));
 			}
 		});
 	});
+
+	await Promise.all(embeddedTextureTasks);
+	await Promise.all(importedTextures.map((texture) => waitForImportedTextureReady(texture)));
 
 	const importedObjects = new Set<object>([
 		...result.meshes,
@@ -306,6 +315,44 @@ export function configureImportedTexture<T extends Texture | CubeTexture | Color
 	}
 
 	return texture;
+}
+
+/** Waits for a file-backed imported texture to finish loading before its source asset can be safely mutated or deleted. */
+export async function waitForImportedTextureReady(texture: Texture, timeoutMs: number = 10_000): Promise<void> {
+	if (texture.isReady()) {
+		return;
+	}
+
+	await new Promise<void>((resolveTexture, rejectTexture) => {
+		let settled = false;
+		const internalTexture = texture.getInternalTexture();
+		let timeout: ReturnType<typeof setTimeout>;
+		let loadObserver: any;
+		let errorObserver: any;
+		const finish = (error?: Error): void => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			clearTimeout(timeout);
+			texture.onLoadObservable.remove(loadObserver);
+			if (errorObserver) {
+				internalTexture?.onErrorObservable.remove(errorObserver);
+			}
+			error ? rejectTexture(error) : resolveTexture();
+		};
+		loadObserver = texture.onLoadObservable.add(() => finish());
+		errorObserver = internalTexture?.onErrorObservable.add((error) => {
+			const message = typeof error?.message === "string" && error.message ? error.message : `Failed to load imported texture "${texture.name}".`;
+			finish(new Error(message));
+		});
+		timeout = setTimeout(() => finish(new Error(`Timed out waiting for imported texture "${texture.name}" to load.`)), timeoutMs);
+
+		// Readiness can change between the initial check and observer registration.
+		if (texture.isReady()) {
+			finish();
+		}
+	});
 }
 
 export async function configureEmbeddedTexture(texture: Texture, absolutePath: string) {

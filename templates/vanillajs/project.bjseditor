@@ -42,6 +42,55 @@
     "compressedPvrtcEnabled": false,
     "compressedTextureQuality": "very-fast",
     "externalEditorCommand": "code",
+    "projectSettings": {
+        "version": 1,
+        "revision": 6,
+        "identity": {
+            "companyName": "Default Company",
+            "productName": "project",
+            "version": "1.0.0",
+            "applicationId": "com.default.zvibegame"
+        },
+        "display": {
+            "defaultWidth": 1920,
+            "defaultHeight": 1080,
+            "fullscreenMode": "windowed",
+            "resizableWindow": true,
+            "runInBackground": true,
+            "allowHighDpi": true
+        },
+        "rendering": {
+            "colorSpace": "linear",
+            "renderingBackend": "auto",
+            "powerPreference": "high-performance",
+            "targetFrameRate": 60,
+            "maximumDevicePixelRatio": 2,
+            "preserveDrawingBuffer": false
+        },
+        "runtime": {
+            "showBabylonLoadingScreen": true,
+            "disableContextMenu": true,
+            "dataCaching": true,
+            "deterministicLockstep": false,
+            "lockstepMaxSteps": 4
+        },
+        "assetPipeline": {
+            "autoRefresh": true,
+            "autoRefreshOnFocus": true,
+            "directoryMonitoring": true,
+            "importWorkerCount": 4,
+            "serializationMode": "forceText",
+            "reduceVersionControlNoise": true
+        },
+        "playMode": {
+            "reloadScene": true,
+            "reloadScripts": true,
+            "muteAudio": false,
+            "maximizeOnPlay": false
+        },
+        "defaultBehaviorMode": "3d",
+        "platformOverrides": {}
+    },
     "scriptExecutionOrders": {},
     "gizmoSnap": {
         "translationEnabled": false,

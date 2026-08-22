@@ -18,6 +18,7 @@ import { EditorBehaviorTreesPanel } from "./animation/behavior-trees";
 import { EditorComputeGraphPanel } from "./animation/compute-graph";
 import { EditorVisualScriptingPanel } from "./animation/visual-scripting";
 import { EditorAnimationWindowPanel } from "./animation/window";
+import { EditorSpriteSkinningPanel } from "./animation/sprite-skinning";
 
 export interface IEditorAnimationProps {
 	/**
@@ -31,7 +32,7 @@ export interface IEditorAnimationState {
 	focused: boolean;
 	animatable: IAnimatable | null;
 	selectedAnimation: Animation | null;
-	mode: "timeline" | "animation-window" | "animator" | "behavior-trees" | "compute-graph" | "visual-scripting";
+	mode: "timeline" | "animation-window" | "2d-animation" | "animator" | "behavior-trees" | "compute-graph" | "visual-scripting";
 	animationGroupName: string | null;
 	animatorControllerId: string | null;
 	animatorDebugEnabled: boolean;
@@ -74,7 +75,7 @@ export class EditorAnimation extends Component<IEditorAnimationProps, IEditorAni
 	public render(): ReactNode {
 		return (
 			<div className="flex flex-col min-w-full h-full">
-				<div className="flex h-10 items-center gap-1 border-b border-input bg-input px-2">
+				<div className="flex min-h-10 flex-wrap items-center gap-1 border-b border-input bg-input px-2">
 					<button
 						className={`rounded px-3 py-1 text-sm ${this.state.mode === "behavior-trees" ? "bg-secondary font-medium" : "text-muted-foreground"}`}
 						onClick={() => this.setState({ mode: "behavior-trees" })}
@@ -92,6 +93,12 @@ export class EditorAnimation extends Component<IEditorAnimationProps, IEditorAni
 						onClick={() => this.setState({ mode: "animation-window" })}
 					>
 						Animation Window
+					</button>
+					<button
+						className={`rounded px-3 py-1 text-sm ${this.state.mode === "2d-animation" ? "bg-secondary font-medium" : "text-muted-foreground"}`}
+						onClick={() => this.setState({ mode: "2d-animation" })}
+					>
+						2D Animation
 					</button>
 					<button
 						className={`rounded px-3 py-1 text-sm ${this.state.mode === "animator" ? "bg-secondary font-medium" : "text-muted-foreground"}`}
@@ -119,6 +126,8 @@ export class EditorAnimation extends Component<IEditorAnimationProps, IEditorAni
 						requestedControllerId={this.state.animatorControllerId}
 						requestedDebugEnabled={this.state.animatorDebugEnabled}
 					/>
+				) : this.state.mode === "2d-animation" ? (
+					<EditorSpriteSkinningPanel editor={this.props.editor} />
 				) : this.state.mode === "animation-window" ? (
 					<EditorAnimationWindowPanel
 						editor={this.props.editor}
@@ -217,6 +226,11 @@ export class EditorAnimation extends Component<IEditorAnimationProps, IEditorAni
 	 */
 	public openAnimatorDebugger(controllerId: string): void {
 		this.setState({ mode: "animator", animatorControllerId: controllerId, animatorDebugEnabled: true });
+	}
+
+	/** Opens the focused weighted-sprite and PSD rigging workspace. */
+	public openSpriteSkinningWorkspace(): void {
+		this.setState({ mode: "2d-animation" });
 	}
 
 	/**

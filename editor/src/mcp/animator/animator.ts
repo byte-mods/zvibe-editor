@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { AnimationGroup, AnimationGroupMask, Scene, Tools } from "babylonjs";
 import {
 	compileAnimatorMachine,
@@ -19,11 +21,26 @@ import {
 	ICompiledAnimatorTransition,
 	IHumanoidAvatar,
 	IHumanoidAvatarMask,
+	HumanBone,
+	HUMAN_BONES,
+	captureAnimatorHumanoidMuscleTrace,
+	clearAnimatorHumanoidMuscleTrace,
+	deleteAnimatorHumanoidMuscleTrace,
+	applyAnimatorFootIK,
+	deleteAnimatorFootIKDiagnostics,
+	getAnimatorFootIKDiagnostics,
+	applyAnimatorWriteDefaults,
+	deleteAnimatorWriteDefaults,
+	getAnimatorWriteDefaultsDiagnostics,
+	getAnimatorHumanoidMuscleTrace,
 	getAnimatorIKPassDiagnostics,
 	getAnimatorStateBehaviourDiagnostics,
+	getAnimatorStateMachineBehaviourTransitions,
 	invokeAnimatorIKPass,
 	invokeAnimatorStateBehaviours,
+	invokeAnimatorStateMachineBehaviours,
 	resolveHumanoidAvatarMaskTargetNames,
+	resolveAnimatorStatePlayback,
 	scriptsDictionary,
 	validateAnimatorStateBehaviours,
 } from "babylonjs-editor-tools";
@@ -63,6 +80,7 @@ interface IAnimatorController extends IAnimatorGraphMachine {
 	id: string;
 	name: string;
 	targetNodeId?: string;
+	humanoidAvatarId?: string;
 	parameters: Record<string, string | number | boolean>;
 	parameterTypes?: Record<string, IAnimatorParameterType>;
 	baseIKPass?: boolean;
@@ -95,12 +113,74 @@ interface IAnimatorFade {
 	interrupted?: boolean;
 }
 
+interface IAnimatorDebugBreakpoint {
+	id: string;
+	layer: "$base" | string;
+	from?: string;
+	to?: string;
+	enabled: boolean;
+}
+
+interface IAnimatorTransitionHistoryEntry {
+	sequence: number;
+	runtimeSeconds: number;
+	layer: "$base" | string;
+	from: string;
+	authoredFrom: string;
+	to: string;
+	transitionIndex: number;
+	interrupted: boolean;
+	durationSeconds: number;
+	conditions: Array<{ parameter: string; operator: string; authoredValue: string | number | boolean; runtimeValue: string | number | boolean | null }>;
+	hitBreakpointIds: string[];
+}
+
+interface IAnimatorRuntimeDebugState {
+	paused: boolean;
+	breakpoints: IAnimatorDebugBreakpoint[];
+	history: IAnimatorTransitionHistoryEntry[];
+	droppedHistoryCount: number;
+	nextSequence: number;
+	runtimeSeconds: number;
+	revision: number;
+}
+
 const rootMotionSamples = new WeakMap<Scene, Map<string, { position: any; rotationY: number }>>();
 const rootMotionObservers = new WeakMap<Scene, any>();
 const animatorElapsedSeconds = new WeakMap<Scene, Map<string, number>>();
 const animatorFades = new WeakMap<Scene, Map<string, IAnimatorFade>>();
 const animatorLayerAnimationGroups = new WeakMap<Scene, AnimatorLayerAnimationGroups>();
 const animatorBehaviourActiveStates = new WeakMap<Scene, Map<string, IAnimatorState>>();
+const animatorRuntimeDebugStates = new WeakMap<Scene, Map<string, IAnimatorRuntimeDebugState>>();
+const maximumAnimatorTransitionHistory = 256;
+
+function getAnimatorRuntimeDebugState(scene: Scene, controllerId: string): IAnimatorRuntimeDebugState {
+	let states = animatorRuntimeDebugStates.get(scene);
+	if (!states) {
+		states = new Map();
+		animatorRuntimeDebugStates.set(scene, states);
+	}
+	let state = states.get(controllerId);
+	if (!state) {
+		state = { paused: false, breakpoints: [], history: [], droppedHistoryCount: 0, nextSequence: 1, runtimeSeconds: 0, revision: 0 };
+		states.set(controllerId, state);
+	}
+	return state;
+}
+
+function animatorRuntimeDebugFingerprint(controller: IAnimatorController, state: IAnimatorRuntimeDebugState): string {
+	return createHash("sha256")
+		.update(
+			JSON.stringify({
+				controllerId: controller.id,
+				paused: state.paused,
+				breakpoints: state.breakpoints,
+				revision: state.revision,
+				lastSequence: state.history.at(-1)?.sequence ?? 0,
+			})
+		)
+		.digest("hex");
+}
 
 function behaviourStateKey(controller: IAnimatorController, layer?: IAnimatorLayer): string {
 	return layer ? `${controller.id}:layer:${layer.name}` : `${controller.id}:base`;
@@ -119,7 +199,7 @@ function getBehaviourActiveStates(scene: Scene): Map<string, IAnimatorState> {
 function enterAnimatorBehaviourState(
 	scene: Scene,
 	controller: IAnimatorController,
-	_machine: ICompiledAnimatorMachine,
+	machine: ICompiledAnimatorMachine,
 	state: IAnimatorState,
 	elapsedSeconds: number,
 	normalizedTime: number,
@@ -132,6 +212,12 @@ function enterAnimatorBehaviourState(
 	if (previous) {
 		invokeAnimatorStateBehaviours(scene as any, controller, previous, "exit", { layerName: layer?.name, elapsedSeconds, normalizedTime, interrupted });
 	}
+	for (const transition of getAnimatorStateMachineBehaviourTransitions(machine, previous, state)) {
+		invokeAnimatorStateMachineBehaviours(scene as any, controller, transition.behaviours, transition.machinePath, transition.phase, {
+			layerName: layer?.name,
+			interrupted,
+		});
+	}
 	states.set(key, state);
 	invokeAnimatorStateBehaviours(scene as any, controller, state, "enter", { layerName: layer?.name, elapsedSeconds, normalizedTime, interrupted });
 }
@@ -140,7 +226,7 @@ function enterAnimatorBehaviourState(
 function exitAnimatorBehaviourState(
 	scene: Scene,
 	controller: IAnimatorController,
-	_machine: ICompiledAnimatorMachine,
+	machine: ICompiledAnimatorMachine,
 	elapsedSeconds: number,
 	normalizedTime: number,
 	layer?: IAnimatorLayer,
@@ -151,6 +237,12 @@ function exitAnimatorBehaviourState(
 	const previous = states.get(key);
 	if (previous) {
 		invokeAnimatorStateBehaviours(scene as any, controller, previous, "exit", { layerName: layer?.name, elapsedSeconds, normalizedTime, interrupted });
+	}
+	for (const transition of getAnimatorStateMachineBehaviourTransitions(machine, previous, null)) {
+		invokeAnimatorStateMachineBehaviours(scene as any, controller, transition.behaviours, transition.machinePath, transition.phase, {
+			layerName: layer?.name,
+			interrupted,
+		});
 	}
 	states.delete(key);
 }
@@ -176,12 +268,148 @@ function resolveAnimationGroup(scene: Scene, controller: IAnimatorController, gr
 		: scene.getAnimationGroupByName(groupName);
 }
 
-function stateMotions(state: IAnimatorState): IAnimatorBlendTreeMotion[] {
-	return state.blendTree
+function stateMotion<T extends IAnimatorBlendTreeMotion>(controller: IAnimatorController, state: IAnimatorState, motion: T): T {
+	const playback = resolveAnimatorStatePlayback(state, controller.parameters);
+	return {
+		...motion,
+		cycleOffset: (((motion.cycleOffset + playback.cycleOffset) % 1) + 1) % 1,
+		mirror: motion.mirror !== playback.mirror,
+	} as T;
+}
+
+function stateMotions(controller: IAnimatorController, state: IAnimatorState): IAnimatorBlendTreeMotion[] {
+	const motions = state.blendTree
 		? getAnimatorBlendTreeMotions(state.blendTree)
 		: state.animationGroup
 			? [{ key: "state", animationGroup: state.animationGroup, timeScale: 1, cycleOffset: 0, mirror: false }]
 			: [];
+	return motions.map((motion) => stateMotion(controller, state, motion));
+}
+
+function activeAnimatorMotionGroups(scene: Scene, controller: IAnimatorController): AnimationGroup[] {
+	const groups = new Map<number, AnimationGroup>();
+	const addState = (state: IAnimatorState | undefined, layer?: IAnimatorLayer): void => {
+		for (const motion of state ? stateMotions(controller, state) : []) {
+			const group = resolveStateMotionGroup(scene, controller, state!, motion, layer);
+			if (group) {
+				groups.set(group.uniqueId, group);
+			}
+		}
+	};
+	const baseMachine = compileControllerMachine(controller);
+	addState(baseMachine.states.find((state) => state.name === controller.activeState));
+	for (const state of animatorFades
+		.get(scene)
+		?.get(`${controller.id}:base`)
+		?.sources.map((source) => source.state) ?? []) {
+		addState(state);
+	}
+	addState(animatorFades.get(scene)?.get(`${controller.id}:base`)?.to);
+	for (const layer of controller.layers ?? []) {
+		const machine = compileLayerMachine(controller, layer);
+		addState(
+			machine.states.find((state) => state.name === layer.activeState),
+			layer
+		);
+		const fade = animatorFades.get(scene)?.get(`${controller.id}:layer:${layer.name}`);
+		for (const source of fade?.sources ?? []) {
+			addState(source.state, layer);
+		}
+		addState(fade?.to, layer);
+	}
+	return [...groups.values()];
+}
+
+function setAnimatorMotionGroupsPaused(scene: Scene, controller: IAnimatorController, paused: boolean): void {
+	for (const group of activeAnimatorMotionGroups(scene, controller)) {
+		if (paused && group.isPlaying) {
+			group.pause();
+		} else if (!paused && group.isStarted && !group.isPlaying) {
+			group.restart();
+		}
+	}
+}
+
+function validateAnimatorDebugBreakpoints(controller: IAnimatorController, breakpoints: any[]): IAnimatorDebugBreakpoint[] {
+	if (!Array.isArray(breakpoints) || breakpoints.length > 64) {
+		throw new Error("Animator runtime debugging accepts at most 64 transition breakpoints.");
+	}
+	const ids = new Set<string>();
+	return breakpoints.map((breakpoint, index) => {
+		if (!breakpoint || typeof breakpoint !== "object") {
+			throw new Error(`Animator breakpoint ${index} must be an object.`);
+		}
+		const id = breakpoint.id;
+		if (typeof id !== "string" || id.length < 1 || id.length > 128 || ids.has(id)) {
+			throw new Error(`Animator breakpoint ${index} requires a unique id containing 1 through 128 characters.`);
+		}
+		ids.add(id);
+		const layer = breakpoint.layer ?? "$base";
+		const machine = layer === "$base" ? compileControllerMachine(controller) : compileLayerMachine(controller, findLayer(controller, layer));
+		const stateNames = new Set(machine.states.map((state) => state.name));
+		if (breakpoint.from !== undefined && (typeof breakpoint.from !== "string" || !stateNames.has(breakpoint.from))) {
+			throw new Error(`Animator breakpoint "${id}" source state "${String(breakpoint.from)}" was not found in ${layer}.`);
+		}
+		if (breakpoint.to !== undefined && (typeof breakpoint.to !== "string" || (breakpoint.to !== ANIMATOR_EXIT_STATE && !stateNames.has(breakpoint.to)))) {
+			throw new Error(`Animator breakpoint "${id}" destination state "${String(breakpoint.to)}" was not found in ${layer}.`);
+		}
+		if (breakpoint.from === undefined && breakpoint.to === undefined) {
+			throw new Error(`Animator breakpoint "${id}" requires from, to, or both.`);
+		}
+		return {
+			id,
+			layer,
+			...(breakpoint.from === undefined ? {} : { from: breakpoint.from }),
+			...(breakpoint.to === undefined ? {} : { to: breakpoint.to }),
+			enabled: breakpoint.enabled !== false,
+		};
+	});
+}
+
+function transitionConditionEvidence(controller: IAnimatorController, transition: IAnimatorTransition): IAnimatorTransitionHistoryEntry["conditions"] {
+	return (authoredTransition(transition).conditions ?? []).map((condition) => {
+		const operator =
+			condition.equals !== undefined ? "equals" : condition.notEquals !== undefined ? "notEquals" : condition.greaterThan !== undefined ? "greaterThan" : "lessThan";
+		const authoredValue = condition[operator] as string | number | boolean;
+		return { parameter: condition.parameter, operator, authoredValue, runtimeValue: controller.parameters[condition.parameter] ?? null };
+	});
+}
+
+function recordAnimatorTransition(scene: Scene, controller: IAnimatorController, layer: "$base" | string, match: IAnimatorTransitionMatch, durationSeconds: number): void {
+	const state = getAnimatorRuntimeDebugState(scene, controller.id);
+	const authored = authoredTransition(match.transition);
+	const hitBreakpointIds = state.breakpoints
+		.filter(
+			(breakpoint) =>
+				breakpoint.enabled &&
+				breakpoint.layer === layer &&
+				(breakpoint.from === undefined || breakpoint.from === match.evaluatedState) &&
+				(breakpoint.to === undefined || breakpoint.to === match.transition.to)
+		)
+		.map((breakpoint) => breakpoint.id);
+	state.history.push({
+		sequence: state.nextSequence++,
+		runtimeSeconds: state.runtimeSeconds,
+		layer,
+		from: match.evaluatedState,
+		authoredFrom: authored.from,
+		to: match.transition.to,
+		transitionIndex: match.index,
+		interrupted: match.interrupted,
+		durationSeconds,
+		conditions: transitionConditionEvidence(controller, match.transition),
+		hitBreakpointIds,
+	});
+	if (state.history.length > maximumAnimatorTransitionHistory) {
+		const removed = state.history.length - maximumAnimatorTransitionHistory;
+		state.history.splice(0, removed);
+		state.droppedHistoryCount += removed;
+	}
+	state.revision++;
+	if (hitBreakpointIds.length) {
+		state.paused = true;
+		setAnimatorMotionGroupsPaused(scene, controller, true);
+	}
 }
 
 function resolveStateMotionGroup(
@@ -191,14 +419,16 @@ function resolveStateMotionGroup(
 	motion: IAnimatorBlendTreeMotion,
 	layer?: IAnimatorLayer
 ): AnimationGroup | null {
-	if (!state.blendTree) {
-		return resolveAnimationGroup(scene, controller, motion.animationGroup, layer);
-	}
+	const playback = resolveAnimatorStatePlayback(state, controller.parameters);
 	const requiresIndependentMotion =
+		state.cycleOffset !== undefined ||
+		state.mirror !== undefined ||
+		!!playback.bindings.cycleOffset ||
+		!!playback.bindings.mirror ||
 		motion.timeScale !== 1 ||
 		motion.cycleOffset !== 0 ||
 		motion.mirror ||
-		stateMotions(state).filter((candidate) => candidate.animationGroup === motion.animationGroup).length > 1;
+		stateMotions(controller, state).filter((candidate) => candidate.animationGroup === motion.animationGroup).length > 1;
 	if (!requiresIndependentMotion) {
 		return resolveAnimationGroup(scene, controller, motion.animationGroup, layer);
 	}
@@ -212,31 +442,37 @@ function resolveStateMotionGroup(
 }
 
 function stopStateGroups(scene: Scene, controller: IAnimatorController, state: IAnimatorState, layer?: IAnimatorLayer): void {
-	stateMotions(state).forEach((motion) => resolveStateMotionGroup(scene, controller, state, motion, layer)?.stop());
+	stateMotions(controller, state).forEach((motion) => resolveStateMotionGroup(scene, controller, state, motion, layer)?.stop());
 }
 
 function stopStateGroupsExcept(scene: Scene, controller: IAnimatorController, from: IAnimatorState, keep: IAnimatorState, layer?: IAnimatorLayer): void {
-	const keepGroups = new Set(stateMotions(keep).map((motion) => resolveStateMotionGroup(scene, controller, keep, motion, layer)));
-	stateMotions(from)
+	const keepGroups = new Set(stateMotions(controller, keep).map((motion) => resolveStateMotionGroup(scene, controller, keep, motion, layer)));
+	stateMotions(controller, from)
 		.map((motion) => resolveStateMotionGroup(scene, controller, from, motion, layer))
 		.filter((group) => group && !keepGroups.has(group))
 		.forEach((group) => group?.stop());
 }
 
-function stateDurationSeconds(scene: Scene, state: IAnimatorState): number | null {
-	const motion = stateMotions(state)[0];
+function stateDurationSeconds(scene: Scene, controller: IAnimatorController, state: IAnimatorState): number | null {
+	const motion = stateMotions(controller, state)[0];
 	const group = motion ? scene.getAnimationGroupByName(motion.animationGroup) : null;
 	const framesPerSecond = group?.targetedAnimations[0]?.animation.framePerSecond;
 	if (!group || !framesPerSecond || group.to <= group.from) {
 		return null;
 	}
-	return (group.to - group.from) / framesPerSecond / Math.abs((state.speed ?? 1) * (motion?.timeScale ?? 1));
+	const effectiveSpeed = resolveAnimatorStatePlayback(state, controller.parameters).effectiveSpeed;
+	return effectiveSpeed !== 0 ? (group.to - group.from) / framesPerSecond / Math.abs(effectiveSpeed * (motion?.timeScale ?? 1)) : null;
 }
 
 function applyRootMotion(scene: Scene, controller: IAnimatorController): void {
 	const config = controller.rootMotion;
 	const samples = rootMotionSamples.get(scene)!;
 	if (!config?.enabled) {
+		samples.delete(controller.id);
+		return;
+	}
+	const state = compileControllerMachine(controller).states.find((candidate) => candidate.name === controller.activeState);
+	if (state && resolveAnimatorStatePlayback(state, controller.parameters).timeDriven) {
 		samples.delete(controller.id);
 		return;
 	}
@@ -260,6 +496,138 @@ function applyRootMotion(scene: Scene, controller: IAnimatorController): void {
 	samples.set(controller.id, sample);
 }
 
+function advanceAnimatorControllerRuntime(scene: Scene, controller: IAnimatorController, deltaSeconds: number, ignorePause = false): boolean {
+	const debug = getAnimatorRuntimeDebugState(scene, controller.id);
+	if (debug.paused && !ignorePause) {
+		return false;
+	}
+	const previousSequence = debug.history[debug.history.length - 1]?.sequence ?? 0;
+	debug.runtimeSeconds += deltaSeconds;
+	const elapsed = animatorElapsedSeconds.get(scene)!;
+	const consumedTriggers = new Set<string>();
+	advanceAnimatorFade(scene, controller, deltaSeconds);
+	const baseMachine = compileControllerMachine(controller);
+	const state = baseMachine.states.find((candidate) => candidate.name === controller.activeState);
+	if (state) {
+		const total = (elapsed.get(controller.id) ?? 0) + deltaSeconds;
+		elapsed.set(controller.id, total);
+		const progress = stateProgress(scene, controller, state, total);
+		applyStateWriteDefaults(scene, controller, state);
+		seekStateGroups(scene, controller, state, progress);
+		if (getBehaviourActiveStates(scene).get(behaviourStateKey(controller))?.name === state.name) {
+			invokeAnimatorStateBehaviours(scene as any, controller, state, "update", { elapsedSeconds: total, normalizedTime: progress, deltaSeconds });
+		}
+		const activeFade = animatorFades.get(scene)?.get(`${controller.id}:base`);
+		const transition = activeFade
+			? findInterruptionTransition(baseMachine.transitions, activeFade, controller.parameters)
+			: findEligibleTransition(baseMachine.transitions, state.name, controller.parameters, progress);
+		if (transition) {
+			applyBaseTransition(scene, controller, transition);
+			for (const condition of transition.transition.conditions ?? []) {
+				if (controller.parameterTypes?.[condition.parameter] === "trigger") {
+					consumedTriggers.add(condition.parameter);
+				}
+			}
+		}
+	}
+	for (const layer of controller.layers ?? []) {
+		if (layer.synchronizedLayer) {
+			synchronizeAnimatorLayer(scene, controller, layer);
+			const synchronizedState = getBehaviourActiveStates(scene).get(behaviourStateKey(controller, layer));
+			if (synchronizedState) {
+				const elapsedKey = `${controller.id}:layer:${layer.name}`;
+				const total = elapsed.get(elapsedKey) ?? 0;
+				const progress = stateProgress(scene, controller, synchronizedState, total, layer);
+				invokeAnimatorStateBehaviours(scene as any, controller, synchronizedState, "update", {
+					layerName: layer.name,
+					elapsedSeconds: total,
+					normalizedTime: progress,
+					deltaSeconds,
+				});
+			}
+			continue;
+		}
+		const layerMachine = compileLayerMachine(controller, layer);
+		const layerState = layerMachine.states.find((candidate) => candidate.name === layer.activeState);
+		if (!layerState) {
+			continue;
+		}
+		const elapsedKey = `${controller.id}:layer:${layer.name}`;
+		const total = (elapsed.get(elapsedKey) ?? 0) + deltaSeconds;
+		elapsed.set(elapsedKey, total);
+		const progress = stateProgress(scene, controller, layerState, total, layer);
+		applyStateWriteDefaults(scene, controller, layerState, layer);
+		seekStateGroups(scene, controller, layerState, progress, layer);
+		if (getBehaviourActiveStates(scene).get(behaviourStateKey(controller, layer))?.name === layerState.name) {
+			invokeAnimatorStateBehaviours(scene as any, controller, layerState, "update", {
+				layerName: layer.name,
+				elapsedSeconds: total,
+				normalizedTime: progress,
+				deltaSeconds,
+			});
+		}
+		const activeFade = animatorFades.get(scene)?.get(`${controller.id}:layer:${layer.name}`);
+		const transition = activeFade
+			? findInterruptionTransition(layerMachine.transitions, activeFade, controller.parameters)
+			: findEligibleTransition(layerMachine.transitions, layerState.name, controller.parameters, progress);
+		if (transition) {
+			applyLayerTransition(scene, controller, layer, transition);
+			for (const condition of transition.transition.conditions ?? []) {
+				if (controller.parameterTypes?.[condition.parameter] === "trigger") {
+					consumedTriggers.add(condition.parameter);
+				}
+			}
+		}
+	}
+	for (const parameter of consumedTriggers) {
+		controller.parameters[parameter] = false;
+	}
+	if (state) {
+		applyAnimatorFootIK(scene as any, controller, { name: "$base", weight: 1 }, state);
+	}
+	for (const layer of controller.layers ?? []) {
+		const footIKState = layer.synchronizedLayer
+			? getBehaviourActiveStates(scene).get(behaviourStateKey(controller, layer))
+			: compileLayerMachine(controller, layer).states.find((candidate) => candidate.name === layer.activeState);
+		if (footIKState) {
+			applyAnimatorFootIK(scene as any, controller, layer, footIKState);
+		}
+	}
+	if (controller.baseIKPass === true) {
+		const ikState = compileControllerMachine(controller).states.find((candidate) => candidate.name === controller.activeState);
+		if (ikState) {
+			const elapsedSeconds = elapsed.get(controller.id) ?? 0;
+			const normalizedTime = stateProgress(scene, controller, ikState, elapsedSeconds);
+			invokeAnimatorIKPass(scene as any, controller, { name: "$base", weight: 1, ikPass: true }, ikState, {
+				elapsedSeconds,
+				normalizedTime,
+				deltaSeconds,
+			});
+		}
+	}
+	for (const layer of controller.layers ?? []) {
+		if (layer.ikPass !== true) {
+			continue;
+		}
+		const ikState = layer.synchronizedLayer
+			? getBehaviourActiveStates(scene).get(behaviourStateKey(controller, layer))
+			: compileLayerMachine(controller, layer).states.find((candidate) => candidate.name === layer.activeState);
+		if (!ikState) {
+			continue;
+		}
+		const elapsedSeconds = elapsed.get(`${controller.id}:layer:${layer.name}`) ?? 0;
+		const normalizedTime = stateProgress(scene, controller, ikState, elapsedSeconds, layer);
+		invokeAnimatorIKPass(scene as any, controller, layer, ikState, { elapsedSeconds, normalizedTime, deltaSeconds });
+	}
+	applyRootMotion(scene, controller);
+	captureAnimatorHumanoidMuscleTrace(scene as any, controller, { runtimeSeconds: debug.runtimeSeconds, deltaSeconds });
+	if (debug.paused) {
+		setAnimatorMotionGroupsPaused(scene, controller, true);
+	}
+	const latest = debug.history[debug.history.length - 1];
+	return !!latest && latest.sequence > previousSequence && latest.hitBreakpointIds.length > 0;
+}
+
 function ensureRootMotion(scene: Scene): void {
 	if (rootMotionObservers.has(scene)) {
 		return;
@@ -272,117 +640,9 @@ function ensureRootMotion(scene: Scene): void {
 		scene,
 		scene.onBeforeRenderObservable.add(
 			() => {
-				const elapsed = animatorElapsedSeconds.get(scene)!;
 				const deltaSeconds = scene.getEngine().getDeltaTime() / 1000;
 				for (const controller of getControllers(scene)) {
-					const consumedTriggers = new Set<string>();
-					advanceAnimatorFade(scene, controller, deltaSeconds);
-					const baseMachine = compileControllerMachine(controller);
-					const state = baseMachine.states.find((candidate) => candidate.name === controller.activeState);
-					if (state) {
-						const total = (elapsed.get(controller.id) ?? 0) + deltaSeconds;
-						elapsed.set(controller.id, total);
-						const duration = effectiveStateDuration(scene, controller, state);
-						const progress = duration ? ((state.loop ?? true) ? (total % duration) / duration : Math.min(1, total / duration)) : 0;
-						seekStateGroups(scene, controller, state, progress);
-						if (getBehaviourActiveStates(scene).get(behaviourStateKey(controller))?.name === state.name) {
-							invokeAnimatorStateBehaviours(scene as any, controller, state, "update", { elapsedSeconds: total, normalizedTime: progress, deltaSeconds });
-						}
-						const activeFade = animatorFades.get(scene)?.get(`${controller.id}:base`);
-						const transition = activeFade
-							? findInterruptionTransition(baseMachine.transitions, activeFade, controller.parameters)
-							: findEligibleTransition(baseMachine.transitions, state.name, controller.parameters, progress);
-						if (transition) {
-							applyBaseTransition(scene, controller, transition);
-							for (const condition of transition.transition.conditions ?? []) {
-								if (controller.parameterTypes?.[condition.parameter] === "trigger") {
-									consumedTriggers.add(condition.parameter);
-								}
-							}
-						}
-					}
-					for (const layer of controller.layers ?? []) {
-						if (layer.synchronizedLayer) {
-							synchronizeAnimatorLayer(scene, controller, layer);
-							const synchronizedState = getBehaviourActiveStates(scene).get(behaviourStateKey(controller, layer));
-							if (synchronizedState) {
-								const elapsedKey = `${controller.id}:layer:${layer.name}`;
-								const total = elapsed.get(elapsedKey) ?? 0;
-								const duration = effectiveStateDuration(scene, controller, synchronizedState, layer);
-								const progress = duration ? ((synchronizedState.loop ?? true) ? (total % duration) / duration : Math.min(1, total / duration)) : 0;
-								invokeAnimatorStateBehaviours(scene as any, controller, synchronizedState, "update", {
-									layerName: layer.name,
-									elapsedSeconds: total,
-									normalizedTime: progress,
-									deltaSeconds,
-								});
-							}
-							continue;
-						}
-						const layerMachine = compileLayerMachine(controller, layer);
-						const layerState = layerMachine.states.find((candidate) => candidate.name === layer.activeState);
-						if (!layerState) {
-							continue;
-						}
-						const elapsedKey = `${controller.id}:layer:${layer.name}`;
-						const total = (elapsed.get(elapsedKey) ?? 0) + deltaSeconds;
-						elapsed.set(elapsedKey, total);
-						const duration = effectiveStateDuration(scene, controller, layerState, layer);
-						const progress = duration ? ((layerState.loop ?? true) ? (total % duration) / duration : Math.min(1, total / duration)) : 0;
-						seekStateGroups(scene, controller, layerState, progress, layer);
-						if (getBehaviourActiveStates(scene).get(behaviourStateKey(controller, layer))?.name === layerState.name) {
-							invokeAnimatorStateBehaviours(scene as any, controller, layerState, "update", {
-								layerName: layer.name,
-								elapsedSeconds: total,
-								normalizedTime: progress,
-								deltaSeconds,
-							});
-						}
-						const activeFade = animatorFades.get(scene)?.get(`${controller.id}:layer:${layer.name}`);
-						const transition = activeFade
-							? findInterruptionTransition(layerMachine.transitions, activeFade, controller.parameters)
-							: findEligibleTransition(layerMachine.transitions, layerState.name, controller.parameters, progress);
-						if (transition) {
-							applyLayerTransition(scene, controller, layer, transition);
-							for (const condition of transition.transition.conditions ?? []) {
-								if (controller.parameterTypes?.[condition.parameter] === "trigger") {
-									consumedTriggers.add(condition.parameter);
-								}
-							}
-						}
-					}
-					for (const parameter of consumedTriggers) {
-						controller.parameters[parameter] = false;
-					}
-					if (controller.baseIKPass === true) {
-						const ikState = compileControllerMachine(controller).states.find((candidate) => candidate.name === controller.activeState);
-						if (ikState) {
-							const elapsedSeconds = elapsed.get(controller.id) ?? 0;
-							const duration = effectiveStateDuration(scene, controller, ikState);
-							const normalizedTime = duration ? ((ikState.loop ?? true) ? (elapsedSeconds % duration) / duration : Math.min(1, elapsedSeconds / duration)) : 0;
-							invokeAnimatorIKPass(scene as any, controller, { name: "$base", weight: 1, ikPass: true }, ikState, {
-								elapsedSeconds,
-								normalizedTime,
-								deltaSeconds,
-							});
-						}
-					}
-					for (const layer of controller.layers ?? []) {
-						if (layer.ikPass !== true) {
-							continue;
-						}
-						const ikState = layer.synchronizedLayer
-							? getBehaviourActiveStates(scene).get(behaviourStateKey(controller, layer))
-							: compileLayerMachine(controller, layer).states.find((candidate) => candidate.name === layer.activeState);
-						if (!ikState) {
-							continue;
-						}
-						const elapsedSeconds = elapsed.get(`${controller.id}:layer:${layer.name}`) ?? 0;
-						const duration = effectiveStateDuration(scene, controller, ikState, layer);
-						const normalizedTime = duration ? ((ikState.loop ?? true) ? (elapsedSeconds % duration) / duration : Math.min(1, elapsedSeconds / duration)) : 0;
-						invokeAnimatorIKPass(scene as any, controller, layer, ikState, { elapsedSeconds, normalizedTime, deltaSeconds });
-					}
-					applyRootMotion(scene, controller);
+					advanceAnimatorControllerRuntime(scene, controller, deltaSeconds);
 				}
 			},
 			-1,
@@ -404,6 +664,66 @@ function findController(scene: Scene, data: any): IAnimatorController {
 		throw new Error("Animator controller not found. Provide controllerId (preferred) or controllerName.");
 	}
 	return controller;
+}
+
+function humanoidAvatars(scene: Scene): IHumanoidAvatar[] {
+	return ((scene.metadata?.babylonEditorHumanoidAvatars as IHumanoidAvatar[] | undefined) ?? []).filter((avatar) => avatar.animationType === "humanoid");
+}
+
+function validateControllerHumanoidAvatar(scene: Scene, avatarId: string | undefined): IHumanoidAvatar | null {
+	if (avatarId === undefined) {
+		return null;
+	}
+	const avatar = humanoidAvatars(scene).find((candidate) => candidate.id === avatarId);
+	if (!avatar) {
+		throw new Error(`Humanoid Avatar "${avatarId}" was not found.`);
+	}
+	if (!scene.skeletons.some((skeleton) => skeleton.id === avatar.skeletonId)) {
+		throw new Error(`Skeleton "${avatar.skeletonId}" for Humanoid Avatar "${avatarId}" was not found.`);
+	}
+	return avatar;
+}
+
+function normalizeMuscleTraceRoles(roles: unknown): HumanBone[] | undefined {
+	if (roles === undefined) {
+		return undefined;
+	}
+	if (!Array.isArray(roles) || roles.length > HUMAN_BONES.length) {
+		throw new Error(`roles must be an array of at most ${HUMAN_BONES.length} Humanoid bone roles.`);
+	}
+	const known = new Set<string>(HUMAN_BONES);
+	const normalized = roles.map((role) => {
+		if (typeof role !== "string" || !known.has(role)) {
+			throw new Error(`Unknown Humanoid muscle role "${String(role)}".`);
+		}
+		return role as HumanBone;
+	});
+	if (new Set(normalized).size !== normalized.length) {
+		throw new Error("roles must not contain duplicates.");
+	}
+	return normalized;
+}
+
+function animatorHumanoidMuscleTraceFingerprint(scene: Scene, controller: IAnimatorController): string {
+	const avatar = controller.humanoidAvatarId ? humanoidAvatars(scene).find((candidate) => candidate.id === controller.humanoidAvatarId) : null;
+	const skeleton = avatar ? scene.skeletons.find((candidate) => candidate.id === avatar.skeletonId) : null;
+	const trace = getAnimatorHumanoidMuscleTrace(scene as any, controller, { limit: 1 });
+	return createHash("sha256")
+		.update(
+			JSON.stringify({
+				controller: { id: controller.id, name: controller.name, humanoidAvatarId: controller.humanoidAvatarId ?? null },
+				avatar: avatar ?? null,
+				skeleton: skeleton ? skeleton.bones.map((bone) => ({ name: bone.name, parentName: bone.getParent()?.name ?? null, index: bone.getIndex() })) : null,
+				trace: {
+					revision: trace.revision,
+					total: trace.history.total,
+					droppedSampleCount: trace.droppedSampleCount,
+					latestSequence: trace.latest?.sequence ?? null,
+					lastError: trace.lastError,
+				},
+			})
+		)
+		.digest("hex");
 }
 
 function compileControllerMachine(controller: IAnimatorController): ICompiledAnimatorMachine {
@@ -468,7 +788,7 @@ function synchronizedTargetState(controller: IAnimatorController, layer: IAnimat
 }
 
 function effectiveStateDuration(scene: Scene, controller: IAnimatorController, state: IAnimatorState, sourceLayer?: IAnimatorLayer): number | null {
-	let duration = stateDurationSeconds(scene, state);
+	let duration = stateDurationSeconds(scene, controller, state);
 	if (!duration || sourceLayer?.synchronizedLayer) {
 		return duration;
 	}
@@ -477,7 +797,7 @@ function effectiveStateDuration(scene: Scene, controller: IAnimatorController, s
 		if (layer.synchronizedLayer !== sourceName || layer.synchronizedTiming !== true) {
 			continue;
 		}
-		const targetDuration = stateDurationSeconds(scene, synchronizedTargetState(controller, layer, state));
+		const targetDuration = stateDurationSeconds(scene, controller, synchronizedTargetState(controller, layer, state));
 		if (targetDuration) {
 			duration += (targetDuration - duration) * Math.min(1, Math.max(0, layer.weight ?? 1));
 		}
@@ -485,11 +805,26 @@ function effectiveStateDuration(scene: Scene, controller: IAnimatorController, s
 	return duration;
 }
 
+function stateProgress(scene: Scene, controller: IAnimatorController, state: IAnimatorState, elapsedSeconds: number, layer?: IAnimatorLayer): number {
+	const playback = resolveAnimatorStatePlayback(state, controller.parameters);
+	if (playback.time !== null) {
+		return (state.loop ?? true) ? ((playback.time % 1) + 1) % 1 : Math.min(1, Math.max(0, playback.time));
+	}
+	const duration = effectiveStateDuration(scene, controller, state, layer);
+	return duration ? ((state.loop ?? true) ? (elapsedSeconds % duration) / duration : Math.min(1, elapsedSeconds / duration)) : 0;
+}
+
+function stateMotionPhase(controller: IAnimatorController, state: IAnimatorState, motion: IAnimatorBlendTreeMotion, normalizedTime: number): number {
+	const playback = resolveAnimatorStatePlayback(state, controller.parameters);
+	const raw = normalizedTime * (playback.timeDriven ? 1 : Math.sign(playback.effectiveSpeed || 1)) * motion.timeScale + motion.cycleOffset;
+	return (state.loop ?? true) ? ((raw % 1) + 1) % 1 : Math.min(1, Math.max(0, raw));
+}
+
 function seekStateGroups(scene: Scene, controller: IAnimatorController, state: IAnimatorState, normalizedTime: number, layer?: IAnimatorLayer): void {
-	for (const motion of stateMotions(state)) {
+	for (const motion of stateMotions(controller, state)) {
 		const group = resolveStateMotionGroup(scene, controller, state, motion, layer);
 		if (group?.isStarted) {
-			const phase = (((normalizedTime * motion.timeScale + motion.cycleOffset) % 1) + 1) % 1;
+			const phase = stateMotionPhase(controller, state, motion, normalizedTime);
 			group.goToFrame(group.from + (group.to - group.from) * phase);
 		}
 	}
@@ -568,6 +903,15 @@ function validateStates(scene: Scene, states: IAnimatorState[]): void {
 		}
 		if (state.blendTree) {
 			validateBlendTree(scene, state.name, state.blendTree);
+		}
+		if (state.speed !== undefined && (!Number.isFinite(state.speed) || state.speed === 0)) {
+			throw new Error(`Animator state "${state.name}" speed must be a finite non-zero number.`);
+		}
+		if (state.cycleOffset !== undefined && (!Number.isFinite(state.cycleOffset) || state.cycleOffset < 0 || state.cycleOffset > 1)) {
+			throw new Error(`Animator state "${state.name}" cycleOffset must be normalized between 0 and 1.`);
+		}
+		if (state.tag !== undefined && (typeof state.tag !== "string" || state.tag.length > 256)) {
+			throw new Error(`Animator state "${state.name}" tag cannot exceed 256 characters.`);
 		}
 		if (state.graphPosition && (state.graphPosition.length !== 2 || state.graphPosition.some((value) => !Number.isFinite(value)))) {
 			throw new Error(`Animator state "${state.name}" graphPosition must contain two finite numbers.`);
@@ -704,7 +1048,14 @@ function applyStateMask(
 	const legacyNames = state.maskTargetNames ?? fallbackTargetNames;
 	const names = [...new Set([...(avatarMaskId ? humanoidMaskNames(scene, avatarMaskId) : []), ...legacyNames])];
 	const configured = !!avatarMaskId || names.length > 0;
-	for (const motion of stateMotions(state)) {
+	const motions = controller
+		? stateMotions(controller, state)
+		: state.blendTree
+			? getAnimatorBlendTreeMotions(state.blendTree)
+			: state.animationGroup
+				? [{ key: "state", animationGroup: state.animationGroup, timeScale: 1, cycleOffset: state.cycleOffset ?? 0, mirror: state.mirror === true }]
+				: [];
+	for (const motion of motions) {
 		const group = controller ? resolveStateMotionGroup(scene, controller, state, motion, layer) : scene.getAnimationGroupByName(motion.animationGroup);
 		if (group) {
 			group.mask = configured ? new AnimationGroupMask(names) : null;
@@ -731,7 +1082,8 @@ function applyBlendTree(scene: Scene, controller: IAnimatorController, state: IA
 	if (!tree) {
 		return;
 	}
-	for (const motion of evaluateAnimatorBlendTreeMotions(tree, controller.parameters)) {
+	for (const evaluatedMotion of evaluateAnimatorBlendTreeMotions(tree, controller.parameters)) {
+		const motion = stateMotion(controller, state, evaluatedMotion);
 		const group = resolveStateMotionGroup(scene, controller, state, motion, layer);
 		if (group) {
 			group.weight = motion.weight * weight;
@@ -743,8 +1095,8 @@ function applyStateWeight(scene: Scene, controller: IAnimatorController, state: 
 	if (state.blendTree) {
 		applyBlendTree(scene, controller, state, weight, layer);
 	} else {
-		stateGroups(state).forEach((groupName) => {
-			const group = resolveAnimationGroup(scene, controller, groupName, layer);
+		stateMotions(controller, state).forEach((motion) => {
+			const group = resolveStateMotionGroup(scene, controller, state, motion, layer);
 			if (group) {
 				group.weight = weight;
 			}
@@ -879,6 +1231,32 @@ function validateTransitionParameters(
 	}
 }
 
+function validateStatePlaybackParameters(
+	parameters: IAnimatorController["parameters"],
+	parameterTypes: Record<string, IAnimatorParameterType>,
+	states: IAnimatorState[],
+	owner: string
+): void {
+	for (const state of states) {
+		for (const [field, parameter, expectedType] of [
+			["speedParameter", state.speedParameter === undefined ? state.unitySource?.speedParameter : state.speedParameter, "float"],
+			["mirrorParameter", state.mirrorParameter === undefined ? state.unitySource?.mirrorParameter : state.mirrorParameter, "bool"],
+			["cycleOffsetParameter", state.cycleOffsetParameter === undefined ? state.unitySource?.cycleOffsetParameter : state.cycleOffsetParameter, "float"],
+			["timeParameter", state.timeParameter === undefined ? state.unitySource?.timeParameter : state.timeParameter, "float"],
+		] as const) {
+			if (!parameter) {
+				continue;
+			}
+			if (!Object.prototype.hasOwnProperty.call(parameters, parameter)) {
+				throw new Error(`${owner} state "${state.name}" ${field} references missing parameter "${parameter}".`);
+			}
+			if (parameterTypes[parameter] !== expectedType) {
+				throw new Error(`${owner} state "${state.name}" ${field} requires a ${expectedType} parameter, not "${parameterTypes[parameter]}".`);
+			}
+		}
+	}
+}
+
 function validateEntryState(machine: IAnimatorGraphMachine, entryState: string | undefined, owner: string): string {
 	const resolved = entryState ?? machine.states[0]?.name;
 	if (!resolved || (!machine.states.some((state) => state.name === resolved) && !(machine.subStateMachines ?? []).some((instance) => instance.name === resolved))) {
@@ -896,6 +1274,7 @@ function validateSubgraphs(
 	for (const subgraph of subgraphs) {
 		validateStates(scene, subgraph.states);
 		validateBlendTreeParameters(parameters, subgraph.states);
+		validateStatePlaybackParameters(parameters, parameterTypes, subgraph.states, `Animator subgraph "${subgraph.name}"`);
 		validateTransitions(subgraph);
 		validateTransitionParameters(parameters, parameterTypes, subgraph.transitions ?? [], `Animator subgraph "${subgraph.name}"`);
 		validateTransitionParameters(parameters, parameterTypes, subgraph.entryTransitions ?? [], `Animator subgraph "${subgraph.name}" Entry`);
@@ -948,6 +1327,7 @@ function validateLayers(
 		}
 		validateStates(scene, layer.states);
 		validateBlendTreeParameters(parameters, layer.states);
+		validateStatePlaybackParameters(parameters, parameterTypes, layer.states, `Animator layer "${layer.name}"`);
 		validateTransitions(layer);
 		validateTransitionParameters(parameters, parameterTypes, layer.transitions ?? [], `Animator layer "${layer.name}"`);
 		validateTransitionParameters(parameters, parameterTypes, layer.entryTransitions ?? [], `Animator layer "${layer.name}" Entry`);
@@ -1050,6 +1430,31 @@ function validateBehaviourScriptBindings(scene: Scene, controller: IAnimatorCont
 	}
 }
 
+function validateAllBehaviourScriptBindings(
+	scene: Scene,
+	controller: IAnimatorController,
+	rootMachine: IAnimatorGraphMachine,
+	subgraphs: IAnimatorSubgraphDefinition[],
+	layers: IAnimatorLayer[]
+): void {
+	const validateMachine = (machine: IAnimatorGraphMachine): void => {
+		validateBehaviourScriptBindings(scene, controller, machine.behaviours ?? []);
+		for (const state of machine.states) {
+			validateBehaviourScriptBindings(scene, controller, state.behaviours ?? []);
+		}
+	};
+	validateMachine(rootMachine);
+	for (const subgraph of subgraphs) {
+		validateMachine(subgraph);
+	}
+	for (const layer of layers) {
+		validateMachine(layer);
+		for (const behaviours of Object.values(layer.synchronizedBehaviourOverrides ?? {})) {
+			validateBehaviourScriptBindings(scene, controller, behaviours);
+		}
+	}
+}
+
 // eslint-disable-next-line max-params -- state playback needs the controller, mask, offset, and optional layer context together.
 function startStateGroups(
 	scene: Scene,
@@ -1064,17 +1469,28 @@ function startStateGroups(
 	const legacyNames = state.maskTargetNames ?? fallbackTargetNames;
 	const names = [...new Set([...(avatarMaskId ? humanoidMaskNames(scene, avatarMaskId) : []), ...legacyNames])];
 	const configured = !!avatarMaskId || names.length > 0;
-	for (const motion of stateMotions(state)) {
-		const group = resolveStateMotionGroup(scene, controller, state, motion, layer);
-		if (!group) {
-			continue;
-		}
+	const playback = resolveAnimatorStatePlayback(state, controller.parameters);
+	const normalizedOffset = playback.time === null ? offset : (state.loop ?? true) ? ((playback.time % 1) + 1) % 1 : Math.min(1, Math.max(0, playback.time));
+	const motions = stateMotions(controller, state)
+		.map((motion) => ({ motion, group: resolveStateMotionGroup(scene, controller, state, motion, layer) }))
+		.filter((entry): entry is { motion: IAnimatorBlendTreeMotion; group: AnimationGroup } => !!entry.group);
+	for (const { group } of motions) {
 		group.mask = configured ? new AnimationGroupMask(names) : null;
-		const phase = (((offset * motion.timeScale + motion.cycleOffset) % 1) + 1) % 1;
+	}
+	applyStateWriteDefaults(scene, controller, state, layer);
+	for (const { motion, group } of motions) {
+		const phase = stateMotionPhase(controller, state, motion, normalizedOffset);
 		const from = group.from + (group.to - group.from) * phase;
-		group.start(state.loop ?? true, (state.speed ?? 1) * motion.timeScale, from, group.to, layer?.blendingMode === "additive");
+		group.start(state.loop ?? true, playback.effectiveSpeed * motion.timeScale, from, group.to, layer?.blendingMode === "additive");
 		group.goToFrame(from);
 	}
+}
+
+function applyStateWriteDefaults(scene: Scene, controller: IAnimatorController, state: IAnimatorState, layer?: IAnimatorLayer): void {
+	const groups = stateMotions(controller, state)
+		.map((motion) => resolveStateMotionGroup(scene, controller, state, motion, layer))
+		.filter((group): group is AnimationGroup => !!group);
+	applyAnimatorWriteDefaults(scene as any, controller, layer?.name ?? "$base", state, groups);
 }
 
 function transitionSources(
@@ -1210,9 +1626,8 @@ function synchronizeAnimatorLayer(scene: Scene, controller: IAnimatorController,
 	const targetState = synchronizedTargetState(controller, layer, sourceState);
 	const sourceElapsedKey = sourceLayer ? `${controller.id}:layer:${sourceLayer.name}` : controller.id;
 	const sourceElapsed = animatorElapsedSeconds.get(scene)?.get(sourceElapsedKey) ?? 0;
-	const sourceDuration = effectiveStateDuration(scene, controller, sourceState, sourceLayer);
-	const normalizedTime = sourceDuration ? ((sourceState.loop ?? true) ? (sourceElapsed % sourceDuration) / sourceDuration : Math.min(1, sourceElapsed / sourceDuration)) : 0;
-	const sourceMotion = stateMotions(sourceState)[0];
+	const normalizedTime = stateProgress(scene, controller, sourceState, sourceElapsed, sourceLayer);
+	const sourceMotion = stateMotions(controller, sourceState)[0];
 	const sourceGroup = sourceMotion ? resolveStateMotionGroup(scene, controller, sourceState, sourceMotion, sourceLayer) : null;
 	if (!sourceGroup?.isStarted) {
 		layer.activeState = targetState.name;
@@ -1227,9 +1642,10 @@ function synchronizeAnimatorLayer(scene: Scene, controller: IAnimatorController,
 		});
 	}
 	const elapsedKey = `${controller.id}:layer:${layer.name}`;
-	const targetDuration = stateDurationSeconds(scene, targetState);
+	const targetDuration = stateDurationSeconds(scene, controller, targetState);
 	animatorElapsedSeconds.get(scene)?.set(elapsedKey, targetDuration ? targetDuration * normalizedTime : 0);
-	for (const motion of stateMotions(targetState)) {
+	applyStateWriteDefaults(scene, controller, targetState, layer);
+	for (const motion of stateMotions(controller, targetState)) {
 		const group = resolveStateMotionGroup(scene, controller, targetState, motion, layer);
 		if (!group) {
 			continue;
@@ -1238,7 +1654,7 @@ function synchronizeAnimatorLayer(scene: Scene, controller: IAnimatorController,
 			startStateGroups(scene, controller, targetState, layer.maskTargetNames ?? [], layer.avatarMaskId, normalizedTime, layer);
 			break;
 		}
-		const phase = (((normalizedTime * motion.timeScale + motion.cycleOffset) % 1) + 1) % 1;
+		const phase = stateMotionPhase(controller, targetState, motion, normalizedTime);
 		group.goToFrame(group.from + (group.to - group.from) * phase);
 	}
 	applyStateWeight(scene, controller, targetState, layer.weight ?? 1, layer);
@@ -1405,6 +1821,7 @@ function applyBaseTransition(scene: Scene, controller: IAnimatorController, matc
 	} else {
 		startState(scene, controller, match.transition.to, duration, match.transition.offset ?? 0, match);
 	}
+	recordAnimatorTransition(scene, controller, "$base", match, duration);
 }
 
 function applyLayerTransition(scene: Scene, controller: IAnimatorController, layer: IAnimatorLayer, match: IAnimatorTransitionMatch): void {
@@ -1423,6 +1840,7 @@ function applyLayerTransition(scene: Scene, controller: IAnimatorController, lay
 			match,
 		});
 	}
+	recordAnimatorTransition(scene, controller, layer.name, match, duration ?? 0);
 }
 
 function animationGroupDebug(scene: Scene, controller: IAnimatorController, state: IAnimatorState, motion: IAnimatorBlendTreeMotion, layer?: IAnimatorLayer): any {
@@ -1469,10 +1887,11 @@ function animatorMachineDebug(
 	const elapsedSeconds = animatorElapsedSeconds.get(scene)?.get(elapsedKey) ?? 0;
 	const durationSeconds = activeState
 		? layer?.synchronizedLayer
-			? stateDurationSeconds(scene, activeState)
+			? stateDurationSeconds(scene, controller, activeState)
 			: effectiveStateDuration(scene, controller, activeState, layer)
 		: null;
-	const normalizedTime = durationSeconds && durationSeconds > 0 ? elapsedSeconds / durationSeconds : 0;
+	const normalizedTime = activeState ? stateProgress(scene, controller, activeState, elapsedSeconds, layer) : 0;
+	const playback = activeState ? resolveAnimatorStatePlayback(activeState, controller.parameters) : null;
 	const fade = animatorFades.get(scene)?.get(fadeKey);
 	const transitionProgress = fade ? Math.min(1, fade.elapsed / fade.duration) : null;
 	const fadeSourceNames = new Set(fade?.sources.map((source) => source.state.name) ?? []);
@@ -1480,7 +1899,9 @@ function animatorMachineDebug(
 	const relevantStates = includeAllClips
 		? debugStates
 		: debugStates.filter((state) => state.name === activeState?.name || fadeSourceNames.has(state.name) || state.name === fade?.to?.name);
-	const clips = relevantStates.flatMap((state) => stateMotions(state).map((motion) => ({ state: state.name, ...animationGroupDebug(scene, controller, state, motion, layer) })));
+	const clips = relevantStates.flatMap((state) =>
+		stateMotions(controller, state).map((motion) => ({ state: state.name, ...animationGroupDebug(scene, controller, state, motion, layer) }))
+	);
 	const warnings: string[] = [];
 	if (activeStateName && !activeState) {
 		warnings.push(`Active state "${activeStateName}" is missing.`);
@@ -1500,9 +1921,19 @@ function animatorMachineDebug(
 		elapsedSeconds,
 		durationSeconds,
 		normalizedTime,
-		loopProgress: activeState && durationSeconds ? ((activeState.loop ?? true) ? normalizedTime % 1 : Math.min(1, normalizedTime)) : 0,
+		loopProgress: activeState ? ((activeState.loop ?? true) ? ((normalizedTime % 1) + 1) % 1 : Math.min(1, Math.max(0, normalizedTime))) : 0,
 		speed: activeState?.speed ?? null,
+		effectiveSpeed: playback?.effectiveSpeed ?? null,
+		cycleOffset: playback?.cycleOffset ?? 0,
+		mirror: playback?.mirror ?? false,
+		timeDriven: playback?.timeDriven ?? false,
+		time: playback?.time ?? null,
+		playbackBindings: playback?.bindings ?? null,
 		loop: activeState?.loop ?? null,
+		tag: activeState?.tag ?? null,
+		footIK: activeState?.footIK ?? null,
+		writeDefaultValues: activeState?.writeDefaultValues ?? null,
+		unitySource: activeState?.unitySource ?? null,
 		transition: fade
 			? {
 					from: fade.sourceState ?? fade.sources[0]?.state.name ?? null,
@@ -1547,9 +1978,14 @@ export function createAnimatorController(scene: Scene, data: any, options: IMCPA
 	const parameterTypes = normalizeParameterTypes(parameters, data.parameterTypes);
 	const layers = (data.layers ?? []).map((layer: IAnimatorLayer) => ({
 		...layer,
+		behaviours: layer.behaviours ?? [],
+		transitions: layer.transitions ?? [],
+		entryTransitions: layer.entryTransitions ?? [],
+		subStateMachines: layer.subStateMachines ?? [],
 		entryState: layer.entryState ?? layer.activeState ?? layer.states?.[0]?.name,
 	}));
 	const rootMachine: IAnimatorGraphMachine = {
+		behaviours: data.behaviours ?? [],
 		states,
 		transitions,
 		entryTransitions: data.entryTransitions ?? [],
@@ -1559,12 +1995,14 @@ export function createAnimatorController(scene: Scene, data: any, options: IMCPA
 	};
 	validateStates(scene, states);
 	validateBlendTreeParameters(parameters, states);
+	validateStatePlaybackParameters(parameters, parameterTypes, states, "Animator controller");
 	validateTransitions(rootMachine);
 	validateTransitionParameters(parameters, parameterTypes, transitions, "Animator controller");
 	validateTransitionParameters(parameters, parameterTypes, rootMachine.entryTransitions ?? [], "Animator controller Entry");
 	validateSubgraphs(scene, parameters, parameterTypes, subgraphs);
 	validateLayers(scene, parameters, parameterTypes, layers, subgraphs, rootMachine);
 	validateRootMotion(scene, data.rootMotion);
+	validateControllerHumanoidAvatar(scene, data.humanoidAvatarId);
 	if (getControllers(scene).some((controller) => controller.name === data.name)) {
 		throw new Error(`Animator controller "${data.name}" already exists.`);
 	}
@@ -1583,9 +2021,11 @@ export function createAnimatorController(scene: Scene, data: any, options: IMCPA
 		id: Tools.RandomId(),
 		name: data.name,
 		targetNodeId: data.targetNodeId,
+		humanoidAvatarId: data.humanoidAvatarId,
 		parameters,
 		parameterTypes,
 		baseIKPass: data.baseIKPass ?? false,
+		behaviours: rootMachine.behaviours,
 		states,
 		transitions,
 		entryTransitions: data.entryTransitions ?? [],
@@ -1596,6 +2036,7 @@ export function createAnimatorController(scene: Scene, data: any, options: IMCPA
 		layers: normalizedLayers,
 		rootMotion: data.rootMotion,
 	};
+	validateAllBehaviourScriptBindings(scene, controller, rootMachine, subgraphs, normalizedLayers);
 	getControllers(scene).push(controller);
 	ensureRootMotion(scene);
 	if (data.playOnCreate) {
@@ -1667,6 +2108,7 @@ export function setAnimatorSubgraph(scene: Scene, data: any, options: IMCPAction
 	const replacement: IAnimatorSubgraphDefinition = {
 		id: existing?.id ?? Tools.RandomId(),
 		name: data.name ?? existing!.name,
+		behaviours: data.behaviours ?? existing?.behaviours ?? [],
 		states: data.states ?? existing!.states,
 		transitions: data.transitions ?? existing?.transitions ?? [],
 		entryTransitions: data.entryTransitions ?? existing?.entryTransitions ?? [],
@@ -1819,10 +2261,99 @@ export function setAnimatorSubStateMachine(scene: Scene, data: any, options: IMC
 	return setAnimatorController(scene, { controllerId: controller.id, ...machineUpdate }, options);
 }
 
-/** Captures the live Animator state, timing, cross-fade, parameter, layer, clip-weight, and root-motion evidence. */
+function animatorRuntimeDebuggerSnapshot(controller: IAnimatorController, state: IAnimatorRuntimeDebugState, historyLimit: number): any {
+	const history = state.history.slice(-historyLimit);
+	return {
+		fingerprint: animatorRuntimeDebugFingerprint(controller, state),
+		paused: state.paused,
+		runtimeSeconds: state.runtimeSeconds,
+		breakpoints: structuredClone(state.breakpoints),
+		history: structuredClone(history),
+		historyCount: state.history.length,
+		droppedHistoryCount: state.droppedHistoryCount,
+		historyTruncated: state.droppedHistoryCount > 0 || history.length < state.history.length,
+		lastSequence: state.history[state.history.length - 1]?.sequence ?? 0,
+	};
+}
+
+/** Atomically replaces runtime-only debugger pause/breakpoint state and optionally clears its bounded transition history. */
+export function setAnimatorRuntimeDebug(scene: Scene, data: any, options: IMCPActionOptions): any {
+	const controller = findController(scene, data);
+	ensureRootMotion(scene);
+	const state = getAnimatorRuntimeDebugState(scene, controller.id);
+	if (data.expectedFingerprint !== animatorRuntimeDebugFingerprint(controller, state)) {
+		throw new Error("Animator runtime debugger changed after inspection. Call get_animator_runtime_debug again and use its exact debugger fingerprint.");
+	}
+	if (data.paused === undefined && data.breakpoints === undefined && data.clearHistory !== true) {
+		throw new Error("Animator runtime debugger update requires paused, breakpoints, or clearHistory=true.");
+	}
+	const breakpoints = data.breakpoints === undefined ? state.breakpoints : validateAnimatorDebugBreakpoints(controller, data.breakpoints);
+	const paused = data.paused === undefined ? state.paused : data.paused;
+	if (typeof paused !== "boolean") {
+		throw new Error("Animator runtime debugger paused must be a boolean.");
+	}
+	state.breakpoints = breakpoints;
+	state.paused = paused;
+	if (data.clearHistory === true) {
+		state.history = [];
+		state.droppedHistoryCount = 0;
+	}
+	state.revision++;
+	setAnimatorMotionGroupsPaused(scene, controller, paused);
+	options.editor.layout.inspector.setEditedObject(scene);
+	options.editor.layout.inspector.forceUpdate();
+	return { controllerId: controller.id, controllerName: controller.name, debugger: animatorRuntimeDebuggerSnapshot(controller, state, 64) };
+}
+
+/** Advances one paused Animator controller by an exact bounded delta without advancing other controllers or relying on wall-clock rendering. */
+export function stepAnimatorRuntimeDebug(scene: Scene, data: any, options: IMCPActionOptions): any {
+	const controller = findController(scene, data);
+	ensureRootMotion(scene);
+	const state = getAnimatorRuntimeDebugState(scene, controller.id);
+	if (data.expectedFingerprint !== animatorRuntimeDebugFingerprint(controller, state)) {
+		throw new Error("Animator runtime debugger changed after inspection. Call get_animator_runtime_debug again and use its exact debugger fingerprint.");
+	}
+	if (!state.paused) {
+		throw new Error("Pause the Animator runtime debugger before stepping it.");
+	}
+	const deltaSeconds = data.deltaSeconds ?? 1 / 60;
+	const steps = data.steps ?? 1;
+	if (!Number.isFinite(deltaSeconds) || deltaSeconds < 0.0001 || deltaSeconds > 1) {
+		throw new Error("Animator debugger step deltaSeconds must be between 0.0001 and 1.");
+	}
+	if (!Number.isInteger(steps) || steps < 1 || steps > 120 || deltaSeconds * steps > 5) {
+		throw new Error("Animator debugger stepping requires 1 through 120 steps totaling at most 5 seconds.");
+	}
+	let completedSteps = 0;
+	let haltedByBreakpoint = false;
+	for (; completedSteps < steps; completedSteps++) {
+		haltedByBreakpoint = advanceAnimatorControllerRuntime(scene, controller, deltaSeconds, true);
+		if (haltedByBreakpoint) {
+			completedSteps++;
+			break;
+		}
+	}
+	state.paused = true;
+	state.revision++;
+	setAnimatorMotionGroupsPaused(scene, controller, true);
+	options.editor.layout.inspector.setEditedObject(scene);
+	options.editor.layout.inspector.forceUpdate();
+	return {
+		controllerId: controller.id,
+		controllerName: controller.name,
+		stepped: { requestedSteps: steps, completedSteps, deltaSeconds, elapsedSeconds: completedSteps * deltaSeconds, haltedByBreakpoint },
+		debugger: animatorRuntimeDebuggerSnapshot(controller, state, 64),
+		base: animatorMachineDebug(scene, compileControllerMachine(controller), controller.activeState, controller.id, `${controller.id}:base`, false, controller),
+	};
+}
+
+/** Captures the live Animator state, timing, cross-fade, parameter, layer, clip-weight, root-motion, and debugger evidence. */
 export function getAnimatorRuntimeDebug(scene: Scene, data: any): any {
 	const controller = findController(scene, data);
+	ensureRootMotion(scene);
 	const includeAllClips = data.includeAllClips === true;
+	const historyLimit = Number.isInteger(data.historyLimit) ? Math.max(1, Math.min(256, data.historyLimit)) : 64;
+	const debugState = getAnimatorRuntimeDebugState(scene, controller.id);
 	const parameters = Object.entries(controller.parameters)
 		.sort(([first], [second]) => first.localeCompare(second))
 		.map(([name, value]) => ({ name, type: controller.parameterTypes?.[name] ?? inferParameterType(value), runtimeType: typeof value, value }));
@@ -1858,6 +2389,9 @@ export function getAnimatorRuntimeDebug(scene: Scene, data: any): any {
 				sourceFound: !!scene.getNodeById(controller.rootMotion.sourceNodeId),
 				targetFound: !!scene.getNodeById(controller.rootMotion.targetNodeId),
 				sampled: rootMotionSamples.get(scene)?.has(controller.id) ?? false,
+				suppressedByTimeParameter: compileControllerMachine(controller).states.some(
+					(state) => state.name === controller.activeState && resolveAnimatorStatePlayback(state, controller.parameters).timeDriven
+				),
 			}
 		: null;
 	return {
@@ -1871,8 +2405,65 @@ export function getAnimatorRuntimeDebug(scene: Scene, data: any): any {
 		rootMotion,
 		stateBehaviours: getAnimatorStateBehaviourDiagnostics(scene as any, controller),
 		ikPasses: getAnimatorIKPassDiagnostics(scene as any, controller, [{ name: "$base", weight: 1, ikPass: controller.baseIKPass }, ...(controller.layers ?? [])]),
+		footIK: getAnimatorFootIKDiagnostics(scene as any, controller, [{ name: "$base", weight: 1 }, ...(controller.layers ?? [])]),
+		writeDefaults: getAnimatorWriteDefaultsDiagnostics(scene as any, controller.id),
+		humanoidMuscleTrace: getAnimatorHumanoidMuscleTrace(scene as any, controller, { limit: 16 }),
 		engineDeltaTimeMs: scene.getEngine().getDeltaTime(),
+		debugger: animatorRuntimeDebuggerSnapshot(controller, debugState, historyLimit),
 	};
+}
+
+/** Reads one controller's Avatar binding, current Humanoid pose, and newest-first bounded runtime muscle trace. */
+export function getAnimatorHumanoidMuscleTraceForController(scene: Scene, data: any): any {
+	const controller = findController(scene, data);
+	ensureRootMotion(scene);
+	const roles = normalizeMuscleTraceRoles(data.roles);
+	const snapshot = getAnimatorHumanoidMuscleTrace(scene as any, controller, {
+		roles,
+		offset: data.offset,
+		limit: data.limit,
+	});
+	return {
+		...snapshot,
+		availableAvatars: humanoidAvatars(scene).map((avatar) => ({
+			id: avatar.id,
+			name: avatar.name,
+			skeletonId: avatar.skeletonId,
+			skeletonFound: scene.skeletons.some((skeleton) => skeleton.id === avatar.skeletonId),
+			mappedBoneCount: Object.keys(avatar.mapping).length,
+			muscleLimitsEnabled: avatar.muscleLimitsEnabled === true,
+		})),
+		fingerprint: animatorHumanoidMuscleTraceFingerprint(scene, controller),
+	};
+}
+
+/** Assigns or clears a controller Humanoid Avatar and/or clears its runtime-only muscle history under an exact lease. */
+export function setAnimatorHumanoidMuscleTrace(scene: Scene, data: any, options: IMCPActionOptions): any {
+	const controller = findController(scene, data);
+	const currentFingerprint = animatorHumanoidMuscleTraceFingerprint(scene, controller);
+	if (data.expectedFingerprint !== currentFingerprint) {
+		throw new Error(`Animator Humanoid muscle trace changed since it was read. Expected fingerprint "${currentFingerprint}".`);
+	}
+	const changesAvatar = Object.prototype.hasOwnProperty.call(data, "humanoidAvatarId");
+	if (!changesAvatar && data.clearHistory !== true) {
+		throw new Error("Provide humanoidAvatarId (string or null) and/or clearHistory: true.");
+	}
+	if (changesAvatar) {
+		if (data.humanoidAvatarId !== null && typeof data.humanoidAvatarId !== "string") {
+			throw new Error("humanoidAvatarId must be a string or null.");
+		}
+		const avatarId = data.humanoidAvatarId === null ? undefined : data.humanoidAvatarId;
+		validateControllerHumanoidAvatar(scene, avatarId);
+		controller.humanoidAvatarId = avatarId;
+		deleteAnimatorHumanoidMuscleTrace(scene as any, controller.id);
+		deleteAnimatorFootIKDiagnostics(scene as any, controller.id);
+	}
+	if (data.clearHistory === true) {
+		clearAnimatorHumanoidMuscleTrace(scene as any, controller);
+	}
+	options.editor.layout.inspector.setEditedObject(scene);
+	options.editor.layout.inspector.forceUpdate();
+	return getAnimatorHumanoidMuscleTraceForController(scene, { controllerId: controller.id, offset: 0, limit: data.limit });
 }
 
 /** Opens the Animator panel on one controller and enables its live debugger. */
@@ -1898,9 +2489,14 @@ export function setAnimatorController(scene: Scene, data: any, options: IMCPActi
 	const parameterTypes = normalizeParameterTypes(parameters, data.parameterTypes ?? inheritedParameterTypes);
 	const layers = (data.layers ?? controller.layers ?? []).map((layer: IAnimatorLayer) => ({
 		...layer,
+		behaviours: layer.behaviours ?? [],
+		transitions: layer.transitions ?? [],
+		entryTransitions: layer.entryTransitions ?? [],
+		subStateMachines: layer.subStateMachines ?? [],
 		entryState: layer.entryState ?? layer.activeState ?? layer.states?.[0]?.name,
 	}));
 	const rootMachine: IAnimatorGraphMachine = {
+		behaviours: data.behaviours ?? controller.behaviours ?? [],
 		states,
 		transitions,
 		entryTransitions,
@@ -1910,6 +2506,7 @@ export function setAnimatorController(scene: Scene, data: any, options: IMCPActi
 	};
 	validateStates(scene, states);
 	validateBlendTreeParameters(parameters, states);
+	validateStatePlaybackParameters(parameters, parameterTypes, states, "Animator controller");
 	validateTransitions(rootMachine);
 	validateTransitionParameters(parameters, parameterTypes, transitions, "Animator controller");
 	validateTransitionParameters(parameters, parameterTypes, entryTransitions, "Animator controller Entry");
@@ -1920,17 +2517,42 @@ export function setAnimatorController(scene: Scene, data: any, options: IMCPActi
 	const compiled = compileAnimatorMachine(rootMachine, subgraphs);
 	const rootMotion = data.rootMotion === undefined ? controller.rootMotion : data.rootMotion;
 	validateRootMotion(scene, rootMotion);
+	const humanoidAvatarId = Object.prototype.hasOwnProperty.call(data, "humanoidAvatarId")
+		? data.humanoidAvatarId === null
+			? undefined
+			: data.humanoidAvatarId
+		: controller.humanoidAvatarId;
+	validateControllerHumanoidAvatar(scene, humanoidAvatarId);
+	const proposedController: IAnimatorController = {
+		...controller,
+		targetNodeId: data.targetNodeId ?? controller.targetNodeId,
+		humanoidAvatarId,
+		behaviours: rootMachine.behaviours,
+		states,
+		transitions,
+		entryTransitions,
+		subStateMachines,
+		subgraphs,
+		layers,
+	};
+	validateAllBehaviourScriptBindings(scene, proposedController, rootMachine, subgraphs, layers);
 	if (data.name !== undefined) {
 		controller.name = data.name;
 	}
 	if (data.targetNodeId !== undefined) {
 		controller.targetNodeId = data.targetNodeId;
 	}
+	if (Object.prototype.hasOwnProperty.call(data, "humanoidAvatarId") && controller.humanoidAvatarId !== humanoidAvatarId) {
+		controller.humanoidAvatarId = humanoidAvatarId;
+		deleteAnimatorHumanoidMuscleTrace(scene as any, controller.id);
+		deleteAnimatorFootIKDiagnostics(scene as any, controller.id);
+	}
 	if (data.parameters !== undefined) {
 		controller.parameters = parameters;
 	}
 	controller.parameterTypes = parameterTypes;
 	controller.baseIKPass = data.baseIKPass ?? controller.baseIKPass ?? false;
+	controller.behaviours = rootMachine.behaviours;
 	controller.states = states;
 	controller.transitions = transitions;
 	controller.entryTransitions = entryTransitions;
@@ -1947,6 +2569,7 @@ export function setAnimatorController(scene: Scene, data: any, options: IMCPActi
 		}
 	});
 	controller.rootMotion = rootMotion;
+	deleteAnimatorWriteDefaults(scene as any, controller.id);
 	ensureRootMotion(scene);
 	const requestedActiveState = data.activeState ?? controller.activeState ?? compiled.entryState;
 	try {
@@ -1992,6 +2615,7 @@ export function setAnimatorLayer(scene: Scene, data: any, options: IMCPActionOpt
 	const replacement: IAnimatorLayer = {
 		...layer,
 		name: data.name ?? layer.name,
+		behaviours: data.behaviours ?? layer.behaviours ?? [],
 		weight: data.weight ?? layer.weight ?? 1,
 		maskTargetNames: data.maskTargetNames ?? layer.maskTargetNames ?? [],
 		avatarMaskId: data.avatarMaskId === null ? undefined : (data.avatarMaskId ?? layer.avatarMaskId),
@@ -2344,6 +2968,30 @@ export function setAnimatorParameter(scene: Scene, data: any, options: IMCPActio
 	}
 	const parameterType = controller.parameterTypes?.[data.parameter] ?? inferParameterType(controller.parameters[data.parameter]);
 	validateParameterValue(data.parameter, parameterType, data.value);
+	const elapsed = animatorElapsedSeconds.get(scene)!;
+	const baseBefore = compileControllerMachine(controller).states.find((candidate) => candidate.name === controller.activeState);
+	const baseProgress = baseBefore ? stateProgress(scene, controller, baseBefore, elapsed.get(controller.id) ?? 0) : 0;
+	const layersBefore = new Map(
+		(controller.layers ?? []).map((layer) => {
+			const state = layer.synchronizedLayer
+				? getBehaviourActiveStates(scene).get(behaviourStateKey(controller, layer))
+				: compileLayerMachine(controller, layer).states.find((candidate) => candidate.name === layer.activeState);
+			const elapsedKey = `${controller.id}:layer:${layer.name}`;
+			return [layer.name, { layer, state, progress: state ? stateProgress(scene, controller, state, elapsed.get(elapsedKey) ?? 0, layer) : 0 }] as const;
+		})
+	);
+	const affectsPlayback = (state: IAnimatorState | undefined): boolean => {
+		const bindings = state ? resolveAnimatorStatePlayback(state, controller.parameters).bindings : null;
+		return !!bindings && Object.values(bindings).includes(data.parameter);
+	};
+	if (affectsPlayback(baseBefore)) {
+		stopStateGroups(scene, controller, baseBefore!);
+	}
+	for (const { layer, state } of layersBefore.values()) {
+		if (affectsPlayback(state)) {
+			stopStateGroups(scene, controller, state!, layer);
+		}
+	}
 	controller.parameters[data.parameter] = data.value;
 	const activeState = controller.activeState;
 	const baseMachine = compileControllerMachine(controller);
@@ -2356,7 +3004,13 @@ export function setAnimatorParameter(scene: Scene, data: any, options: IMCPActio
 	if (transition) {
 		applyBaseTransition(scene, controller, transition);
 	} else if (controller.activeState) {
-		applyBlendTree(scene, controller, resolveCompiledState(baseMachine, controller.activeState));
+		const active = resolveCompiledState(baseMachine, controller.activeState);
+		if (affectsPlayback(active)) {
+			startStateGroups(scene, controller, active, [], undefined, baseProgress);
+			const duration = effectiveStateDuration(scene, controller, active);
+			elapsed.set(controller.id, duration ? duration * baseProgress : 0);
+		}
+		applyBlendTree(scene, controller, active);
 	}
 	let triggerConsumedByLayer = false;
 	const layerTransitions = (controller.layers ?? []).flatMap((layer) => {
@@ -2378,7 +3032,14 @@ export function setAnimatorParameter(scene: Scene, data: any, options: IMCPActio
 			return [{ layer: layer.name, from, source: authored.from, to: layerTransition.transition.to, interrupted: layerTransition.interrupted }];
 		}
 		if (layer.activeState) {
-			applyBlendTree(scene, controller, resolveCompiledState(layerMachine, layer.activeState), layer.weight ?? 1, layer);
+			const active = resolveCompiledState(layerMachine, layer.activeState);
+			const previous = layersBefore.get(layer.name);
+			if (affectsPlayback(active)) {
+				startStateGroups(scene, controller, active, layer.maskTargetNames ?? [], layer.avatarMaskId, previous?.progress ?? 0, layer);
+				const duration = effectiveStateDuration(scene, controller, active, layer);
+				elapsed.set(`${controller.id}:layer:${layer.name}`, duration ? duration * (previous?.progress ?? 0) : 0);
+			}
+			applyBlendTree(scene, controller, active, layer.weight ?? 1, layer);
 		}
 		return [];
 	});
@@ -2423,9 +3084,19 @@ export function resetAnimatorTrigger(scene: Scene, data: any, options: IMCPActio
 /** Deletes a persisted animator controller without deleting its animation clips. */
 export function deleteAnimatorController(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const controller = findController(scene, data);
+	activeAnimatorMotionGroups(scene, controller).forEach((group) => group.stop());
 	const controllers = getControllers(scene);
 	controllers.splice(controllers.indexOf(controller), 1);
 	rootMotionSamples.get(scene)?.delete(controller.id);
+	animatorRuntimeDebugStates.get(scene)?.delete(controller.id);
+	deleteAnimatorHumanoidMuscleTrace(scene as any, controller.id);
+	deleteAnimatorFootIKDiagnostics(scene as any, controller.id);
+	deleteAnimatorWriteDefaults(scene as any, controller.id);
+	for (const key of animatorElapsedSeconds.get(scene)?.keys() ?? []) {
+		if (key === controller.id || key.startsWith(`${controller.id}:`)) {
+			animatorElapsedSeconds.get(scene)?.delete(key);
+		}
+	}
 	for (const key of animatorBehaviourActiveStates.get(scene)?.keys() ?? []) {
 		if (key.startsWith(`${controller.id}:`)) {
 			animatorBehaviourActiveStates.get(scene)?.delete(key);

@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which MCP tool reads the Lighting Search query tree, provider inventory, pipeline selectors, and exact tree lease?</question>
+      <answer>inspect_lighting_search</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which four portable pipeline selectors can be used in addition to all? Answer as a comma-separated list in reported order.</question>
+      <answer>native-forward, clustered-forward, portable-deferred, baked-gi</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool runs built-in, custom, or direct provider queries with stable sorting and pagination?</question>
+      <answer>query_lighting_search</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two exact global leases are required to create or update a custom query-tree node?</question>
+      <answer>expectedRevision and expectedFingerprint</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Can immutable built-in Lighting Search queries be deleted? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool returns a project-contained lightmap preview with SHA-256 and exposure evidence?</question>
+      <answer>get_lighting_search_lightmap_preview</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the supported lightmap preview exposure range in EV?</question>
+      <answer>-16 through 16</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool atomically batch-edits exact-fingerprint lighting table rows?</question>
+      <answer>set_lighting_search_properties</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which four providers support direct batch property editing? Answer as a comma-separated list.</question>
+      <answer>lights, mesh-renderers, materials, lighting-settings</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does this portable workflow claim Unity Search, URP, HDRP, or Progressive Lightmapper binary/API identity? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+</evaluation>

@@ -1,23 +1,66 @@
-import { Matrix, Mesh, Scene, Tools, Vector3, VertexBuffer, VertexData } from "babylonjs";
+import { Mesh, Scene, Tools, Vector3, VertexBuffer, VertexData } from "babylonjs";
+import {
+	configureCloths,
+	getClothSimulationControl,
+	IClothTriangleCollider,
+	IClothVertexConstraint,
+	MaxClothTriangleColliders,
+	MaxClothTrianglesPerCollider,
+	resetClothSimulation,
+} from "babylonjs-editor-tools";
 
 import { isMesh } from "../../tools/guards/nodes";
 
 import { IMCPActionOptions } from "../action";
 import { resolveNode, toNodeSummary } from "../tools/resolve";
 
-type IRuntimeCloth = { observer: any; initialPositions: Float32Array; velocities: Float32Array; springs: Array<[number, number, number]>; mesh: Mesh; pinned: Set<number> };
-
-const runtimeCloths = new WeakMap<Scene, Map<string, IRuntimeCloth>>();
-
 function configs(scene: Scene): any[] {
 	scene.metadata ??= {};
 	return (scene.metadata.babylonEditorCloths ??= []);
 }
 
-function runtime(scene: Scene): Map<string, IRuntimeCloth> {
-	let cloths = runtimeCloths.get(scene);
-	if (!cloths) runtimeCloths.set(scene, (cloths = new Map()));
-	return cloths;
+export type ClothConstraintChannel = "maxDistance" | "surfacePenetration";
+export type ClothConstraintFalloff = "constant" | "linear" | "smooth";
+
+export interface IClothConstraintPaintViewportState {
+	revision: number;
+	enabled: boolean;
+	clothId: string | null;
+	channel: ClothConstraintChannel;
+	value: number;
+	radius: number;
+	strength: number;
+	falloff: ClothConstraintFalloff;
+}
+
+export interface IClothConstraintSnapshot {
+	id: string;
+	constraintRevision: number;
+	vertexConstraints: IClothVertexConstraint[];
+}
+
+export interface IClothConstraintViewportData {
+	id: string;
+	meshId: string;
+	constraintRevision: number;
+	vertexIndices: number[];
+	total: number;
+}
+
+const clothConstraintPaintStates = new WeakMap<Scene, IClothConstraintPaintViewportState>();
+
+function getConstraintRevision(config: any): number {
+	return Number.isInteger(config.constraintRevision) && config.constraintRevision >= 1 ? config.constraintRevision : 1;
+}
+
+function getPaintState(scene: Scene): IClothConstraintPaintViewportState {
+	let state = clothConstraintPaintStates.get(scene);
+	if (!state) {
+		state = { revision: 1, enabled: false, clothId: null, channel: "maxDistance", value: 50, radius: 50, strength: 1, falloff: "smooth" };
+		clothConstraintPaintStates.set(scene, state);
+		scene.onDisposeObservable.addOnce(() => clothConstraintPaintStates.delete(scene));
+	}
+	return state;
 }
 
 function createGrid(mesh: Mesh, width: number, height: number, subdivisions: number): void {
@@ -46,341 +89,233 @@ function createGrid(mesh: Mesh, width: number, height: number, subdivisions: num
 	mesh.setIndices(indices, null, true);
 }
 
-function buildSprings(initialPositions: Float32Array, subdivisions: number): Array<[number, number, number]> {
-	const columns = subdivisions + 1;
-	const springs: Array<[number, number, number]> = [];
-	const distance = (first: number, second: number): number => {
-		const a = first * 3;
-		const b = second * 3;
-		return Math.hypot(initialPositions[a] - initialPositions[b], initialPositions[a + 1] - initialPositions[b + 1], initialPositions[a + 2] - initialPositions[b + 2]);
-	};
-	const add = (first: number, second: number): void => {
-		springs.push([first, second, distance(first, second)]);
-	};
-	for (let row = 0; row <= subdivisions; row++) {
-		for (let column = 0; column <= subdivisions; column++) {
-			const index = row * columns + column;
-			if (column < subdivisions) add(index, index + 1);
-			if (row < subdivisions) add(index, index + columns);
-			if (row < subdivisions && column < subdivisions) add(index, index + columns + 1);
-			if (row < subdivisions && column > 0) add(index, index + columns - 1);
-		}
-	}
-	return springs;
-}
-
-function resolvePlaneCollision(positions: any, velocities: Float32Array, pinned: Set<number>, plane: any): void {
-	if (!plane) return;
-	const normal = Vector3.FromArray(plane.normal ?? [0, 1, 0]);
-	if (normal.lengthSquared() < 0.0000001) return;
-	normal.normalize();
-	const offset = plane.offset ?? 0;
-	const restitution = Math.max(0, Math.min(1, plane.restitution ?? 0));
-	for (let index = 0; index < positions.length / 3; index++) {
-		if (pinned.has(index)) continue;
-		const positionOffset = index * 3;
-		const distance = positions[positionOffset] * normal.x + positions[positionOffset + 1] * normal.y + positions[positionOffset + 2] * normal.z - offset;
-		if (distance >= 0) continue;
-		positions[positionOffset] -= normal.x * distance;
-		positions[positionOffset + 1] -= normal.y * distance;
-		positions[positionOffset + 2] -= normal.z * distance;
-		const normalVelocity = velocities[positionOffset] * normal.x + velocities[positionOffset + 1] * normal.y + velocities[positionOffset + 2] * normal.z;
-		if (normalVelocity < 0) {
-			velocities[positionOffset] -= normal.x * normalVelocity * (1 + restitution);
-			velocities[positionOffset + 1] -= normal.y * normalVelocity * (1 + restitution);
-			velocities[positionOffset + 2] -= normal.z * normalVelocity * (1 + restitution);
-		}
-	}
-}
-
 function normalizeCollisionSpheres(spheres: any): any[] | undefined {
-	if (spheres === undefined || spheres === null) return spheres;
-	if (!Array.isArray(spheres) || spheres.length > 32) throw new Error("collisionSpheres must contain from zero to 32 local-space spheres.");
+	if (spheres === undefined || spheres === null) {
+		return spheres;
+	}
+	if (!Array.isArray(spheres) || spheres.length > 32) {
+		throw new Error("collisionSpheres must contain from zero to 32 local-space spheres.");
+	}
 	return spheres.map((sphere, index) => {
-		if (!Array.isArray(sphere?.center) || sphere.center.length !== 3 || sphere.center.some((value: any) => !Number.isFinite(value)))
+		if (!Array.isArray(sphere?.center) || sphere.center.length !== 3 || sphere.center.some((value: any) => !Number.isFinite(value))) {
 			throw new Error(`collisionSpheres[${index}].center must be three finite numbers.`);
-		if (!(sphere.radius > 0) || !Number.isFinite(sphere.radius)) throw new Error(`collisionSpheres[${index}].radius must be greater than zero.`);
-		if (sphere.restitution !== undefined && (!(sphere.restitution >= 0) || !(sphere.restitution <= 1)))
+		}
+		if (!(sphere.radius > 0) || !Number.isFinite(sphere.radius)) {
+			throw new Error(`collisionSpheres[${index}].radius must be greater than zero.`);
+		}
+		if (sphere.restitution !== undefined && (!(sphere.restitution >= 0) || !(sphere.restitution <= 1))) {
 			throw new Error(`collisionSpheres[${index}].restitution must be from 0 to 1.`);
+		}
 		return { center: [...sphere.center], radius: sphere.radius, restitution: sphere.restitution ?? 0 };
 	});
 }
 
 function normalizeCollisionPlane(plane: any): any | undefined | null {
-	if (plane === undefined || plane === null) return plane;
-	if (!Array.isArray(plane.normal) || plane.normal.length !== 3 || plane.normal.some((value: any) => !Number.isFinite(value)) || !Vector3.FromArray(plane.normal).lengthSquared())
+	if (plane === undefined || plane === null) {
+		return plane;
+	}
+	if (
+		!Array.isArray(plane.normal) ||
+		plane.normal.length !== 3 ||
+		plane.normal.some((value: any) => !Number.isFinite(value)) ||
+		!Vector3.FromArray(plane.normal).lengthSquared()
+	) {
 		throw new Error("collisionPlane.normal must be a non-zero vector of three finite numbers.");
-	if (plane.offset !== undefined && !Number.isFinite(plane.offset)) throw new Error("collisionPlane.offset must be finite.");
-	if (plane.restitution !== undefined && (!(plane.restitution >= 0) || !(plane.restitution <= 1))) throw new Error("collisionPlane.restitution must be from 0 to 1.");
+	}
+	if (plane.offset !== undefined && !Number.isFinite(plane.offset)) {
+		throw new Error("collisionPlane.offset must be finite.");
+	}
+	if (plane.restitution !== undefined && (!(plane.restitution >= 0) || !(plane.restitution <= 1))) {
+		throw new Error("collisionPlane.restitution must be from 0 to 1.");
+	}
 	return { normal: Vector3.FromArray(plane.normal).normalize().asArray(), offset: plane.offset ?? 0, restitution: plane.restitution ?? 0 };
 }
 
 function normalizePinnedVertices(pinnedVertices: any, subdivisions: number): number[] | undefined {
-	if (pinnedVertices === undefined) return undefined;
-	if (!Array.isArray(pinnedVertices)) throw new Error("pinnedVertices must be an array of vertex indices.");
+	if (pinnedVertices === undefined) {
+		return undefined;
+	}
+	if (!Array.isArray(pinnedVertices)) {
+		throw new Error("pinnedVertices must be an array of vertex indices.");
+	}
 	const maximum = (subdivisions + 1) ** 2;
 	const unique = [...new Set(pinnedVertices)];
-	if (unique.some((index) => !Number.isInteger(index) || index < 0 || index >= maximum)) throw new Error(`pinnedVertices must contain integer indices from 0 to ${maximum - 1}.`);
+	if (unique.some((index) => !Number.isInteger(index) || index < 0 || index >= maximum)) {
+		throw new Error(`pinnedVertices must contain integer indices from 0 to ${maximum - 1}.`);
+	}
 	return unique;
 }
 
+function normalizeVertexConstraints(constraints: any, subdivisions: number): IClothVertexConstraint[] | undefined {
+	if (constraints === undefined || constraints === null) {
+		return constraints;
+	}
+	const maximum = (subdivisions + 1) ** 2;
+	if (!Array.isArray(constraints) || constraints.length > maximum) {
+		throw new Error(`vertexConstraints must contain from zero to ${maximum} sparse vertex constraints.`);
+	}
+	const seen = new Set<number>();
+	const normalized = constraints.map((constraint, index) => {
+		if (!Number.isInteger(constraint?.vertexIndex) || constraint.vertexIndex < 0 || constraint.vertexIndex >= maximum) {
+			throw new Error(`vertexConstraints[${index}].vertexIndex must be an integer from 0 to ${maximum - 1}.`);
+		}
+		if (seen.has(constraint.vertexIndex)) {
+			throw new Error(`vertexConstraints contains duplicate vertex ${constraint.vertexIndex}.`);
+		}
+		seen.add(constraint.vertexIndex);
+		for (const property of ["maxDistance", "surfacePenetration"] as const) {
+			if (constraint[property] !== undefined && (!Number.isFinite(constraint[property]) || constraint[property] < 0 || constraint[property] > 100000)) {
+				throw new Error(`vertexConstraints[${index}].${property} must be from 0 through 100000 centimeters.`);
+			}
+		}
+		if (constraint.maxDistance === undefined && constraint.surfacePenetration === undefined) {
+			throw new Error(`vertexConstraints[${index}] must define maxDistance, surfacePenetration, or both.`);
+		}
+		return {
+			vertexIndex: constraint.vertexIndex,
+			...(constraint.maxDistance !== undefined ? { maxDistance: constraint.maxDistance } : {}),
+			...(constraint.surfacePenetration !== undefined ? { surfacePenetration: constraint.surfacePenetration } : {}),
+		};
+	});
+	return normalized.sort((first, second) => first.vertexIndex - second.vertexIndex);
+}
+
 function normalizeCollisionBoxes(boxes: any): any[] | undefined {
-	if (boxes === undefined || boxes === null) return boxes;
-	if (!Array.isArray(boxes) || boxes.length > 32) throw new Error("collisionBoxes must contain from zero to 32 local-space boxes.");
+	if (boxes === undefined || boxes === null) {
+		return boxes;
+	}
+	if (!Array.isArray(boxes) || boxes.length > 32) {
+		throw new Error("collisionBoxes must contain from zero to 32 local-space boxes.");
+	}
 	return boxes.map((box, index) => {
-		if (!Array.isArray(box?.center) || box.center.length !== 3 || box.center.some((value: any) => !Number.isFinite(value)))
+		if (!Array.isArray(box?.center) || box.center.length !== 3 || box.center.some((value: any) => !Number.isFinite(value))) {
 			throw new Error(`collisionBoxes[${index}].center must be three finite numbers.`);
-		if (!Array.isArray(box?.size) || box.size.length !== 3 || box.size.some((value: any) => !(value > 0) || !Number.isFinite(value)))
+		}
+		if (!Array.isArray(box?.size) || box.size.length !== 3 || box.size.some((value: any) => !(value > 0) || !Number.isFinite(value))) {
 			throw new Error(`collisionBoxes[${index}].size must be three positive finite numbers.`);
-		if (box.restitution !== undefined && (!(box.restitution >= 0) || !(box.restitution <= 1))) throw new Error(`collisionBoxes[${index}].restitution must be from 0 to 1.`);
+		}
+		if (box.restitution !== undefined && (!(box.restitution >= 0) || !(box.restitution <= 1))) {
+			throw new Error(`collisionBoxes[${index}].restitution must be from 0 to 1.`);
+		}
 		return { center: [...box.center], size: [...box.size], restitution: box.restitution ?? 0 };
 	});
 }
 
 function normalizeCollisionMeshIds(scene: Scene, clothMeshId: string, ids: any): string[] | undefined {
-	if (ids === undefined || ids === null) return ids;
-	if (!Array.isArray(ids) || ids.length > 16 || ids.some((id) => typeof id !== "string" || !id.trim()))
+	if (ids === undefined || ids === null) {
+		return ids;
+	}
+	if (!Array.isArray(ids) || ids.length > 16 || ids.some((id) => typeof id !== "string" || !id.trim())) {
 		throw new Error("collisionMeshIds must contain from zero to 16 non-empty mesh ids.");
-	if (new Set(ids).size !== ids.length) throw new Error("collisionMeshIds must not contain duplicates.");
+	}
+	if (new Set(ids).size !== ids.length) {
+		throw new Error("collisionMeshIds must not contain duplicates.");
+	}
 	for (const id of ids) {
-		if (id === clothMeshId) throw new Error("A cloth cannot use its own mesh as a collision mesh.");
+		if (id === clothMeshId) {
+			throw new Error("A cloth cannot use its own mesh as a collision mesh.");
+		}
 		const node = resolveNode({ scene, nodeId: id });
-		if (!isMesh(node)) throw new Error(`Collision mesh "${id}" was not found.`);
+		if (!isMesh(node)) {
+			throw new Error(`Collision mesh "${id}" was not found.`);
+		}
 	}
 	return [...ids];
 }
 
+function normalizeTriangleColliders(scene: Scene, clothMeshId: string, colliders: any): IClothTriangleCollider[] | undefined {
+	if (colliders === undefined || colliders === null) {
+		return colliders;
+	}
+	if (!Array.isArray(colliders) || colliders.length > MaxClothTriangleColliders) {
+		throw new Error(`triangleColliders must contain from zero to ${MaxClothTriangleColliders} mesh colliders.`);
+	}
+	const seen = new Set<string>();
+	return colliders.map((collider, index) => {
+		if (typeof collider?.meshId !== "string" || !collider.meshId.trim()) {
+			throw new Error(`triangleColliders[${index}].meshId must be a non-empty string.`);
+		}
+		if (collider.meshId === clothMeshId) {
+			throw new Error("A cloth cannot use its own mesh as a triangle collider.");
+		}
+		if (seen.has(collider.meshId)) {
+			throw new Error(`triangleColliders contains duplicate mesh "${collider.meshId}".`);
+		}
+		seen.add(collider.meshId);
+		const mesh = scene.getMeshById(collider.meshId) as Mesh | null;
+		const positions = mesh?.getVerticesData(VertexBuffer.PositionKind);
+		const indices = mesh?.getIndices();
+		const triangleCount = indices?.length ? indices.length / 3 : (positions?.length ?? 0) / 9;
+		if (
+			!mesh ||
+			!positions ||
+			positions.length < 9 ||
+			positions.length % 3 !== 0 ||
+			positions.some((value) => !Number.isFinite(value)) ||
+			!Number.isInteger(triangleCount) ||
+			triangleCount < 1
+		) {
+			throw new Error(`Triangle collider mesh "${collider.meshId}" has no valid triangle geometry.`);
+		}
+		if (indices?.some((vertexIndex) => !Number.isInteger(vertexIndex) || vertexIndex < 0 || vertexIndex >= positions.length / 3)) {
+			throw new Error(`Triangle collider mesh "${collider.meshId}" contains an out-of-range vertex index.`);
+		}
+		if (triangleCount > MaxClothTrianglesPerCollider) {
+			throw new Error(`Triangle collider mesh "${collider.meshId}" has ${triangleCount} triangles; the per-collider limit is ${MaxClothTrianglesPerCollider}.`);
+		}
+		const thickness = collider.thickness ?? 2;
+		const restitution = collider.restitution ?? 0;
+		const friction = collider.friction ?? 0.2;
+		if (!Number.isFinite(thickness) || thickness <= 0 || thickness > 1000) {
+			throw new Error(`triangleColliders[${index}].thickness must be greater than 0 and at most 1000 centimeters.`);
+		}
+		if (!Number.isFinite(restitution) || restitution < 0 || restitution > 1 || !Number.isFinite(friction) || friction < 0 || friction > 1) {
+			throw new Error(`triangleColliders[${index}] restitution and friction must be from 0 through 1.`);
+		}
+		return { meshId: collider.meshId, thickness, restitution, friction };
+	});
+}
+
 function normalizeSelfCollisionRadius(radius: any): number | undefined {
-	if (radius === undefined) return undefined;
-	if (!(radius > 0) || !Number.isFinite(radius)) throw new Error("selfCollisionRadius must be a positive finite number.");
+	if (radius === undefined) {
+		return undefined;
+	}
+	if (!(radius > 0) || !Number.isFinite(radius)) {
+		throw new Error("selfCollisionRadius must be a positive finite number.");
+	}
 	return radius;
 }
 
-function resolveSphereCollisions(positions: any, velocities: Float32Array, pinned: Set<number>, spheres: any): void {
-	for (const sphere of spheres ?? []) {
-		const center = sphere.center;
-		const radius = sphere.radius;
-		const restitution = sphere.restitution ?? 0;
-		for (let index = 0; index < positions.length / 3; index++) {
-			if (pinned.has(index)) continue;
-			const offset = index * 3;
-			let x = positions[offset] - center[0];
-			let y = positions[offset + 1] - center[1];
-			let z = positions[offset + 2] - center[2];
-			let length = Math.hypot(x, y, z);
-			if (length >= radius) continue;
-			if (length < 0.000001) {
-				x = 0;
-				y = 1;
-				z = 0;
-				length = 1;
-			}
-			x /= length;
-			y /= length;
-			z /= length;
-			positions[offset] = center[0] + x * radius;
-			positions[offset + 1] = center[1] + y * radius;
-			positions[offset + 2] = center[2] + z * radius;
-			const normalVelocity = velocities[offset] * x + velocities[offset + 1] * y + velocities[offset + 2] * z;
-			if (normalVelocity < 0) {
-				velocities[offset] -= x * normalVelocity * (1 + restitution);
-				velocities[offset + 1] -= y * normalVelocity * (1 + restitution);
-				velocities[offset + 2] -= z * normalVelocity * (1 + restitution);
-			}
-		}
-	}
-}
-
-function resolveBoxCollisions(positions: any, velocities: Float32Array, pinned: Set<number>, boxes: any): void {
-	for (const box of boxes ?? []) {
-		const half = box.size.map((value: number) => value / 2);
-		for (let index = 0; index < positions.length / 3; index++) {
-			if (pinned.has(index)) continue;
-			const offset = index * 3;
-			const local = [positions[offset] - box.center[0], positions[offset + 1] - box.center[1], positions[offset + 2] - box.center[2]];
-			if (local.some((value: number, axis: number) => Math.abs(value) >= half[axis])) continue;
-			const axis = local
-				.map((value: number, candidate: number) => half[candidate] - Math.abs(value))
-				.reduce((best: number, value: number, candidate: number, values: number[]) => (value < values[best] ? candidate : best), 0);
-			const normal = local[axis] >= 0 ? 1 : -1;
-			positions[offset + axis] = box.center[axis] + normal * half[axis];
-			const normalVelocity = velocities[offset + axis] * normal;
-			if (normalVelocity < 0) velocities[offset + axis] -= normal * normalVelocity * (1 + box.restitution);
-		}
-	}
-}
-
-function resolveMeshBoundsCollisions(scene: Scene, clothMesh: Mesh, positions: any, velocities: Float32Array, pinned: Set<number>, meshIds: string[] | undefined): void {
-	if (!meshIds?.length) return;
-	const inverseClothWorld = Matrix.Invert(clothMesh.getWorldMatrix());
-	const boxes: any[] = [];
-	for (const id of meshIds) {
-		const mesh = scene.getMeshById(id);
-		if (!mesh || mesh === clothMesh) continue;
-		const bounds = mesh.getBoundingInfo().boundingBox;
-		const min = bounds.minimumWorld;
-		const max = bounds.maximumWorld;
-		const points = [
-			new Vector3(min.x, min.y, min.z),
-			new Vector3(max.x, min.y, min.z),
-			new Vector3(min.x, max.y, min.z),
-			new Vector3(max.x, max.y, min.z),
-			new Vector3(min.x, min.y, max.z),
-			new Vector3(max.x, min.y, max.z),
-			new Vector3(min.x, max.y, max.z),
-			new Vector3(max.x, max.y, max.z),
-		].map((point) => Vector3.TransformCoordinates(point, inverseClothWorld));
-		const localMin = points.reduce((value, point) => Vector3.Minimize(value, point), points[0].clone());
-		const localMax = points.reduce((value, point) => Vector3.Maximize(value, point), points[0].clone());
-		boxes.push({ center: localMin.add(localMax).scale(0.5).asArray(), size: localMax.subtract(localMin).asArray(), restitution: 0 });
-	}
-	resolveBoxCollisions(positions, velocities, pinned, boxes);
-}
-
-/** Resolves non-neighbouring grid-vertex contacts with a bounded spatial hash. */
-function resolveSelfCollisions(positions: any, pinned: Set<number>, subdivisions: number, radius: number): void {
-	if (!(radius > 0)) return;
-	const cells = new Map<string, number[]>();
-	const columns = subdivisions + 1;
-	const key = (x: number, y: number, z: number): string => `${x}:${y}:${z}`;
-	for (let index = 0; index < positions.length / 3; index++) {
-		const offset = index * 3;
-		const cellX = Math.floor(positions[offset] / radius);
-		const cellY = Math.floor(positions[offset + 1] / radius);
-		const cellZ = Math.floor(positions[offset + 2] / radius);
-		const row = Math.floor(index / columns);
-		const column = index % columns;
-		for (let x = cellX - 1; x <= cellX + 1; x++)
-			for (let y = cellY - 1; y <= cellY + 1; y++)
-				for (let z = cellZ - 1; z <= cellZ + 1; z++)
-					for (const other of cells.get(key(x, y, z)) ?? []) {
-						const otherRow = Math.floor(other / columns);
-						const otherColumn = other % columns;
-						if (Math.abs(row - otherRow) <= 1 && Math.abs(column - otherColumn) <= 1) continue;
-						const otherOffset = other * 3;
-						let dx = positions[offset] - positions[otherOffset];
-						let dy = positions[offset + 1] - positions[otherOffset + 1];
-						let dz = positions[offset + 2] - positions[otherOffset + 2];
-						let length = Math.hypot(dx, dy, dz);
-						if (length >= radius) continue;
-						if (length < 0.000001) {
-							dx = 0;
-							dy = 0;
-							dz = 1;
-							length = 1;
-						}
-						dx /= length;
-						dy /= length;
-						dz /= length;
-						const correction = radius - length;
-						const movable = (pinned.has(index) ? 0 : 1) + (pinned.has(other) ? 0 : 1);
-						if (!movable) continue;
-						if (!pinned.has(index)) {
-							positions[offset] += (dx * correction) / movable;
-							positions[offset + 1] += (dy * correction) / movable;
-							positions[offset + 2] += (dz * correction) / movable;
-						}
-						if (!pinned.has(other)) {
-							positions[otherOffset] -= (dx * correction) / movable;
-							positions[otherOffset + 1] -= (dy * correction) / movable;
-							positions[otherOffset + 2] -= (dz * correction) / movable;
-						}
-					}
-		const cellKey = key(cellX, cellY, cellZ);
-		const values = cells.get(cellKey) ?? [];
-		values.push(index);
-		cells.set(cellKey, values);
-	}
-}
-
-function createRuntimeCloth(scene: Scene, config: any): IRuntimeCloth {
-	const node = resolveNode({ scene, nodeId: config.meshId });
-	if (!isMesh(node)) throw new Error("Cloth mesh was not found. Create or keep its mesh before enabling the component.");
-	const positions = node.getVerticesData(VertexBuffer.PositionKind);
-	if (!positions) throw new Error("Cloth mesh has no position vertex buffer.");
-	const initialPositions = new Float32Array(positions);
-	const velocities = new Float32Array(positions.length);
-	const springs = buildSprings(initialPositions, config.subdivisions);
-	const columns = config.subdivisions + 1;
-	const pinned = new Set<number>(config.pinnedVertices ?? Array.from({ length: columns }, (_, index) => index));
-	const observer = scene.onBeforeRenderObservable.add(() => {
-		if (config.enabled === false) return;
-		const step = Math.min(scene.getEngine().getDeltaTime() / 1000, 1 / 30);
-		if (!step) return;
-		const gravity = config.gravity ?? [0, -981, 0];
-		const damping = Math.max(0, Math.min(0.999, config.damping ?? 0.02));
-		for (let index = 0; index < positions.length / 3; index++) {
-			const offset = index * 3;
-			if (pinned.has(index)) {
-				positions[offset] = initialPositions[offset];
-				positions[offset + 1] = initialPositions[offset + 1];
-				positions[offset + 2] = initialPositions[offset + 2];
-				velocities[offset] = velocities[offset + 1] = velocities[offset + 2] = 0;
-				continue;
-			}
-			velocities[offset] = (velocities[offset] + gravity[0] * step) * (1 - damping);
-			velocities[offset + 1] = (velocities[offset + 1] + gravity[1] * step) * (1 - damping);
-			velocities[offset + 2] = (velocities[offset + 2] + gravity[2] * step) * (1 - damping);
-			positions[offset] += velocities[offset] * step;
-			positions[offset + 1] += velocities[offset + 1] * step;
-			positions[offset + 2] += velocities[offset + 2] * step;
-		}
-		for (let iteration = 0; iteration < (config.constraintIterations ?? 4); iteration++) {
-			for (const [first, second, restLength] of springs) {
-				const a = first * 3;
-				const b = second * 3;
-				const x = positions[b] - positions[a];
-				const y = positions[b + 1] - positions[a + 1];
-				const z = positions[b + 2] - positions[a + 2];
-				const length = Math.hypot(x, y, z) || 1;
-				const correction = (length - restLength) / length / 2;
-				if (!pinned.has(first)) {
-					positions[a] += x * correction;
-					positions[a + 1] += y * correction;
-					positions[a + 2] += z * correction;
-				}
-				if (!pinned.has(second)) {
-					positions[b] -= x * correction;
-					positions[b + 1] -= y * correction;
-					positions[b + 2] -= z * correction;
-				}
-			}
-		}
-		if (config.selfCollision) resolveSelfCollisions(positions, pinned, config.subdivisions, config.selfCollisionRadius ?? 5);
-		resolvePlaneCollision(positions, velocities, pinned, config.collisionPlane);
-		resolveSphereCollisions(positions, velocities, pinned, config.collisionSpheres);
-		resolveBoxCollisions(positions, velocities, pinned, config.collisionBoxes);
-		resolveMeshBoundsCollisions(scene, node, positions, velocities, pinned, config.collisionMeshIds);
-		const normals: number[] = [];
-		VertexData.ComputeNormals(positions, node.getIndices() ?? [], normals);
-		node.updateVerticesData(VertexBuffer.PositionKind, positions);
-		node.updateVerticesData(VertexBuffer.NormalKind, normals);
-		node.refreshBoundingInfo();
-	});
-	return { observer, initialPositions, velocities, springs, mesh: node, pinned };
-}
-
-/** Recreates saved cloth simulations once scene meshes are loaded. */
+/** Recreates saved cloth simulations through the shared editor/export runtime. */
 export function restoreCloths(scene: Scene): void {
-	for (const config of configs(scene)) {
-		if (runtime(scene).has(config.id)) continue;
-		try {
-			runtime(scene).set(config.id, createRuntimeCloth(scene, config));
-		} catch (error) {
-			console.warn(`Failed to restore cloth ${config.id}:`, error);
-		}
-	}
+	configureCloths(scene);
 }
 
-/** Lists persistent cloth components and live simulation status. */
+/** Lists persistent cloth components and shared live simulation status. */
 export function listCloths(scene: Scene): any {
-	return { cloths: structuredClone(configs(scene)).map((config) => ({ ...config, active: runtime(scene).has(config.id) })) };
+	const control = getClothSimulationControl(scene);
+	const activeIds = new Set(control.clothIds);
+	return {
+		cloths: structuredClone(configs(scene)).map((config) => {
+			const { vertexConstraints = [], ...summary } = config;
+			return {
+				...summary,
+				constraintRevision: getConstraintRevision(config),
+				vertexConstraintCount: vertexConstraints.length,
+				active: activeIds.has(config.id),
+				diagnostics: control.clothDiagnostics.find((diagnostics) => diagnostics.clothId === config.id) ?? null,
+			};
+		}),
+		simulation: control,
+	};
 }
 
-/** Creates a gridded, pinned cloth mesh with a live Verlet-style constraint simulation. */
+/** Creates a gridded, pinned cloth mesh owned by the shared runtime solver. */
 export function createCloth(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const subdivisions = data.subdivisions ?? 16;
-	if (!Number.isInteger(subdivisions) || subdivisions < 2 || subdivisions > 64) throw new Error("subdivisions must be an integer from 2 to 64.");
+	if (!Number.isInteger(subdivisions) || subdivisions < 2 || subdivisions > 64) {
+		throw new Error("subdivisions must be an integer from 2 to 64.");
+	}
 	const mesh = new Mesh(data.name ?? "Cloth", scene);
 	createGrid(mesh, data.width ?? 400, data.height ?? 400, subdivisions);
 	mesh.position = Vector3.FromArray(data.position ?? [0, 400, 0]);
@@ -392,10 +327,13 @@ export function createCloth(scene: Scene, data: any, options: IMCPActionOptions)
 		damping: data.damping ?? 0.02,
 		constraintIterations: data.constraintIterations ?? 4,
 		pinnedVertices: normalizePinnedVertices(data.pinnedVertices, subdivisions),
+		constraintRevision: 1,
+		vertexConstraints: normalizeVertexConstraints(data.vertexConstraints, subdivisions) ?? [],
 		collisionPlane: normalizeCollisionPlane(data.collisionPlane),
 		collisionSpheres: normalizeCollisionSpheres(data.collisionSpheres),
 		collisionBoxes: normalizeCollisionBoxes(data.collisionBoxes),
 		collisionMeshIds: normalizeCollisionMeshIds(scene, mesh.id, data.collisionMeshIds),
+		triangleColliders: normalizeTriangleColliders(scene, mesh.id, data.triangleColliders) ?? [],
 		selfCollision: data.selfCollision ?? false,
 		selfCollisionRadius: normalizeSelfCollisionRadius(data.selfCollisionRadius) ?? 5,
 		enabled: data.enabled ?? true,
@@ -404,50 +342,315 @@ export function createCloth(scene: Scene, data: any, options: IMCPActionOptions)
 		mesh.dispose();
 		throw new Error(`Cloth "${config.id}" already exists.`);
 	}
-	const active = createRuntimeCloth(scene, config);
 	configs(scene).push(config);
-	runtime(scene).set(config.id, active);
+	configureCloths(scene);
+	const active = getClothSimulationControl(scene).clothIds.includes(config.id);
+	if (!active) {
+		configs(scene).splice(configs(scene).indexOf(config), 1);
+		mesh.dispose();
+		throw new Error(`Cloth "${config.id}" could not start because its shared runtime mesh was unavailable.`);
+	}
 	options.editor.layout.inspector.setEditedObject(mesh);
 	options.editor.layout.inspector.forceUpdate();
-	return { ...config, mesh: toNodeSummary(mesh), active: true };
+	const { vertexConstraints, ...summary } = config;
+	return { ...summary, vertexConstraintCount: vertexConstraints.length, mesh: toNodeSummary(mesh), active };
 }
 
-/** Updates live cloth simulation settings or resets it to its authored rest pose. */
+/** Updates shared cloth settings or restores the authored rest pose. */
 export function setCloth(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const config = configs(scene).find((candidate) => candidate.id === data.id);
-	if (!config) throw new Error(`Cloth "${data.id}" was not found.`);
-	for (const key of ["gravity", "damping", "constraintIterations", "enabled", "selfCollision", "selfCollisionRadius"] as const)
-		if (data[key] !== undefined) config[key] = data[key];
-	if (data.collisionPlane !== undefined) config.collisionPlane = normalizeCollisionPlane(data.collisionPlane);
-	if (data.pinnedVertices !== undefined) {
-		config.pinnedVertices = normalizePinnedVertices(data.pinnedVertices, config.subdivisions);
-		const pinned = runtime(scene).get(config.id)?.pinned;
-		if (pinned) {
-			pinned.clear();
-			for (const index of config.pinnedVertices ?? []) pinned.add(index);
+	if (!config) {
+		throw new Error(`Cloth "${data.id}" was not found.`);
+	}
+	if (data.expectedConstraintRevision !== undefined && data.vertexConstraints === undefined) {
+		throw new Error("vertexConstraints is required when expectedConstraintRevision is provided.");
+	}
+	for (const key of ["gravity", "damping", "constraintIterations", "enabled", "selfCollision", "selfCollisionRadius"] as const) {
+		if (data[key] !== undefined) {
+			config[key] = data[key];
 		}
 	}
-	if (data.collisionSpheres !== undefined) config.collisionSpheres = normalizeCollisionSpheres(data.collisionSpheres);
-	if (data.collisionBoxes !== undefined) config.collisionBoxes = normalizeCollisionBoxes(data.collisionBoxes);
-	if (data.collisionMeshIds !== undefined) config.collisionMeshIds = normalizeCollisionMeshIds(scene, config.meshId, data.collisionMeshIds);
-	if (data.selfCollisionRadius !== undefined) config.selfCollisionRadius = normalizeSelfCollisionRadius(data.selfCollisionRadius);
-	const active = runtime(scene).get(config.id);
-	if (data.reset && active) {
-		active.mesh.updateVerticesData(VertexBuffer.PositionKind, active.initialPositions);
-		active.velocities.fill(0);
+	if (data.collisionPlane !== undefined) {
+		config.collisionPlane = normalizeCollisionPlane(data.collisionPlane);
 	}
+	if (data.pinnedVertices !== undefined) {
+		config.pinnedVertices = normalizePinnedVertices(data.pinnedVertices, config.subdivisions);
+	}
+	if (data.vertexConstraints !== undefined) {
+		if (data.expectedConstraintRevision === undefined) {
+			throw new Error("expectedConstraintRevision is required when replacing vertexConstraints.");
+		}
+		if (data.expectedConstraintRevision !== getConstraintRevision(config)) {
+			throw new Error(`Cloth constraint revision is stale: expected ${data.expectedConstraintRevision}, current ${getConstraintRevision(config)}.`);
+		}
+		config.vertexConstraints = normalizeVertexConstraints(data.vertexConstraints, config.subdivisions) ?? [];
+		config.constraintRevision = getConstraintRevision(config) + 1;
+	}
+	if (data.collisionSpheres !== undefined) {
+		config.collisionSpheres = normalizeCollisionSpheres(data.collisionSpheres);
+	}
+	if (data.collisionBoxes !== undefined) {
+		config.collisionBoxes = normalizeCollisionBoxes(data.collisionBoxes);
+	}
+	if (data.collisionMeshIds !== undefined) {
+		config.collisionMeshIds = normalizeCollisionMeshIds(scene, config.meshId, data.collisionMeshIds);
+	}
+	if (data.triangleColliders !== undefined) {
+		config.triangleColliders = normalizeTriangleColliders(scene, config.meshId, data.triangleColliders) ?? [];
+	}
+	if (data.selfCollisionRadius !== undefined) {
+		config.selfCollisionRadius = normalizeSelfCollisionRadius(data.selfCollisionRadius);
+	}
+	configureCloths(scene);
+	if (data.reset) {
+		resetClothSimulation(scene, config.id);
+	}
+	const active = getClothSimulationControl(scene).clothIds.includes(config.id);
 	options.editor.layout.inspector.forceUpdate();
-	return { ...structuredClone(config), active: !!active };
+	const { vertexConstraints, ...summary } = structuredClone(config);
+	return { ...summary, vertexConstraintCount: vertexConstraints?.length ?? 0, active };
 }
 
-/** Stops and removes a cloth component, leaving its mesh for ordinary scene editing. */
+/** Reads sparse per-vertex cloth constraints and the exact mutation lease. */
+export function getClothConstraints(scene: Scene, data: any = {}): any {
+	const config = configs(scene).find((candidate) => candidate.id === data.id);
+	if (!config) {
+		throw new Error(`Cloth "${data.id}" was not found.`);
+	}
+	const offset = data.offset ?? 0;
+	const limit = data.limit ?? 200;
+	if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 500) {
+		throw new Error("offset must be a non-negative integer and limit must be an integer from 1 through 500.");
+	}
+	const constraints = structuredClone(config.vertexConstraints ?? []);
+	return {
+		id: config.id,
+		meshId: config.meshId,
+		constraintRevision: getConstraintRevision(config),
+		vertexCount: (config.subdivisions + 1) ** 2,
+		vertexConstraints: constraints.slice(offset, offset + limit),
+		page: {
+			offset,
+			limit,
+			returned: Math.max(0, Math.min(limit, constraints.length - offset)),
+			total: constraints.length,
+			nextOffset: offset + limit < constraints.length ? offset + limit : null,
+		},
+	};
+}
+
+/** Returns an exact content snapshot used by viewport stroke Undo/Redo. */
+export function getClothConstraintSnapshot(scene: Scene, id: string): IClothConstraintSnapshot {
+	const config = configs(scene).find((candidate) => candidate.id === id);
+	if (!config) {
+		throw new Error(`Cloth "${id}" was not found.`);
+	}
+	return { id, constraintRevision: getConstraintRevision(config), vertexConstraints: structuredClone(config.vertexConstraints ?? []) };
+}
+
+/** Reads only the bounded vertex ids needed by the live viewport overlay. */
+export function getClothConstraintViewportData(scene: Scene, id: string, channel: ClothConstraintChannel): IClothConstraintViewportData {
+	const config = configs(scene).find((candidate) => candidate.id === id);
+	if (!config) {
+		throw new Error(`Cloth "${id}" was not found.`);
+	}
+	const matching = (config.vertexConstraints ?? []).filter((constraint: IClothVertexConstraint) => constraint[channel] !== undefined);
+	return {
+		id,
+		meshId: config.meshId,
+		constraintRevision: getConstraintRevision(config),
+		vertexIndices: matching.slice(0, 512).map((constraint) => constraint.vertexIndex),
+		total: matching.length,
+	};
+}
+
+/** Restores snapshot content while issuing a fresh exact revision. */
+export function restoreClothConstraintSnapshot(scene: Scene, snapshot: IClothConstraintSnapshot, options: IMCPActionOptions, expectedCurrentRevision?: number): any {
+	const config = configs(scene).find((candidate) => candidate.id === snapshot.id);
+	if (!config) {
+		throw new Error(`Cloth "${snapshot.id}" was not found.`);
+	}
+	if (expectedCurrentRevision !== undefined && getConstraintRevision(config) !== expectedCurrentRevision) {
+		throw new Error(`Cloth constraint revision is stale: expected ${expectedCurrentRevision}, current ${getConstraintRevision(config)}.`);
+	}
+	config.vertexConstraints = normalizeVertexConstraints(snapshot.vertexConstraints, config.subdivisions) ?? [];
+	config.constraintRevision = getConstraintRevision(config) + 1;
+	options.editor.layout.inspector.forceUpdate();
+	return getClothConstraints(scene, { id: snapshot.id });
+}
+
+/** Reads bounded per-cloth triangle broadphase, contact, and truncation evidence without stepping simulation. */
+export function getClothCollisionDiagnostics(scene: Scene, data: any = {}): any {
+	const control = getClothSimulationControl(scene);
+	const diagnostics = data.id ? control.clothDiagnostics.filter((candidate) => candidate.clothId === data.id) : control.clothDiagnostics;
+	if (data.id && !configs(scene).some((candidate) => candidate.id === data.id)) {
+		throw new Error(`Cloth "${data.id}" was not found.`);
+	}
+	return { diagnostics: structuredClone(diagnostics), count: diagnostics.length, simulationPaused: control.paused, lastStepSeconds: control.lastStepSeconds };
+}
+
+function brushInfluence(distance: number, radius: number, strength: number, falloff: ClothConstraintFalloff): number {
+	if (falloff === "constant") {
+		return strength;
+	}
+	const linear = Math.max(0, 1 - distance / radius);
+	return strength * (falloff === "smooth" ? linear * linear * (3 - 2 * linear) : linear);
+}
+
+/** Paints one persistent cloth-constraint channel in local cloth space without advancing simulation. */
+export function paintClothConstraints(scene: Scene, data: any, options: IMCPActionOptions): any {
+	const config = configs(scene).find((candidate) => candidate.id === data.id);
+	if (!config) {
+		throw new Error(`Cloth "${data.id}" was not found.`);
+	}
+	const revision = getConstraintRevision(config);
+	if (data.expectedConstraintRevision !== revision) {
+		throw new Error(`Cloth constraint revision is stale: expected ${data.expectedConstraintRevision}, current ${revision}.`);
+	}
+	if (!Array.isArray(data.center) || data.center.length !== 3 || data.center.some((value: any) => !Number.isFinite(value))) {
+		throw new Error("center must contain three finite local-space coordinates.");
+	}
+	if (!Number.isFinite(data.radius) || data.radius <= 0 || data.radius > 100000) {
+		throw new Error("radius must be greater than 0 and at most 100000 centimeters.");
+	}
+	if (!Number.isFinite(data.strength) || data.strength <= 0 || data.strength > 1) {
+		throw new Error("strength must be greater than 0 and at most 1.");
+	}
+	if (!(["maxDistance", "surfacePenetration"] as string[]).includes(data.channel)) {
+		throw new Error('channel must be "maxDistance" or "surfacePenetration".');
+	}
+	if (!(["constant", "linear", "smooth"] as string[]).includes(data.falloff)) {
+		throw new Error('falloff must be "constant", "linear", or "smooth".');
+	}
+	if (!(["paint", "erase"] as string[]).includes(data.mode)) {
+		throw new Error('mode must be "paint" or "erase".');
+	}
+	if (data.mode === "paint" && (!Number.isFinite(data.value) || data.value < 0 || data.value > 100000)) {
+		throw new Error("value must be from 0 through 100000 centimeters when painting.");
+	}
+	const mesh = scene.getMeshById(config.meshId) as Mesh | null;
+	const positions = mesh?.getVerticesData(VertexBuffer.PositionKind);
+	if (!mesh || !positions) {
+		throw new Error(`Cloth "${data.id}" has no editable position buffer.`);
+	}
+	const center = Vector3.FromArray(data.center);
+	const candidates: Array<{ vertexIndex: number; distance: number; influence: number }> = [];
+	for (let vertexIndex = 0; vertexIndex < positions.length / 3; vertexIndex++) {
+		const distance = Vector3.Distance(Vector3.FromArray(positions, vertexIndex * 3), center);
+		if (distance <= data.radius) {
+			const influence = brushInfluence(distance, data.radius, data.strength, data.falloff);
+			if (influence > 0) {
+				candidates.push({ vertexIndex, distance, influence });
+			}
+		}
+	}
+	const cap = data.maxAffectedVertices ?? 1024;
+	if (!Number.isInteger(cap) || cap < 1 || cap > 4096) {
+		throw new Error("maxAffectedVertices must be an integer from 1 through 4096.");
+	}
+	if (candidates.length > cap) {
+		throw new Error(`Brush would affect ${candidates.length} vertices, above maxAffectedVertices ${cap}; reduce radius or increase the explicit cap.`);
+	}
+	const constraints = new Map<number, IClothVertexConstraint>(
+		(config.vertexConstraints ?? []).map((constraint: IClothVertexConstraint) => [constraint.vertexIndex, { ...constraint }])
+	);
+	const beforeConstraints = JSON.stringify([...constraints.values()]);
+	for (const candidate of candidates) {
+		const constraint = constraints.get(candidate.vertexIndex) ?? { vertexIndex: candidate.vertexIndex };
+		if (data.mode === "erase") {
+			if (candidate.influence >= 0.5) {
+				delete constraint[data.channel as ClothConstraintChannel];
+			}
+		} else {
+			const previous = constraint[data.channel as ClothConstraintChannel];
+			constraint[data.channel as ClothConstraintChannel] = previous === undefined ? data.value : previous + (data.value - previous) * candidate.influence;
+		}
+		if (constraint.maxDistance === undefined && constraint.surfacePenetration === undefined) {
+			constraints.delete(candidate.vertexIndex);
+		} else {
+			constraints.set(candidate.vertexIndex, constraint);
+		}
+	}
+	config.vertexConstraints = [...constraints.values()].sort((first, second) => first.vertexIndex - second.vertexIndex);
+	const mutated = JSON.stringify(config.vertexConstraints) !== beforeConstraints;
+	if (mutated) {
+		config.constraintRevision = revision + 1;
+	}
+	options.editor.layout.inspector.forceUpdate();
+	return {
+		id: config.id,
+		constraintRevision: config.constraintRevision,
+		channel: data.channel,
+		mode: data.mode,
+		affectedVertices: candidates.slice(0, 256).map((candidate) => ({ vertexIndex: candidate.vertexIndex, distance: candidate.distance, influence: candidate.influence })),
+		affectedCount: candidates.length,
+		returnedAffectedVertices: Math.min(256, candidates.length),
+		affectedVerticesTruncated: candidates.length > 256,
+		constraintCount: config.vertexConstraints.length,
+		mutated,
+	};
+}
+
+/** Reads transient viewport brush settings; authored constraint data remains in scene metadata. */
+export function getClothConstraintPaintViewport(scene: Scene): IClothConstraintPaintViewportState {
+	return { ...getPaintState(scene) };
+}
+
+/** Updates transient viewport brush settings under an exact state lease. */
+export function setClothConstraintPaintViewport(scene: Scene, data: any, options: IMCPActionOptions): IClothConstraintPaintViewportState {
+	const current = getPaintState(scene);
+	if (data.expectedRevision !== current.revision) {
+		throw new Error(`Cloth paint viewport revision is stale: expected ${data.expectedRevision}, current ${current.revision}.`);
+	}
+	const next = { ...current };
+	if (data.clothId !== undefined) {
+		if (data.clothId !== null && !configs(scene).some((candidate) => candidate.id === data.clothId)) {
+			throw new Error(`Cloth "${data.clothId}" was not found.`);
+		}
+		next.clothId = data.clothId;
+	}
+	for (const property of ["enabled", "channel", "value", "radius", "strength", "falloff"] as const) {
+		if (data[property] !== undefined) {
+			(next as any)[property] = data[property];
+		}
+	}
+	if (!(<string[]>["maxDistance", "surfacePenetration"]).includes(next.channel) || !(<string[]>["constant", "linear", "smooth"]).includes(next.falloff)) {
+		throw new Error("Cloth brush channel or falloff is unsupported.");
+	}
+	if (next.enabled && !next.clothId) {
+		throw new Error("Select clothId before enabling cloth constraint painting.");
+	}
+	if (
+		!Number.isFinite(next.radius) ||
+		!(next.radius > 0) ||
+		next.radius > 100000 ||
+		!Number.isFinite(next.strength) ||
+		!(next.strength > 0) ||
+		next.strength > 1 ||
+		!Number.isFinite(next.value) ||
+		next.value < 0 ||
+		next.value > 100000
+	) {
+		throw new Error("Cloth brush value/radius/strength settings are outside their supported ranges.");
+	}
+	next.revision++;
+	clothConstraintPaintStates.set(scene, next);
+	options.editor.layout.inspector.forceUpdate();
+	return { ...next };
+}
+
+/** Stops and removes a cloth component while preserving its ordinary scene mesh. */
 export function deleteCloth(scene: Scene, data: any, options: IMCPActionOptions): any {
 	const index = configs(scene).findIndex((candidate) => candidate.id === data.id);
-	if (index === -1) throw new Error(`Cloth "${data.id}" was not found.`);
-	const active = runtime(scene).get(data.id);
-	if (active) scene.onBeforeRenderObservable.remove(active.observer);
-	runtime(scene).delete(data.id);
+	if (index === -1) {
+		throw new Error(`Cloth "${data.id}" was not found.`);
+	}
 	configs(scene).splice(index, 1);
+	const paint = getPaintState(scene);
+	if (paint.clothId === data.id) {
+		clothConstraintPaintStates.set(scene, { ...paint, revision: paint.revision + 1, enabled: false, clothId: null });
+	}
+	configureCloths(scene);
 	options.editor.layout.inspector.forceUpdate();
 	return { deleted: true, id: data.id };
 }

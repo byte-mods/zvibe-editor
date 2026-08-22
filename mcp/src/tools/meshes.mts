@@ -5,6 +5,16 @@ import { z } from "zod";
 
 import { callTextTool } from "./helpers.mjs";
 
+const decalChannelsSchema = z
+	.object({
+		albedo: z.boolean().optional().describe("Project the material base color/base texture and common opacity mask."),
+		normal: z.boolean().optional().describe("Project the material 2D normal/bump texture in projector tangent space, or a flat projector normal when no texture is assigned."),
+		metallic: z.boolean().optional().describe("Project metallic and smoothness; a material reflectivity texture uses red=metallic and alpha=smoothness."),
+		ambientOcclusion: z.boolean().optional().describe("Project ambient occlusion; a material ambient/AO texture uses its red channel."),
+		emissive: z.boolean().optional().describe("Project the material emissive color/texture multiplied by emissiveIntensity."),
+	})
+	.strict();
+
 export function registerMeshTools(server: McpServer): void {
 	server.registerTool(
 		"create_primitive_mesh",
@@ -212,12 +222,13 @@ export function registerMeshTools(server: McpServer): void {
 		{
 			title: "Bevel mesh edges",
 			description:
-				"ProBuilder-style multi-edge chamfer. Bevels selected disjoint manifold unique edges from one topology snapshot; edges cannot share endpoints. Get stable edge indices from get_mesh_topology.",
+				"ProBuilder-style atomic multi-edge bevel from one topology snapshot. Supports disjoint edges and adjacent manifold chains, mitered connected endpoints, and 1-8 quadratic rounded-profile segments. Every selected edge must be shared by exactly two triangles; get stable edge indices from get_mesh_topology.",
 			inputSchema: z.object({
 				nodeId: z.string().optional(),
 				nodeName: z.string().optional(),
-				edgeIndices: z.array(z.number().int().nonnegative()).min(1),
+				edgeIndices: z.array(z.number().int().nonnegative()).min(1).max(256),
 				amount: z.number().positive().max(0.999999),
+				segments: z.number().int().min(1).max(8).optional(),
 			}),
 			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
 		},
@@ -228,25 +239,410 @@ export function registerMeshTools(server: McpServer): void {
 		{
 			title: "Bevel mesh edge",
 			description:
-				"ProBuilder-style topology operation: chamfer one manifold unique edge shared by exactly two triangles. Get a stable edgeIndex from get_mesh_topology; amount is the local fraction moved from the edge endpoints toward each incident face's third vertex.",
+				"ProBuilder-style topology operation: bevel one manifold unique edge shared by exactly two triangles with mitered endpoint caps and 1-8 quadratic rounded-profile segments. Get a stable edgeIndex from get_mesh_topology; amount is the local fraction cut into each incident triangle.",
 			inputSchema: z.object({
 				nodeId: z.string().optional(),
 				nodeName: z.string().optional(),
 				edgeIndex: z.number().int().nonnegative(),
 				amount: z.number().positive().max(0.999999),
+				segments: z.number().int().min(1).max(8).optional(),
 			}),
 			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("bevel_mesh_edge", args)
 	);
 	server.registerTool(
+		"loop_cut_mesh",
+		{
+			title: "Loop cut mesh",
+			description:
+				"Insert one to eight evenly spaced edge loops through the manifold logical quad strip crossing a selected raw topology edge. The editor reconstructs deterministic quads from triangles, crosses opposite edges through hard UV/normal seams, preserves every compatible vertex stream and submesh material range, selects the created loop edges, and rejects stale, branched, diagonal, degenerate, morph-target, or unsafe topology before mutation. Call get_mesh_topology immediately first and pass its exact topologyFingerprint.",
+			inputSchema: z.object({
+				nodeId: z.string().optional().describe("Target editable Mesh id."),
+				nodeName: z.string().optional().describe("Target editable Mesh name when its id is unavailable."),
+				expectedTopologyFingerprint: z.string().min(1).describe("Exact topologyFingerprint returned by the latest get_mesh_topology call."),
+				edgeIndex: z.number().int().nonnegative().describe("Stable raw unique-edge ID returned by get_mesh_topology."),
+				cuts: z.number().int().min(1).max(8).optional().describe("Number of evenly spaced loops. Defaults to 1."),
+				offset: z.number().min(-0.49).max(0.49).optional().describe("Signed interval offset applied to every cut. Defaults to 0."),
+			}),
+			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("loop_cut_mesh", args)
+	);
+	server.registerTool(
+		"detach_mesh_faces",
+		{
+			title: "Detach mesh faces",
+			description:
+				"Unity ProBuilder-style face detach under an exact topology lease. Detach 1-4096 selected triangle faces either to a transform-preserving new Game Object or to disconnected vertex/submesh ranges in the source object. Every complete vertex stream, hard seam, skin buffer, material range, and face winding is preserved; stale, complete-selection, morph-target, unsafe-stream, and invalid requests reject before mutation. Call get_mesh_topology immediately first and pass its topologyFingerprint.",
+			inputSchema: z.object({
+				nodeId: z.string().optional().describe("Source editable Mesh id."),
+				nodeName: z.string().optional().describe("Source editable Mesh name when its id is unavailable."),
+				expectedTopologyFingerprint: z.string().min(1).describe("Exact topologyFingerprint returned by the latest get_mesh_topology call."),
+				faceIndices: z.array(z.number().int().nonnegative()).min(1).max(4096).describe("Unique current triangle-face IDs returned by get_mesh_topology."),
+				mode: z.enum(["gameObject", "submesh"]).describe("Create a separate Mesh Game Object or disconnected ranges in the source Mesh."),
+				name: z.string().trim().min(1).max(128).optional().describe("Optional new Game Object name; valid only when mode is gameObject."),
+			}),
+			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("detach_mesh_faces", args)
+	);
+	server.registerTool(
+		"get_mesh_smoothing_groups",
+		{
+			title: "Get mesh smoothing groups",
+			description:
+				"Inspect Unity ProBuilder-style per-triangle smoothing groups, exact topology fingerprint/revision, hard/smooth counts, group summaries, last operation, and a bounded face page. Group 0 is hard; groups 1-24 average normals across coincident vertices while retaining all other vertex seams. Use the returned topologyFingerprint and revision for a mutation.",
+			inputSchema: z.object({
+				nodeId: z.string().optional().describe("Target editable Mesh id."),
+				nodeName: z.string().optional().describe("Target editable Mesh name when its id is unavailable."),
+				group: z.number().int().min(0).max(24).optional().describe("Optional group filter; 0 returns hard faces."),
+				offset: z.number().int().nonnegative().optional().describe("Zero-based offset in the filtered face list."),
+				limit: z.number().int().min(1).max(256).optional().describe("Maximum face rows to return. Defaults to 128."),
+				faceIndices: z.array(z.number().int().nonnegative()).max(256).optional().describe("Optional exact current face IDs; cannot be combined with group/paging fields."),
+			}),
+			annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_mesh_smoothing_groups", args)
+	);
+	server.registerTool(
+		"set_mesh_smoothing_group",
+		{
+			title: "Set mesh smoothing group",
+			description:
+				"Assign 1-4096 unique current triangle faces to hard group 0 or smooth group 1-24 under the exact topology fingerprint and smoothing revision returned by get_mesh_smoothing_groups. The editor atomically splits/merges only required vertex records, averages normals across coincident same-group corners, orthonormalizes tangents, and preserves every other complete stream, submesh range, winding, UV layout, and face selection.",
+			inputSchema: z.object({
+				nodeId: z.string().optional().describe("Target editable Mesh id."),
+				nodeName: z.string().optional().describe("Target editable Mesh name when its id is unavailable."),
+				expectedTopologyFingerprint: z.string().min(1).describe("Exact fingerprint returned by get_mesh_smoothing_groups."),
+				expectedRevision: z.number().int().nonnegative().describe("Exact smoothing revision returned by get_mesh_smoothing_groups."),
+				faceIndices: z.array(z.number().int().nonnegative()).min(1).max(4096).describe("Unique current triangle-face IDs to assign."),
+				group: z.number().int().min(0).max(24).describe("Group 0 creates hard faces; groups 1-24 smooth coincident corners in the same group."),
+			}),
+			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_mesh_smoothing_group", args)
+	);
+	server.registerTool(
+		"auto_smooth_mesh_faces",
+		{
+			title: "Auto smooth mesh faces",
+			description:
+				"Generate isolated Unity ProBuilder-style smoothing groups for 1-4096 selected current triangle faces by joining manifold adjacent faces whose normal angle is at most angleThreshold. Requires the exact topology fingerprint and smoothing revision; available groups 1-24 are assigned deterministically without changing unselected faces, and the same stream-preserving normal/tangent rebuild as manual assignment runs atomically.",
+			inputSchema: z.object({
+				nodeId: z.string().optional().describe("Target editable Mesh id."),
+				nodeName: z.string().optional().describe("Target editable Mesh name when its id is unavailable."),
+				expectedTopologyFingerprint: z.string().min(1).describe("Exact fingerprint returned by get_mesh_smoothing_groups."),
+				expectedRevision: z.number().int().nonnegative().describe("Exact smoothing revision returned by get_mesh_smoothing_groups."),
+				faceIndices: z.array(z.number().int().nonnegative()).min(1).max(4096).describe("Unique current triangle-face IDs to classify."),
+				angleThreshold: z.number().min(0).max(180).describe("Maximum angle in degrees between adjacent face normals that may share a group."),
+			}),
+			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("auto_smooth_mesh_faces", args)
+	);
+	server.registerTool(
+		"get_mesh_vertex_colors",
+		{
+			title: "Get mesh vertex colors",
+			description:
+				"Inspect Unity ProBuilder-style RGBA vertex colors without changing the mesh. Returns exact topology/color fingerprints and revision, stream/default-white state, channel bounds, unique/painted/selected counts, last operation, and a bounded raw-vertex page. Filter by current component selection or non-white values, or request up to 256 exact current raw vertex IDs. Use all three returned leases for painting.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().optional().describe("Target editable Mesh id."),
+					nodeName: z.string().optional().describe("Target editable Mesh name when its id is unavailable."),
+					vertexIndices: z
+						.array(z.number().int().nonnegative())
+						.min(1)
+						.max(256)
+						.optional()
+						.describe("Optional unique exact raw vertex IDs; cannot be combined with filters or paging."),
+					selectedOnly: z.boolean().optional().describe("Return only vertices reached by the current vertex, edge, or face component selection."),
+					nonWhiteOnly: z.boolean().optional().describe("Return only vertices whose RGBA color differs from neutral white."),
+					offset: z.number().int().nonnegative().optional().describe("Zero-based offset in the filtered vertex list."),
+					limit: z.number().int().min(1).max(256).optional().describe("Maximum vertex rows to return. Defaults to 128."),
+				})
+				.superRefine((value, context) => {
+					if (value.vertexIndices && (value.selectedOnly !== undefined || value.nonWhiteOnly !== undefined || value.offset !== undefined || value.limit !== undefined)) {
+						context.addIssue({ code: "custom", message: "vertexIndices cannot be combined with filters or paging." });
+					}
+					if (value.vertexIndices && new Set(value.vertexIndices).size !== value.vertexIndices.length) {
+						context.addIssue({ code: "custom", message: "vertexIndices must be unique." });
+					}
+				}),
+			annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_mesh_vertex_colors", args)
+	);
+	server.registerTool(
+		"paint_mesh_vertex_colors",
+		{
+			title: "Paint mesh vertex colors",
+			description:
+				"Paint 1-4096 exact raw vertices or triangle faces with bounded RGBA, replace/add/multiply blending, and opacity under exact topology, color, and revision leases from get_mesh_vertex_colors. Face painting isolates shared selected/unselected corners by default while duplicating every complete vertex stream, so color does not bleed into unselected faces. Existing RGB is upgraded to RGBA; selection, submeshes, smoothing/UV data, skinning, tangent handedness, vertex-alpha flags, and arbitrary streams are preserved atomically. Morph targets reject only when isolation would split vertices.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().optional().describe("Target editable Mesh id."),
+					nodeName: z.string().optional().describe("Target editable Mesh name when its id is unavailable."),
+					expectedTopologyFingerprint: z.string().min(1).describe("Exact topologyFingerprint returned by get_mesh_vertex_colors."),
+					expectedColorFingerprint: z.string().min(1).describe("Exact colorFingerprint returned by get_mesh_vertex_colors."),
+					expectedRevision: z.number().int().nonnegative().describe("Exact revision returned by get_mesh_vertex_colors."),
+					targetMode: z.enum(["vertex", "face"]).describe("Paint raw vertices or triangle faces."),
+					vertexIndices: z.array(z.number().int().nonnegative()).min(1).max(4096).optional().describe("Unique current raw vertex IDs; required only for vertex mode."),
+					faceIndices: z.array(z.number().int().nonnegative()).min(1).max(4096).optional().describe("Unique current triangle-face IDs; required only for face mode."),
+					color: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]).describe("Linear RGBA target color."),
+					blendMode: z.enum(["replace", "add", "multiply"]).optional().describe("Per-channel operation before opacity interpolation. Defaults to replace."),
+					opacity: z.number().min(0).max(1).optional().describe("Interpolation strength from current to blended color. Defaults to 1."),
+					splitFaceBoundaries: z.boolean().optional().describe("Face mode only. Defaults true to isolate selected corners from unselected faces."),
+				})
+				.superRefine((value, context) => {
+					if (value.targetMode === "vertex" && (!value.vertexIndices || value.faceIndices || value.splitFaceBoundaries !== undefined)) {
+						context.addIssue({ code: "custom", message: "Vertex mode requires only vertexIndices and does not accept splitFaceBoundaries." });
+					}
+					if (value.targetMode === "face" && (!value.faceIndices || value.vertexIndices)) {
+						context.addIssue({ code: "custom", message: "Face mode requires only faceIndices." });
+					}
+					const indices = value.targetMode === "vertex" ? value.vertexIndices : value.faceIndices;
+					if (indices && new Set(indices).size !== indices.length) {
+						context.addIssue({ code: "custom", message: "Paint component IDs must be unique." });
+					}
+				}),
+			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("paint_mesh_vertex_colors", args)
+	);
+	server.registerTool(
+		"get_mesh_pivot",
+		{
+			title: "Get mesh pivot",
+			description:
+				"Inspect one editable Mesh's Unity-style local/world pivot, exact pivot/topology lease, transform origin, raw geometry bounds-center candidate, and current component-selection average candidate. Use the returned pivotFingerprint immediately with set_mesh_pivot. Pivot candidates are derived from undeformed editable vertices and editor units are centimeters.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().min(1).max(128).optional().describe("Target editable Mesh id."),
+					nodeName: z.string().min(1).max(128).optional().describe("Target editable Mesh name when its id is unavailable."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_mesh_pivot", args)
+	);
+	server.registerTool(
+		"set_mesh_pivot",
+		{
+			title: "Set mesh pivot",
+			description:
+				"Relocate an editable Mesh pivot with Unity ProBuilder semantics under the exact lease from get_mesh_pivot. Choose an explicit world point, raw local bounds center, or the average of 1-4096 selected vertex/edge/face components. The operation changes only pivot/transform state and atomically verifies unchanged world matrix, every world vertex, descendants, and topology. Parented meshes plus quaternion and non-uniform/negative scaling are supported; frozen, billboard, infinite-distance, singular, invalid-topology, and arbitrary pre-transform states reject with no mutation.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().min(1).max(128).optional().describe("Target editable Mesh id."),
+					nodeName: z.string().min(1).max(128).optional().describe("Target editable Mesh name when its id is unavailable."),
+					expectedPivotFingerprint: z.string().min(1).max(128).describe("Exact pivotFingerprint returned by the latest get_mesh_pivot call."),
+					mode: z.enum(["world", "boundsCenter", "selectionAverage"]).describe("How to derive the new pivot."),
+					worldPosition: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]).optional().describe("Required only for world mode, in centimeters."),
+					selectionMode: z.enum(["vertex", "edge", "face"]).optional().describe("Required only for selectionAverage mode."),
+					componentIndices: z
+						.array(z.number().int().nonnegative())
+						.min(1)
+						.max(4096)
+						.optional()
+						.describe("Unique current component IDs required only for selectionAverage mode."),
+				})
+				.strict()
+				.superRefine((value, context) => {
+					if (value.mode === "world" && (!value.worldPosition || value.selectionMode !== undefined || value.componentIndices !== undefined)) {
+						context.addIssue({ code: "custom", message: "world mode requires only worldPosition." });
+					}
+					if (value.mode === "boundsCenter" && (value.worldPosition !== undefined || value.selectionMode !== undefined || value.componentIndices !== undefined)) {
+						context.addIssue({ code: "custom", message: "boundsCenter mode does not accept target fields." });
+					}
+					if (value.mode === "selectionAverage" && (value.worldPosition !== undefined || !value.selectionMode || !value.componentIndices)) {
+						context.addIssue({ code: "custom", message: "selectionAverage mode requires only selectionMode and componentIndices." });
+					}
+					if (value.componentIndices && new Set(value.componentIndices).size !== value.componentIndices.length) {
+						context.addIssue({ code: "custom", message: "componentIndices must be unique." });
+					}
+				}),
+			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_mesh_pivot", args)
+	);
+	server.registerTool(
+		"get_mesh_editable_source",
+		{
+			title: "Get mesh editable source",
+			description:
+				"Inspect one Mesh's canonical Unity ProBuilder-style editable source and its detached generated-runtime preview. Returns exact source fingerprint/revision and export-settings revision leases; complete stream, index, face, and submesh counts; current optimization policy; generated fingerprint/counts; removed unused or bit-identical vertices; portable-output blockers; persisted artifact evidence; and explicit source/generated ownership. The read does not mutate geometry or settings. Use all three returned leases immediately with set_mesh_export_geometry.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().min(1).max(128).optional().describe("Target editable Mesh id."),
+					nodeName: z.string().min(1).max(128).optional().describe("Target editable Mesh name when its id is unavailable."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_mesh_editable_source", args)
+	);
+	server.registerTool(
+		"set_mesh_export_geometry",
+		{
+			title: "Set mesh export geometry",
+			description:
+				"Set whether runtime geometry is generated by preserving source records or by removing unused records and welding only complete bit-identical vertex records. Requires the exact source fingerprint/revision and export-settings revision returned by get_mesh_editable_source. The operation changes only the versioned export policy, rebuilds a detached preview, verifies the canonical live/project source is unchanged, and leaves editor-only topology metadata out of runtime output.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().min(1).max(128).optional().describe("Target editable Mesh id."),
+					nodeName: z.string().min(1).max(128).optional().describe("Target editable Mesh name when its id is unavailable."),
+					expectedSourceFingerprint: z.string().min(1).max(128).describe("Exact source.fingerprint returned by get_mesh_editable_source."),
+					expectedSourceRevision: z.number().int().positive().describe("Exact source.revision returned by get_mesh_editable_source."),
+					expectedExportSettingsRevision: z.number().int().positive().describe("Exact exportSettings.revision returned by get_mesh_editable_source."),
+					optimize: z
+						.boolean()
+						.describe("True removes unused vertices and welds only complete bit-identical records in the generated artifact; false preserves source record layout."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_mesh_export_geometry", args)
+	);
+	server.registerTool(
+		"inspect_mesh_integrity",
+		{
+			title: "Inspect mesh integrity",
+			description:
+				"Inspect one editable triangle mesh without mutation using a bounded Unity ProBuilder-style repair report. Returns an exact all-stream/index/submesh integrity fingerprint; structural repairability; vertex/face/component, boundary, non-manifold, winding, unused, and weldable counts; category summaries; and a paginated issue list covering incomplete/non-finite streams, invalid indices/submeshes, zero-area and duplicate faces, unused or safely weldable vertices, boundary/non-manifold edges, winding, normals, and skin weights. Open boundaries and disconnected components remain informational because they can be intentional.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().optional().describe("Target editable Mesh id."),
+					nodeName: z.string().optional().describe("Target editable Mesh name when its id is unavailable."),
+					positionTolerance: z.number().positive().max(1).optional().describe("Local-space coincidence and zero-area tolerance. Defaults to 0.000001."),
+					categories: z
+						.array(
+							z.enum([
+								"positions",
+								"indices",
+								"streams",
+								"degenerateFaces",
+								"duplicateFaces",
+								"unusedVertices",
+								"weldableVertices",
+								"nonManifoldEdges",
+								"boundaryEdges",
+								"winding",
+								"components",
+								"normals",
+								"skinning",
+								"subMeshes",
+							])
+						)
+						.min(1)
+						.max(14)
+						.optional()
+						.describe("Optional unique category filter for the issue page."),
+					severity: z.enum(["error", "warning", "info"]).optional().describe("Optional severity filter for the issue page."),
+					offset: z.number().int().nonnegative().optional().describe("Zero-based offset in the filtered issue list."),
+					limit: z.number().int().min(1).max(256).optional().describe("Maximum issue rows to return. Defaults to 128."),
+				})
+				.superRefine((value, context) => {
+					if (value.categories && new Set(value.categories).size !== value.categories.length) {
+						context.addIssue({ code: "custom", message: "categories must be unique." });
+					}
+				}),
+			annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("inspect_mesh_integrity", args)
+	);
+	server.registerTool(
+		"repair_mesh_integrity",
+		{
+			title: "Repair mesh integrity",
+			description:
+				"Atomically apply an explicit bounded repair set under the exact integrityFingerprint from inspect_mesh_integrity. Supported operations remove invalid/trailing, zero-area, or duplicate faces; compact unused vertices; weld only coincident vertices whose complete non-position streams match; make manifold adjacency winding consistent; rebuild normals; normalize four/eight-influence skin weights; and rebuild contiguous material-preserving submesh runs. Every complete arbitrary stream is preserved and remapped together. Smoothing groups follow surviving face identity; stale UV/color metadata is invalidated only when topology changes. Morph targets, incomplete/non-finite streams, contradictory winding, ambiguous non-manifold ownership, stale leases, and all-face removal reject before publication. Requires confirm=true because faces may be deleted.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().optional().describe("Target editable Mesh id."),
+					nodeName: z.string().optional().describe("Target editable Mesh name when its id is unavailable."),
+					expectedIntegrityFingerprint: z.string().min(1).describe("Exact integrityFingerprint returned by inspect_mesh_integrity."),
+					operations: z
+						.array(
+							z.enum([
+								"removeInvalidFaces",
+								"removeDegenerateFaces",
+								"removeDuplicateFaces",
+								"removeUnusedVertices",
+								"weldIdenticalVertices",
+								"fixWinding",
+								"rebuildNormals",
+								"normalizeSkinWeights",
+								"rebuildSubMeshes",
+							])
+						)
+						.min(1)
+						.max(9)
+						.describe("Unique explicit repair operations to run in one transaction."),
+					positionTolerance: z.number().positive().max(1).optional().describe("Must match the intended inspection tolerance. Defaults to 0.000001."),
+					confirm: z.literal(true).describe("Required acknowledgement that repair may delete invalid faces."),
+				})
+				.superRefine((value, context) => {
+					if (new Set(value.operations).size !== value.operations.length) {
+						context.addIssue({ code: "custom", message: "operations must be unique." });
+					}
+				}),
+			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("repair_mesh_integrity", args)
+	);
+	server.registerTool(
+		"get_mesh_uv_layout",
+		{
+			title: "Get mesh UV layout",
+			description:
+				"Inspect persistent logical UV seams, exact layout revision/fingerprint, bounded chart summaries, UV bounds, surface area, and the last harmonic-relax/atlas-pack execution for one editable mesh.",
+			inputSchema: z.object({
+				nodeId: z.string().optional(),
+				nodeName: z.string().optional(),
+				offset: z.number().int().nonnegative().optional(),
+				limit: z.number().int().min(1).max(256).optional(),
+			}),
+			annotations: { readOnlyHint: true },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("get_mesh_uv_layout", args)
+	);
+	server.registerTool(
+		"set_mesh_uv_seams",
+		{
+			title: "Set mesh UV seams",
+			description:
+				"Atomically replace, add, or remove persistent logical UV seams under an exact layout revision. Edge IDs come from get_mesh_topology; coincident UV-split vertices resolve to the same logical edge, while mesh-boundary edges reject as redundant.",
+			inputSchema: z.object({
+				nodeId: z.string().optional(),
+				nodeName: z.string().optional(),
+				expectedRevision: z.number().int().nonnegative(),
+				mode: z.enum(["replace", "add", "remove"]).optional(),
+				edgeIndices: z.array(z.number().int().nonnegative()).max(4096),
+			}),
+			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("set_mesh_uv_seams", args)
+	);
+	server.registerTool(
 		"unwrap_mesh_uvs",
 		{
-			title: "Auto unwrap mesh UVs",
+			title: "Unwrap and pack mesh UV charts",
 			description:
-				"Create a deterministic non-overlapping UV atlas by splitting each triangle into a padded chart. This duplicates shared vertices so arbitrary topology receives safe independent UVs.",
-			inputSchema: z.object({ nodeId: z.string().optional(), nodeName: z.string().optional(), padding: z.number().min(0).max(0.499999).optional() }),
-			annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+				"Under an exact layout revision, use persistent logical seams to extract UV charts, optionally open closed charts with deterministic auto seams, map chart boundaries harmonically, relax interiors, preserve equal surface texel density and every compatible vertex stream, split only required UV vertices, and deterministically pack optional 90-degree rotations into one atlas.",
+			inputSchema: z.object({
+				nodeId: z.string().optional(),
+				nodeName: z.string().optional(),
+				expectedRevision: z.number().int().nonnegative(),
+				padding: z.number().min(0).max(0.1).optional(),
+				relaxIterations: z.number().int().min(0).max(100).optional(),
+				relaxStrength: z.number().positive().max(1).optional(),
+				allowRotation: z.boolean().optional(),
+				autoSeams: z.boolean().optional(),
+				normalizeTexelDensity: z.boolean().optional(),
+			}),
+			annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("unwrap_mesh_uvs", args)
 	);
@@ -351,9 +747,10 @@ export function registerMeshTools(server: McpServer): void {
 		"list_terrain_streaming_groups",
 		{
 			title: "List terrain streaming groups",
-			description: "List persisted distance-based Ground tile streaming groups.",
-			inputSchema: z.object({}),
-			annotations: { readOnlyHint: true },
+			description:
+				"List versioned persisted Ground tile groups, exact revisions, embedded or asynchronous streamed-geometry settings, generated tile artifact manifests, current per-tile resident/queued/loading/loaded/error state, distances, attempts, fetched bytes, SHA-256 verification, timing, failures, and bounded limits. Use the returned revision for update or deletion.",
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (): Promise<CallToolResult> => callTextTool("list_terrain_streaming_groups")
 	);
@@ -362,19 +759,53 @@ export function registerMeshTools(server: McpServer): void {
 		{
 			title: "Set terrain streaming group",
 			description:
-				"Create or update a distance-activated set of Ground terrain tiles. Tiles outside range are disabled in preview and exported runtime; set `releaseGeometry:true` to release off-range vertex/index buffers and rebuild them before a tile is re-enabled. Distance is centimeters.",
-			inputSchema: z.object({
-				groupId: z.string().optional(),
-				name: z.string().optional(),
-				terrainIds: z.array(z.string()).min(1),
-				distance: z.number().positive(),
-				targetNodeId: z.string().optional(),
-				enabled: z.boolean().optional(),
-				releaseGeometry: z
-					.boolean()
-					.optional()
-					.describe("Release vertex/index buffers while an off-range tile is disabled. This reconstructs already-loaded geometry; it does not fetch remote assets."),
-			}),
+				"Create or exact-revision update a bounded distance-activated Ground tile group. Embedded mode disables distant tiles and can snapshot/release resident buffers. `streamGeometry:true` makes direct export and CLI pack publish empty Mesh placeholders plus SHA-256/byte-count/binary-layout manifests; exported full/additive runtime asynchronously fetches only tiles inside `preloadDistance`, shows them inside `distance`, unloads them beyond `unloadDistance` after a delay, limits concurrency, retries with backoff, validates response size/hash, and supports an optional HTTPS CDN base. Distances are centimeters. Create requires name, terrainIds, and distance; update requires groupId and expectedRevision.",
+			inputSchema: z
+				.object({
+					groupId: z.string().min(1).max(256).optional().describe("Existing group id for an update."),
+					expectedRevision: z.number().int().positive().optional().describe("Exact current revision required for an update."),
+					name: z.string().trim().min(1).max(128).optional(),
+					terrainIds: z.array(z.string().min(1).max(256)).min(1).max(4096).optional().describe("Unique Ground Mesh ids; a tile can belong to only one group."),
+					distance: z.number().finite().positive().max(1_000_000_000).optional().describe("Visibility distance in centimeters."),
+					preloadDistance: z.number().finite().positive().max(1_000_000_000).optional().describe("Fetch radius; must be at least distance."),
+					unloadDistance: z.number().finite().positive().max(1_000_000_000).optional().describe("Release radius; must be at least preloadDistance."),
+					unloadDelayMs: z.number().int().min(0).max(600_000).optional(),
+					maxConcurrentLoads: z.number().int().min(1).max(16).optional(),
+					retryCount: z.number().int().min(0).max(8).optional(),
+					requestTimeoutMs: z.number().int().min(1_000).max(120_000).optional(),
+					remoteBaseUrl: z
+						.string()
+						.max(2_048)
+						.nullable()
+						.optional()
+						.describe("Optional HTTPS CDN base; null uses the exported scene root. Loopback HTTP is allowed for development."),
+					targetNodeId: z.string().min(1).max(256).nullable().optional(),
+					enabled: z.boolean().optional(),
+					releaseGeometry: z.boolean().optional().describe("Embedded-only resident buffer snapshot/release. Mutually exclusive with streamGeometry."),
+					streamGeometry: z.boolean().optional().describe("Export hashed asynchronous geometry artifacts and leave empty runtime tile placeholders."),
+				})
+				.strict()
+				.superRefine((value, context) => {
+					if (value.groupId && value.expectedRevision === undefined) {
+						context.addIssue({ code: "custom", message: "Updates require expectedRevision." });
+					}
+					if (!value.groupId && (value.expectedRevision !== undefined || !value.name || !value.terrainIds || value.distance === undefined)) {
+						context.addIssue({ code: "custom", message: "Create requires name, terrainIds, and distance and does not accept expectedRevision." });
+					}
+					if (value.terrainIds && new Set(value.terrainIds).size !== value.terrainIds.length) {
+						context.addIssue({ code: "custom", message: "terrainIds must be unique." });
+					}
+					if (value.distance !== undefined && value.preloadDistance !== undefined && value.preloadDistance < value.distance) {
+						context.addIssue({ code: "custom", message: "preloadDistance must be at least distance." });
+					}
+					if (value.preloadDistance !== undefined && value.unloadDistance !== undefined && value.unloadDistance < value.preloadDistance) {
+						context.addIssue({ code: "custom", message: "unloadDistance must be at least preloadDistance." });
+					}
+					if (value.streamGeometry && value.releaseGeometry) {
+						context.addIssue({ code: "custom", message: "streamGeometry and releaseGeometry are mutually exclusive." });
+					}
+				}),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_terrain_streaming_group", args)
 	);
@@ -382,8 +813,20 @@ export function registerMeshTools(server: McpServer): void {
 		"delete_terrain_streaming_group",
 		{
 			title: "Delete terrain streaming group",
-			description: "Delete a terrain streaming group and re-enable its tiles.",
-			inputSchema: z.object({ groupId: z.string().optional(), name: z.string().optional() }),
+			description: "Delete one terrain streaming group under its exact revision and restore all resident authoring tile geometry before removing the configuration.",
+			inputSchema: z
+				.object({
+					groupId: z.string().min(1).max(256).optional(),
+					name: z.string().trim().min(1).max(128).optional(),
+					expectedRevision: z.number().int().positive(),
+				})
+				.strict()
+				.superRefine((value, context) => {
+					if (!!value.groupId === !!value.name) {
+						context.addIssue({ code: "custom", message: "Provide exactly one of groupId or name." });
+					}
+				}),
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("delete_terrain_streaming_group", args)
 	);
@@ -484,20 +927,97 @@ export function registerMeshTools(server: McpServer): void {
 	);
 
 	server.registerTool(
+		"list_decals",
+		{
+			title: "List decals",
+			description:
+				"List persisted projected-geometry decals and Unity-style screen-space volume projectors with bounded pagination, exact authoring revisions, source/volume/material/channel summaries, and current deferred execution evidence. Returns `{ totalCount, count, offset, limit, hasMore, nextOffset, decals, deferredCameras }`.",
+			inputSchema: z
+				.object({
+					search: z.string().trim().max(256).optional().describe("Optional case-insensitive decal name or id substring."),
+					offset: z.number().int().min(0).max(1_000_000).default(0).describe("Zero-based result offset."),
+					limit: z.number().int().min(1).max(100).default(50).describe("Maximum decals to return; 1–100."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (args): Promise<CallToolResult> => callTextTool("list_decals", args)
+	);
+
+	server.registerTool(
 		"create_decal",
 		{
 			title: "Create decal",
-			description: "Project a persisted decal mesh onto a source Mesh using an existing material. Positions and decal dimensions are in centimeters; angles are radians.",
-			inputSchema: z.object({
-				sourceNodeId: z.string().optional().describe("Id of the source Mesh (preferred)."),
-				sourceNodeName: z.string().optional().describe("Name of the source Mesh."),
-				materialId: z.string().describe("Id of the material to assign to the decal."),
-				name: z.string().optional().describe("Name for the decal mesh."),
-				position: z.array(z.number()).length(3).describe("Projection position `[x,y,z]` in centimeters."),
-				normal: z.array(z.number()).length(3).optional().describe("Surface normal `[x,y,z]`."),
-				size: z.array(z.number()).length(3).optional().describe("Decal size `[width,height,depth]` in centimeters."),
-				angle: z.number().optional().describe("Decal rotation angle in radians."),
-			}),
+			description:
+				"Create either a versioned projected-geometry decal on one source Mesh or a Unity-style ordered screen-space volume projector. Volume projectors reconstruct world position and independently project albedo/opacity, projector-space normal, metallic/smoothness, ambient occlusion, and emissive material channels. `decalLayerMask` uses the editor's existing named 32-bit Rendering Layers: a deferred target mesh is affected when its native `layerMask` shares any bit. Positions/dimensions are centimeters and rotations/angles are radians. Returns the complete record plus exact deferred invalidation/readiness evidence.",
+			inputSchema: z
+				.object({
+					projectionMode: z
+						.enum(["geometry", "screen-space-volume"])
+						.default("geometry")
+						.describe("Geometry bakes clipped triangles onto one source; screen-space-volume projects through reconstructed deferred world position."),
+					sourceNodeId: z.string().min(1).max(256).optional().describe("Id of the non-decal source Mesh (preferred)."),
+					sourceNodeName: z.string().min(1).max(256).optional().describe("Name of the non-decal source Mesh."),
+					materialId: z.string().min(1).max(256).describe("Id of the material to assign to the decal."),
+					name: z.string().min(1).max(256).optional().describe("Name for the decal mesh."),
+					position: z.array(z.number().finite()).length(3).describe("Projection position `[x,y,z]` in centimeters."),
+					normal: z.array(z.number().finite()).length(3).optional().describe("Projection surface normal `[x,y,z]`; omit to derive it."),
+					rotation: z.array(z.number().finite()).length(3).optional().describe("Screen-space projector Euler rotation `[x,y,z]` in radians."),
+					size: z.array(z.number().finite().positive().max(10_000_000)).length(3).optional().describe("Positive decal size `[width,height,depth]` in centimeters."),
+					angle: z.number().finite().optional().describe("Decal rotation angle in radians."),
+					edgeFade: z.number().finite().min(0).max(1).optional().describe("Screen-space volume boundary fade as a 0..1 fraction of half extent."),
+					uvScale: z.array(z.number().finite()).length(2).optional().describe("Screen-space projector UV scale `[x,y]`."),
+					uvOffset: z.array(z.number().finite()).length(2).optional().describe("Screen-space projector UV offset `[x,y]`."),
+					channels: decalChannelsSchema
+						.optional()
+						.describe("Screen-space projector channel enablement. Defaults to albedo only; at least one effective channel must be true."),
+					normalStrength: z.number().finite().min(0).max(2).optional().describe("Projected normal XY strength in 0..2; default 1."),
+					metallic: z.number().finite().min(0).max(1).optional().describe("Projected metallic scalar in 0..1, multiplied by reflectivity texture red; default 0."),
+					smoothness: z
+						.number()
+						.finite()
+						.min(0)
+						.max(1)
+						.optional()
+						.describe("Projected smoothness scalar in 0..1, multiplied by reflectivity texture alpha; default 0.5."),
+					ambientOcclusion: z.number().finite().min(0).max(1).optional().describe("Projected ambient-occlusion scalar in 0..1, multiplied by AO texture red; default 1."),
+					emissiveIntensity: z.number().finite().min(0).max(16).optional().describe("Projected emissive multiplier in 0..16; default 1."),
+					decalLayerMask: z.number().int().min(0).max(0xffffffff).optional().describe("Unsigned 32-bit Unity-style Decal Layer mask. Defaults to all bits (4294967295)."),
+					alphaIndex: z.number().int().min(-1_000_000).max(1_000_000).optional().describe("Babylon transparent draw-order index; lower values draw first."),
+					renderingGroupId: z.number().int().min(0).max(3).default(0).describe("Rendering group. Use 0 for deferred G-buffer execution; later groups remain forward."),
+				})
+				.strict()
+				.superRefine((value, context) => {
+					if (value.projectionMode === "geometry" && !value.sourceNodeId && !value.sourceNodeName) {
+						context.addIssue({ code: "custom", message: "Geometry decals require sourceNodeId or sourceNodeName." });
+					}
+					if (value.projectionMode === "screen-space-volume" && (value.sourceNodeId || value.sourceNodeName || value.normal || value.angle !== undefined)) {
+						context.addIssue({ code: "custom", message: "Screen-space volume projectors do not accept a source mesh, normal, or geometry angle." });
+					}
+					if (value.projectionMode === "screen-space-volume" && value.renderingGroupId !== 0) {
+						context.addIssue({ code: "custom", message: "Screen-space volume projectors execute in deferred rendering group 0." });
+					}
+					const projectorFields = [
+						value.rotation,
+						value.edgeFade,
+						value.uvScale,
+						value.uvOffset,
+						value.channels,
+						value.normalStrength,
+						value.metallic,
+						value.smoothness,
+						value.ambientOcclusion,
+						value.emissiveIntensity,
+						value.decalLayerMask,
+					];
+					if (value.projectionMode === "geometry" && projectorFields.some((field) => field !== undefined)) {
+						context.addIssue({ code: "custom", message: "Geometry decals do not accept screen-space projector channel or Decal Layer fields." });
+					}
+					if (value.channels && !Object.values(value.channels).some(Boolean)) {
+						context.addIssue({ code: "custom", message: "At least one projector channel must be true." });
+					}
+				}),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("create_decal", args)
 	);
@@ -506,12 +1026,15 @@ export function registerMeshTools(server: McpServer): void {
 		"get_decal",
 		{
 			title: "Get decal",
-			description: "Get persisted source, projection, size, angle, and material settings for an editor decal mesh.",
-			inputSchema: z.object({
-				nodeId: z.string().optional().describe("Id of the decal mesh (preferred)."),
-				nodeName: z.string().optional().describe("Name of the decal mesh."),
-			}),
-			annotations: { readOnlyHint: true },
+			description:
+				"Get one geometry decal or screen-space volume projector, including exact revision, oriented volume, material, five channel settings, Decal Layer mask, edge/UV controls, draw order, per-channel texture/readiness data, affected mesh count, and deferred execution/invalidation evidence. Use the returned revision as `expectedRevision` for safe updates.",
+			inputSchema: z
+				.object({
+					nodeId: z.string().min(1).max(256).optional().describe("Id of the decal mesh (preferred)."),
+					nodeName: z.string().min(1).max(256).optional().describe("Name of the decal mesh."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("get_decal", args)
 	);
@@ -520,15 +1043,38 @@ export function registerMeshTools(server: McpServer): void {
 		"set_decal",
 		{
 			title: "Set decal",
-			description: "Update an editor decal's size, angle, and/or material, then regenerate its projection geometry.",
-			inputSchema: z.object({
-				nodeId: z.string().optional().describe("Id of the decal mesh (preferred)."),
-				nodeName: z.string().optional().describe("Name of the decal mesh."),
-				size: z.array(z.number()).length(3).optional().describe("Decal size `[width,height,depth]` in centimeters."),
-				angle: z.number().optional().describe("Decal rotation angle in radians."),
-				materialId: z.string().optional().describe("Replacement material id."),
-			}),
-			annotations: { readOnlyHint: false, idempotentHint: true },
+			description:
+				"Atomically update a geometry decal or screen-space volume projector under its exact revision lease. Geometry edits regenerate source/position/normal/size/angle and reject empty replacement projections without mutation. Volume edits update oriented transform, material, five channel settings, Decal Layer mask, edge/UV controls, name, and order. `channels` merges with current settings and must leave at least one channel enabled. projectionMode is immutable. Returns the incremented record and exact deferred invalidation evidence; rebuild active deferred cameras after mutation.",
+			inputSchema: z
+				.object({
+					projectionMode: z.enum(["geometry", "screen-space-volume"]).optional().describe("Optional assertion of the immutable current mode."),
+					nodeId: z.string().min(1).max(256).optional().describe("Id of the decal mesh (preferred)."),
+					nodeName: z.string().min(1).max(256).optional().describe("Name of the decal mesh."),
+					expectedRevision: z.number().int().positive().optional().describe("Exact current decal revision returned by get_decal."),
+					sourceNodeId: z.string().min(1).max(256).optional().describe("Replacement non-decal source Mesh id."),
+					sourceNodeName: z.string().min(1).max(256).optional().describe("Replacement non-decal source Mesh name."),
+					name: z.string().min(1).max(256).optional().describe("Replacement decal name."),
+					position: z.array(z.number().finite()).length(3).optional().describe("Projection position `[x,y,z]` in centimeters."),
+					normal: z.array(z.number().finite()).length(3).nullable().optional().describe("Projection normal `[x,y,z]`; null derives it from the source."),
+					rotation: z.array(z.number().finite()).length(3).optional().describe("Screen-space projector Euler rotation `[x,y,z]` in radians."),
+					size: z.array(z.number().finite().positive().max(10_000_000)).length(3).optional().describe("Positive decal size `[width,height,depth]` in centimeters."),
+					angle: z.number().finite().optional().describe("Decal rotation angle in radians."),
+					edgeFade: z.number().finite().min(0).max(1).optional().describe("Screen-space volume boundary fade in 0..1."),
+					uvScale: z.array(z.number().finite()).length(2).optional().describe("Screen-space projector UV scale `[x,y]`."),
+					uvOffset: z.array(z.number().finite()).length(2).optional().describe("Screen-space projector UV offset `[x,y]`."),
+					channels: decalChannelsSchema.optional().describe("Partial screen-space projector channel update; omitted keys retain current values."),
+					normalStrength: z.number().finite().min(0).max(2).optional().describe("Projected normal XY strength in 0..2."),
+					metallic: z.number().finite().min(0).max(1).optional().describe("Projected metallic scalar in 0..1."),
+					smoothness: z.number().finite().min(0).max(1).optional().describe("Projected smoothness scalar in 0..1."),
+					ambientOcclusion: z.number().finite().min(0).max(1).optional().describe("Projected ambient-occlusion scalar in 0..1."),
+					emissiveIntensity: z.number().finite().min(0).max(16).optional().describe("Projected emissive multiplier in 0..16."),
+					decalLayerMask: z.number().int().min(0).max(0xffffffff).optional().describe("Unsigned 32-bit Decal Layer mask; overlaps target native Rendering Layers."),
+					materialId: z.string().min(1).max(256).optional().describe("Replacement material id."),
+					alphaIndex: z.number().int().min(-1_000_000).max(1_000_000).optional().describe("Transparent draw-order index."),
+					renderingGroupId: z.number().int().min(0).max(3).optional().describe("Rendering group; use 0 for deferred execution."),
+				})
+				.strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (args): Promise<CallToolResult> => callTextTool("set_decal", args)
 	);

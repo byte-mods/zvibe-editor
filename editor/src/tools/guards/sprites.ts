@@ -7,7 +7,7 @@ import { Sprite } from "babylonjs";
  * @param object defines the reference to the object to test its class name.
  */
 export function isSprite(object: any): object is Sprite {
-	return object.getClassName?.() === "Sprite";
+	return object?.getClassName?.() === "Sprite";
 }
 
 /**
@@ -15,7 +15,7 @@ export function isSprite(object: any): object is Sprite {
  * @param object defines the reference to the object to test its class name.
  */
 export function isSpriteMapNode(object: any): object is SpriteMapNode {
-	return object.getClassName?.() === "SpriteMapNode";
+	return object?.getClassName?.() === "SpriteMapNode";
 }
 
 /**
@@ -23,5 +23,5 @@ export function isSpriteMapNode(object: any): object is SpriteMapNode {
  * @param object defines the reference to the object to test its class name.
  */
 export function isSpriteManagerNode(object: any): object is SpriteManagerNode {
-	return object.getClassName?.() === "SpriteManagerNode";
+	return object?.getClassName?.() === "SpriteManagerNode";
 }

@@ -1,4 +1,5 @@
 import { Bone } from "@babylonjs/core/Bones/bone";
+import { Skeleton } from "@babylonjs/core/Bones/skeleton";
 import { Space } from "@babylonjs/core/Maths/math.axis";
 import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
@@ -6,6 +7,218 @@ import { Scene } from "@babylonjs/core/scene";
 
 const configuredScenes = new WeakSet<Scene>();
 const dampedTransformStates = new WeakMap<Scene, Map<string, { signature: string; position: Vector3; rotation: Quaternion }>>();
+const animationRigJobDefinitions = new Map<string, IAnimationRigJobDefinition>();
+const animationRigJobStates = new WeakMap<Scene, Map<string, IAnimationRigJobRuntimeState>>();
+const animationRigProfilerStates = new WeakMap<Scene, IAnimationRigProfilerState>();
+
+const maximumAnimationRigProfileLayers = 64;
+const maximumAnimationRigProfileConstraints = 256;
+
+export interface IAnimationRigProfilerSettings {
+	enabled: boolean;
+	sampleCapacity: number;
+	sampleEveryNEvaluations: number;
+}
+
+export type AnimationRigProfileStatus = "applied" | "failed" | "disabled" | "zeroWeight" | "invalidConstraints";
+
+export interface IAnimationRigConstraintProfileSample {
+	constraintId: string;
+	name: string;
+	type: string;
+	enabled: boolean;
+	status: "applied" | "failed" | "disabled";
+	durationMilliseconds: number;
+}
+
+export interface IAnimationRigLayerProfileSample {
+	layerId: string;
+	name: string;
+	skeletonId: string;
+	enabled: boolean;
+	weight: number;
+	status: AnimationRigProfileStatus;
+	durationMilliseconds: number;
+	constraintCount: number;
+	appliedConstraintCount: number;
+	failedConstraintCount: number;
+	disabledConstraintCount: number;
+	constraints: IAnimationRigConstraintProfileSample[];
+	truncatedConstraintCount: number;
+}
+
+export interface IAnimationRigProfileSample {
+	evaluationIndex: number;
+	capturedAt: string;
+	deltaTimeSeconds: number;
+	durationMilliseconds: number;
+	layerCount: number;
+	constraintCount: number;
+	appliedConstraintCount: number;
+	failedConstraintCount: number;
+	disabledConstraintCount: number;
+	skippedLayerCount: number;
+	failedConstraintIds: string[];
+	layers: IAnimationRigLayerProfileSample[];
+	truncatedLayerCount: number;
+	truncatedConstraintCount: number;
+	selection: {
+		skeletonId: string | null;
+		layerIds: string[] | null;
+		constraintRefs: Array<{ layerId: string; constraintId: string }> | null;
+		fixedDeltaTimeSeconds: number | null;
+		resetTemporalState: boolean;
+	};
+}
+
+interface IAnimationRigTimingAccumulator {
+	sampleCount: number;
+	totalDurationMilliseconds: number;
+	minimumDurationMilliseconds: number;
+	maximumDurationMilliseconds: number;
+	lastDurationMilliseconds: number;
+	appliedCount: number;
+	failedCount: number;
+	skippedCount: number;
+	lastStatus: string | null;
+}
+
+interface IAnimationRigProfileEntitySummary extends IAnimationRigTimingAccumulator {
+	id: string;
+	name: string;
+	type: string | null;
+	skeletonId: string;
+	layerId: string | null;
+}
+
+interface IAnimationRigProfilerState {
+	settings: IAnimationRigProfilerSettings;
+	evaluationCount: number;
+	capturedSampleCount: number;
+	droppedSampleCount: number;
+	suppressedLayerSummaryUpdateCount: number;
+	suppressedConstraintSummaryUpdateCount: number;
+	startedAt: string;
+	clearedAt: string | null;
+	samples: IAnimationRigProfileSample[];
+	sceneSummary: IAnimationRigTimingAccumulator;
+	layerSummaries: Map<string, IAnimationRigProfileEntitySummary>;
+	constraintSummaries: Map<string, IAnimationRigProfileEntitySummary>;
+}
+
+export interface IAnimationRigJobContext<TData extends Record<string, unknown> = Record<string, unknown>> {
+	readonly scene: Scene;
+	readonly skeleton: Skeleton;
+	readonly mesh: TransformNode | undefined;
+	readonly layerId: string;
+	readonly constraintId: string;
+	readonly jobType: string;
+	readonly jobVersion: number;
+	readonly weight: number;
+	readonly deltaTimeSeconds: number;
+	readonly data: TData;
+	readonly bones: readonly Bone[];
+	readonly nodes: readonly TransformNode[];
+}
+
+/**
+ * Project-script implementation of a Unity-style weighted animation job.
+ * Definitions are registered once at module load and are resolved by the serialized custom constraint's `jobType`.
+ */
+export interface IAnimationRigJobDefinition<TData extends Record<string, unknown> = Record<string, unknown>, TState = unknown> {
+	readonly id: string;
+	readonly displayName?: string;
+	readonly description?: string;
+	readonly dataVersion: number;
+	setDefaultValues?(): TData;
+	validate?(context: IAnimationRigJobContext<TData>): true | string;
+	create?(context: IAnimationRigJobContext<TData>): TState;
+	update?(context: IAnimationRigJobContext<TData>, state: TState): void;
+	processRootMotion?(context: IAnimationRigJobContext<TData>, state: TState): void | boolean;
+	processAnimation(context: IAnimationRigJobContext<TData>, state: TState): void | boolean;
+	destroy?(state: TState): void;
+}
+
+interface IAnimationRigJobRuntimeState {
+	definition: IAnimationRigJobDefinition;
+	state: unknown;
+	createCount: number;
+	updateCount: number;
+	processRootMotionCount: number;
+	processAnimationCount: number;
+	errorCount: number;
+	lastError: string | null;
+	lastDurationMilliseconds: number;
+	lastWeight: number;
+	lastSucceeded: boolean;
+}
+
+function validateAnimationRigJobDefinition(definition: IAnimationRigJobDefinition): void {
+	if (!definition || typeof definition !== "object") {
+		throw new Error("Animation Rig job definition must be an object.");
+	}
+	if (!/^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$/.test(definition.id)) {
+		throw new Error("Animation Rig job id must contain 1 through 128 safe identifier characters.");
+	}
+	if (!Number.isInteger(definition.dataVersion) || definition.dataVersion < 1 || definition.dataVersion > 100000) {
+		throw new Error("Animation Rig job dataVersion must be an integer from 1 through 100000.");
+	}
+	if (typeof definition.processAnimation !== "function") {
+		throw new Error(`Animation Rig job "${definition.id}" must implement processAnimation.`);
+	}
+}
+
+/** Registers or hot-replaces one project-defined weighted Animation Rig job type. */
+export function registerAnimationRigJob<TData extends Record<string, unknown> = Record<string, unknown>, TState = unknown>(
+	definition: IAnimationRigJobDefinition<TData, TState>
+): () => void {
+	validateAnimationRigJobDefinition(definition as IAnimationRigJobDefinition);
+	animationRigJobDefinitions.set(definition.id, definition as IAnimationRigJobDefinition);
+	return () => {
+		if (animationRigJobDefinitions.get(definition.id) === definition) {
+			animationRigJobDefinitions.delete(definition.id);
+		}
+	};
+}
+
+/** Lists registered custom job types without exposing executable callbacks. */
+export function listAnimationRigJobTypes(): Array<{
+	id: string;
+	displayName: string;
+	description: string;
+	dataVersion: number;
+	hasRootMotion: boolean;
+	defaultData: Record<string, unknown>;
+}> {
+	return [...animationRigJobDefinitions.values()]
+		.map((definition) => ({
+			id: definition.id,
+			displayName: definition.displayName?.trim() || definition.id,
+			description: definition.description?.trim() || "",
+			dataVersion: definition.dataVersion,
+			hasRootMotion: typeof definition.processRootMotion === "function",
+			defaultData: structuredClone(definition.setDefaultValues?.() ?? {}),
+		}))
+		.sort((left, right) => left.id.localeCompare(right.id));
+}
+
+/** Returns non-executable metadata for one registered custom job type. */
+export function getAnimationRigJobType(jobType: string): ReturnType<typeof listAnimationRigJobTypes>[number] | null {
+	return listAnimationRigJobTypes().find((definition) => definition.id === jobType) ?? null;
+}
+
+export interface IApplyRigLayersOptions {
+	/** Evaluates only layers owned by this skeleton. Omit to evaluate every persisted layer. */
+	skeletonId?: string;
+	/** Evaluates only these layer ids. Omit to evaluate every matching persisted layer. */
+	layerIds?: string[];
+	/** Evaluates only these exact layer/constraint pairs. Omit to evaluate every constraint in matching layers. */
+	constraintRefs?: Array<{ layerId: string; constraintId: string }>;
+	/** Fixed temporal step used by Damped Transform. Omit to use the render engine delta. */
+	deltaTimeSeconds?: number;
+	/** Clears temporal constraint history before this evaluation. */
+	resetTemporalState?: boolean;
+}
 
 function clamp01(value: unknown, fallback = 1): number {
 	return typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : fallback;
@@ -270,7 +483,7 @@ function applyBlendTransform(scene: Scene, layer: any, constraint: any): boolean
 	return true;
 }
 
-function applyDampedTransform(scene: Scene, layer: any, constraint: any): boolean {
+function applyDampedTransform(scene: Scene, layer: any, constraint: any, deltaTimeSeconds?: number): boolean {
 	const resolved = resolveBone(scene, layer.skeletonId, constraint.boneName);
 	const source = sourceTransform(scene, constraint.sourceNodeId, constraint.positionOffset, constraint.rotationOffset);
 	if (!resolved || !source) {
@@ -289,7 +502,8 @@ function applyDampedTransform(scene: Scene, layer: any, constraint: any): boolea
 		state = { signature, position: currentPosition.clone(), rotation: currentRotation.clone() };
 		states.set(constraint.id, state);
 	}
-	const deltaTime = Math.min(1 / 15, Math.max(1 / 240, scene.getEngine().getDeltaTime() / 1000 || 1 / 60));
+	const requestedDelta = deltaTimeSeconds ?? (scene.getEngine().getDeltaTime() / 1000 || 1 / 60);
+	const deltaTime = Math.min(1 / 15, Math.max(1 / 240, requestedDelta));
 	const positionSpeed = 1 + (1 - clamp01(constraint.positionDamping, 0.5)) * 59;
 	const rotationSpeed = 1 + (1 - clamp01(constraint.rotationDamping, 0.5)) * 59;
 	state.position = Vector3.Lerp(state.position, source.position, 1 - Math.exp(-positionSpeed * deltaTime));
@@ -512,48 +726,644 @@ function applyFullBodyIk(scene: Scene, layer: any, constraint: any): boolean {
 	return true;
 }
 
+function animationRigJobStateKey(layerId: string, constraintId: string): string {
+	return `${layerId}\u0000${constraintId}`;
+}
+
+function animationRigJobElapsedStart(): number {
+	return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
+
+function destroyAnimationRigJobState(state: IAnimationRigJobRuntimeState): void {
+	try {
+		state.definition.destroy?.(state.state);
+	} catch {
+		// Destruction must never break scene teardown or a later rig evaluation.
+	}
+}
+
+function clearAnimationRigJobStates(scene: Scene): void {
+	const states = animationRigJobStates.get(scene);
+	if (!states) {
+		return;
+	}
+	for (const state of states.values()) {
+		destroyAnimationRigJobState(state);
+	}
+	animationRigJobStates.delete(scene);
+}
+
+function animationRigJobContext(scene: Scene, layer: any, constraint: any, deltaTimeSeconds?: number): IAnimationRigJobContext | null {
+	const skeleton = scene.skeletons.find((candidate) => candidate.id === layer.skeletonId);
+	if (!skeleton || !Array.isArray(constraint.boneNames) || !Array.isArray(constraint.nodeIds)) {
+		return null;
+	}
+	const bones = constraint.boneNames.map((name: unknown) => skeleton.bones.find((bone) => bone.name === name));
+	const nodes = constraint.nodeIds.map((id: unknown) => scene.getNodeById(String(id)));
+	if (bones.some((bone: Bone | undefined) => !bone) || nodes.some((node: any) => !node || typeof node.computeWorldMatrix !== "function")) {
+		return null;
+	}
+	const requestedDelta = deltaTimeSeconds ?? (scene.getEngine().getDeltaTime() / 1000 || 1 / 60);
+	return {
+		scene,
+		skeleton,
+		mesh: scene.meshes.find((candidate) => candidate.skeleton === skeleton),
+		layerId: String(layer.id),
+		constraintId: String(constraint.id),
+		jobType: String(constraint.jobType),
+		jobVersion: Number(constraint.jobVersion),
+		weight: clamp01(layer.weight) * clamp01(constraint.weight),
+		deltaTimeSeconds: Math.min(1, Math.max(0, Number.isFinite(requestedDelta) ? requestedDelta : 1 / 60)),
+		data: structuredClone(constraint.jobData ?? {}),
+		bones: bones as Bone[],
+		nodes: nodes as TransformNode[],
+	};
+}
+
+function animationRigJobValidation(definition: IAnimationRigJobDefinition | undefined, context: IAnimationRigJobContext | null): { valid: boolean; message: string | null } {
+	if (!definition) {
+		return { valid: false, message: "The custom Animation Rig job type is not registered by a loaded project script." };
+	}
+	if (!context) {
+		return { valid: false, message: "One or more serialized custom-job bone/node bindings are unresolved." };
+	}
+	if (definition.dataVersion !== context.jobVersion) {
+		return { valid: false, message: `Registered data version ${definition.dataVersion} does not match serialized version ${context.jobVersion}.` };
+	}
+	try {
+		const result = definition.validate?.(context) ?? true;
+		return result === true ? { valid: true, message: null } : { valid: false, message: String(result).slice(0, 1024) };
+	} catch (error) {
+		return { valid: false, message: (error instanceof Error ? error.message : String(error)).slice(0, 1024) };
+	}
+}
+
+function applyAnimationRigJob(scene: Scene, layer: any, constraint: any, deltaTimeSeconds?: number): boolean {
+	const definition = animationRigJobDefinitions.get(String(constraint.jobType));
+	const context = animationRigJobContext(scene, layer, constraint, deltaTimeSeconds);
+	const validation = animationRigJobValidation(definition, context);
+	if (!definition || !context || !validation.valid) {
+		return false;
+	}
+	let states = animationRigJobStates.get(scene);
+	if (!states) {
+		states = new Map();
+		animationRigJobStates.set(scene, states);
+	}
+	const key = animationRigJobStateKey(context.layerId, context.constraintId);
+	let runtime = states.get(key);
+	if (runtime && runtime.definition !== definition) {
+		destroyAnimationRigJobState(runtime);
+		states.delete(key);
+		runtime = undefined;
+	}
+	try {
+		if (!runtime) {
+			runtime = {
+				definition,
+				state: definition.create?.(context),
+				createCount: 1,
+				updateCount: 0,
+				processRootMotionCount: 0,
+				processAnimationCount: 0,
+				errorCount: 0,
+				lastError: null,
+				lastDurationMilliseconds: 0,
+				lastWeight: context.weight,
+				lastSucceeded: false,
+			};
+			states.set(key, runtime);
+		}
+		const started = animationRigJobElapsedStart();
+		definition.update?.(context, runtime.state);
+		runtime.updateCount++;
+		if (definition.processRootMotion) {
+			const rootResult = definition.processRootMotion(context, runtime.state);
+			runtime.processRootMotionCount++;
+			if (rootResult === false) {
+				throw new Error("processRootMotion returned false.");
+			}
+		}
+		const animationResult = definition.processAnimation(context, runtime.state);
+		runtime.processAnimationCount++;
+		if (animationResult === false) {
+			throw new Error("processAnimation returned false.");
+		}
+		runtime.lastDurationMilliseconds = Math.max(0, animationRigJobElapsedStart() - started);
+		runtime.lastWeight = context.weight;
+		runtime.lastError = null;
+		runtime.lastSucceeded = true;
+		return true;
+	} catch (error) {
+		if (runtime) {
+			runtime.errorCount++;
+			runtime.lastError = (error instanceof Error ? error.message : String(error)).slice(0, 1024);
+			runtime.lastWeight = context.weight;
+			runtime.lastSucceeded = false;
+		}
+		return false;
+	}
+}
+
+/** Returns one custom constraint's registration, validation, and live lifecycle evidence. */
+export function getAnimationRigJobRuntimeDiagnostics(scene: Scene, layer: any, constraint: any): any {
+	const definition = animationRigJobDefinitions.get(String(constraint.jobType));
+	const context = animationRigJobContext(scene, layer, constraint);
+	const validation = animationRigJobValidation(definition, context);
+	const runtime = animationRigJobStates.get(scene)?.get(animationRigJobStateKey(String(layer.id), String(constraint.id)));
+	return {
+		registered: !!definition,
+		valid: validation.valid,
+		validationMessage: validation.message,
+		registeredDataVersion: definition?.dataVersion ?? null,
+		hasRootMotion: typeof definition?.processRootMotion === "function",
+		createCount: runtime?.createCount ?? 0,
+		updateCount: runtime?.updateCount ?? 0,
+		processRootMotionCount: runtime?.processRootMotionCount ?? 0,
+		processAnimationCount: runtime?.processAnimationCount ?? 0,
+		errorCount: runtime?.errorCount ?? 0,
+		lastError: runtime?.lastError ?? null,
+		lastDurationMilliseconds: runtime?.lastDurationMilliseconds ?? null,
+		lastWeight: runtime?.lastWeight ?? null,
+		lastSucceeded: runtime?.lastSucceeded ?? false,
+	};
+}
+
+function createAnimationRigTimingAccumulator(): IAnimationRigTimingAccumulator {
+	return {
+		sampleCount: 0,
+		totalDurationMilliseconds: 0,
+		minimumDurationMilliseconds: 0,
+		maximumDurationMilliseconds: 0,
+		lastDurationMilliseconds: 0,
+		appliedCount: 0,
+		failedCount: 0,
+		skippedCount: 0,
+		lastStatus: null,
+	};
+}
+
+function createAnimationRigProfilerState(): IAnimationRigProfilerState {
+	return {
+		settings: { enabled: false, sampleCapacity: 120, sampleEveryNEvaluations: 1 },
+		evaluationCount: 0,
+		capturedSampleCount: 0,
+		droppedSampleCount: 0,
+		suppressedLayerSummaryUpdateCount: 0,
+		suppressedConstraintSummaryUpdateCount: 0,
+		startedAt: new Date().toISOString(),
+		clearedAt: null,
+		samples: [],
+		sceneSummary: createAnimationRigTimingAccumulator(),
+		layerSummaries: new Map(),
+		constraintSummaries: new Map(),
+	};
+}
+
+function animationRigProfilerState(scene: Scene): IAnimationRigProfilerState {
+	let state = animationRigProfilerStates.get(scene);
+	if (!state) {
+		state = createAnimationRigProfilerState();
+		animationRigProfilerStates.set(scene, state);
+	}
+	return state;
+}
+
+function updateAnimationRigTimingAccumulator(accumulator: IAnimationRigTimingAccumulator, durationMilliseconds: number, status: string): void {
+	const duration = Math.max(0, Number.isFinite(durationMilliseconds) ? durationMilliseconds : 0);
+	accumulator.sampleCount++;
+	accumulator.totalDurationMilliseconds += duration;
+	accumulator.minimumDurationMilliseconds = accumulator.sampleCount === 1 ? duration : Math.min(accumulator.minimumDurationMilliseconds, duration);
+	accumulator.maximumDurationMilliseconds = Math.max(accumulator.maximumDurationMilliseconds, duration);
+	accumulator.lastDurationMilliseconds = duration;
+	accumulator.lastStatus = status;
+	if (status === "applied") {
+		accumulator.appliedCount++;
+	} else if (status === "failed") {
+		accumulator.failedCount++;
+	} else {
+		accumulator.skippedCount++;
+	}
+}
+
+function describeAnimationRigTiming(accumulator: IAnimationRigTimingAccumulator): any {
+	return {
+		sampleCount: accumulator.sampleCount,
+		totalDurationMilliseconds: accumulator.totalDurationMilliseconds,
+		minimumDurationMilliseconds: accumulator.minimumDurationMilliseconds,
+		maximumDurationMilliseconds: accumulator.maximumDurationMilliseconds,
+		averageDurationMilliseconds: accumulator.sampleCount ? accumulator.totalDurationMilliseconds / accumulator.sampleCount : 0,
+		lastDurationMilliseconds: accumulator.lastDurationMilliseconds,
+		appliedCount: accumulator.appliedCount,
+		failedCount: accumulator.failedCount,
+		skippedCount: accumulator.skippedCount,
+		lastStatus: accumulator.lastStatus,
+	};
+}
+
+function updateAnimationRigEntitySummary(
+	summaries: Map<string, IAnimationRigProfileEntitySummary>,
+	key: string,
+	identity: Pick<IAnimationRigProfileEntitySummary, "id" | "name" | "type" | "skeletonId" | "layerId">,
+	durationMilliseconds: number,
+	status: string,
+	maximumEntries: number
+): boolean {
+	let summary = summaries.get(key);
+	if (!summary) {
+		if (summaries.size >= maximumEntries) {
+			return false;
+		}
+		summary = { ...identity, ...createAnimationRigTimingAccumulator() };
+		summaries.set(key, summary);
+	} else {
+		summary.name = identity.name;
+		summary.type = identity.type;
+		summary.skeletonId = identity.skeletonId;
+		summary.layerId = identity.layerId;
+	}
+	updateAnimationRigTimingAccumulator(summary, durationMilliseconds, status);
+	return true;
+}
+
+function publishAnimationRigProfileSample(state: IAnimationRigProfilerState, sample: IAnimationRigProfileSample): void {
+	state.capturedSampleCount++;
+	updateAnimationRigTimingAccumulator(state.sceneSummary, sample.durationMilliseconds, sample.failedConstraintCount > 0 ? "failed" : "applied");
+	for (const layer of sample.layers) {
+		if (
+			!updateAnimationRigEntitySummary(
+				state.layerSummaries,
+				layer.layerId,
+				{ id: layer.layerId, name: layer.name, type: null, skeletonId: layer.skeletonId, layerId: null },
+				layer.durationMilliseconds,
+				layer.status === "applied" && layer.failedConstraintCount > 0 ? "failed" : layer.status,
+				maximumAnimationRigProfileLayers
+			)
+		) {
+			state.suppressedLayerSummaryUpdateCount++;
+		}
+		for (const constraint of layer.constraints) {
+			if (
+				!updateAnimationRigEntitySummary(
+					state.constraintSummaries,
+					`${layer.layerId}\u0000${constraint.constraintId}`,
+					{
+						id: constraint.constraintId,
+						name: constraint.name,
+						type: constraint.type,
+						skeletonId: layer.skeletonId,
+						layerId: layer.layerId,
+					},
+					constraint.durationMilliseconds,
+					constraint.status,
+					maximumAnimationRigProfileConstraints
+				)
+			) {
+				state.suppressedConstraintSummaryUpdateCount++;
+			}
+		}
+	}
+	state.samples.push(sample);
+	while (state.samples.length > state.settings.sampleCapacity) {
+		state.samples.shift();
+		state.droppedSampleCount++;
+	}
+}
+
+/** Configures bounded CPU sampling around the exact shared Animation Rig evaluator. */
+export function configureAnimationRigProfiler(scene: Scene, settings: Partial<IAnimationRigProfilerSettings>): ReturnType<typeof getAnimationRigProfile> {
+	const state = animationRigProfilerState(scene);
+	if (settings.enabled !== undefined) {
+		if (typeof settings.enabled !== "boolean") {
+			throw new Error("Animation Rig profiler enabled must be a boolean.");
+		}
+		state.settings.enabled = settings.enabled;
+	}
+	if (settings.sampleCapacity !== undefined) {
+		if (!Number.isInteger(settings.sampleCapacity) || settings.sampleCapacity < 1 || settings.sampleCapacity > 256) {
+			throw new Error("Animation Rig profiler sampleCapacity must be an integer from 1 through 256.");
+		}
+		state.settings.sampleCapacity = settings.sampleCapacity;
+		while (state.samples.length > settings.sampleCapacity) {
+			state.samples.shift();
+			state.droppedSampleCount++;
+		}
+	}
+	if (settings.sampleEveryNEvaluations !== undefined) {
+		if (!Number.isInteger(settings.sampleEveryNEvaluations) || settings.sampleEveryNEvaluations < 1 || settings.sampleEveryNEvaluations > 120) {
+			throw new Error("Animation Rig profiler sampleEveryNEvaluations must be an integer from 1 through 120.");
+		}
+		state.settings.sampleEveryNEvaluations = settings.sampleEveryNEvaluations;
+	}
+	return getAnimationRigProfile(scene);
+}
+
+/** Clears captured Animation Rig timing history while retaining current profiler settings. */
+export function clearAnimationRigProfile(scene: Scene): ReturnType<typeof getAnimationRigProfile> {
+	const state = animationRigProfilerState(scene);
+	state.evaluationCount = 0;
+	state.capturedSampleCount = 0;
+	state.droppedSampleCount = 0;
+	state.suppressedLayerSummaryUpdateCount = 0;
+	state.suppressedConstraintSummaryUpdateCount = 0;
+	state.startedAt = new Date().toISOString();
+	state.clearedAt = state.startedAt;
+	state.samples = [];
+	state.sceneSummary = createAnimationRigTimingAccumulator();
+	state.layerSummaries.clear();
+	state.constraintSummaries.clear();
+	return getAnimationRigProfile(scene);
+}
+
+/** Reads bounded Animation Rig timeline samples plus hierarchical CPU timing/counter summaries. */
+export function getAnimationRigProfile(
+	scene: Scene,
+	options: { skeletonId?: string; layerId?: string; constraintId?: string; includeSamples?: boolean; sampleOffset?: number; sampleLimit?: number } = {}
+): any {
+	const state = animationRigProfilerState(scene);
+	const offset = Number.isInteger(options.sampleOffset) && Number(options.sampleOffset) >= 0 ? Number(options.sampleOffset) : 0;
+	const limit = Number.isInteger(options.sampleLimit) ? Math.min(120, Math.max(1, Number(options.sampleLimit))) : 20;
+	const matchesLayer = (layer: { id?: string; layerId: string | null; skeletonId: string }): boolean =>
+		(!options.skeletonId || layer.skeletonId === options.skeletonId) && (!options.layerId || (layer.layerId ?? layer.id) === options.layerId);
+	const matchesConstraint = (constraint: { id?: string; constraintId?: string; layerId: string | null; skeletonId: string }): boolean =>
+		(!options.skeletonId || constraint.skeletonId === options.skeletonId) &&
+		(!options.layerId || constraint.layerId === options.layerId) &&
+		(!options.constraintId || (constraint.id ?? constraint.constraintId) === options.constraintId);
+	const filteredSamples = [...state.samples]
+		.reverse()
+		.map((sample) => {
+			const layers = sample.layers
+				.filter(matchesLayer)
+				.map((layer) => ({
+					...structuredClone(layer),
+					constraints: layer.constraints.filter((constraint) => matchesConstraint({ ...constraint, layerId: layer.layerId, skeletonId: layer.skeletonId })),
+				}))
+				.filter((layer) => !options.constraintId || layer.constraints.length > 0);
+			if (!options.skeletonId && !options.layerId && !options.constraintId) {
+				return { ...structuredClone(sample), layers };
+			}
+			const constraints = layers.flatMap((layer) => layer.constraints);
+			return {
+				...structuredClone(sample),
+				durationMilliseconds: options.constraintId
+					? constraints.reduce((total, constraint) => total + constraint.durationMilliseconds, 0)
+					: layers.reduce((total, layer) => total + layer.durationMilliseconds, 0),
+				layerCount: layers.length,
+				constraintCount: constraints.length,
+				appliedConstraintCount: constraints.filter((constraint) => constraint.status === "applied").length,
+				failedConstraintCount: constraints.filter((constraint) => constraint.status === "failed").length,
+				disabledConstraintCount: constraints.filter((constraint) => constraint.status === "disabled").length,
+				skippedLayerCount: layers.filter((layer) => layer.status !== "applied").length,
+				failedConstraintIds: constraints.filter((constraint) => constraint.status === "failed").map((constraint) => constraint.constraintId),
+				layers,
+			};
+		})
+		.filter((sample) => (!options.skeletonId && !options.layerId && !options.constraintId) || sample.layers.length > 0);
+	const layerSummaries = [...state.layerSummaries.values()]
+		.filter(matchesLayer)
+		.map((summary) => ({ id: summary.id, name: summary.name, skeletonId: summary.skeletonId, ...describeAnimationRigTiming(summary) }))
+		.sort((left, right) => right.averageDurationMilliseconds - left.averageDurationMilliseconds || left.id.localeCompare(right.id));
+	const constraintSummaries = [...state.constraintSummaries.values()]
+		.filter(matchesConstraint)
+		.map((summary) => ({
+			id: summary.id,
+			name: summary.name,
+			type: summary.type,
+			skeletonId: summary.skeletonId,
+			layerId: summary.layerId,
+			...describeAnimationRigTiming(summary),
+		}))
+		.sort((left, right) => right.averageDurationMilliseconds - left.averageDurationMilliseconds || left.id.localeCompare(right.id));
+	const returnedSamples = options.includeSamples === true ? filteredSamples.slice(offset, offset + limit) : [];
+	return {
+		settings: structuredClone(state.settings),
+		startedAt: state.startedAt,
+		clearedAt: state.clearedAt,
+		evaluationCount: state.evaluationCount,
+		capturedSampleCount: state.capturedSampleCount,
+		retainedSampleCount: state.samples.length,
+		droppedSampleCount: state.droppedSampleCount,
+		suppressedLayerSummaryUpdateCount: state.suppressedLayerSummaryUpdateCount,
+		suppressedConstraintSummaryUpdateCount: state.suppressedConstraintSummaryUpdateCount,
+		detailBounds: { maximumLayersPerSample: maximumAnimationRigProfileLayers, maximumConstraintsPerSample: maximumAnimationRigProfileConstraints },
+		sceneSummary: describeAnimationRigTiming(state.sceneSummary),
+		layerSummaries,
+		constraintSummaries,
+		samples: returnedSamples,
+		pagination: {
+			total: filteredSamples.length,
+			count: returnedSamples.length,
+			offset,
+			hasMore: options.includeSamples === true && offset + returnedSamples.length < filteredSamples.length,
+			nextOffset: options.includeSamples === true && offset + returnedSamples.length < filteredSamples.length ? offset + returnedSamples.length : null,
+		},
+	};
+}
+
+/** Clears the temporal history retained by Damped Transform constraints for a scene. */
+export function resetRigLayerTemporalState(scene: Scene): void {
+	dampedTransformStates.delete(scene);
+	clearAnimationRigJobStates(scene);
+}
+
+function applyRigConstraint(scene: Scene, layer: any, constraint: any, deltaTimeSeconds?: number): boolean {
+	return constraint.type === "multiParent"
+		? applyMultiParent(scene, layer, constraint)
+		: constraint.type === "twist"
+			? applyTwist(scene, layer, constraint)
+			: constraint.type === "chainIk"
+				? applyChainIk(scene, layer, constraint)
+				: constraint.type === "multiPosition"
+					? applyMultiPosition(scene, layer, constraint)
+					: constraint.type === "multiAim"
+						? applyMultiAim(scene, layer, constraint)
+						: constraint.type === "fullBodyIk"
+							? applyFullBodyIk(scene, layer, constraint)
+							: constraint.type === "overrideTransform"
+								? applyOverrideTransform(scene, layer, constraint)
+								: constraint.type === "dampedTransform"
+									? applyDampedTransform(scene, layer, constraint, deltaTimeSeconds)
+									: constraint.type === "blendTransform"
+										? applyBlendTransform(scene, layer, constraint)
+										: constraint.type === "customJob"
+											? applyAnimationRigJob(scene, layer, constraint, deltaTimeSeconds)
+											: false;
+}
+
 /** Evaluates enabled rig layers and constraints in deterministic layer/order sequence after animation. */
-export function applyRigLayers(scene: Scene): { layerCount: number; constraintCount: number; appliedConstraintCount: number; failedConstraintIds: string[] } {
-	const layers = Array.isArray(scene.metadata?.babylonEditorRigLayers) ? [...scene.metadata.babylonEditorRigLayers] : [];
+export function applyRigLayers(
+	scene: Scene,
+	options: IApplyRigLayersOptions = {}
+): { layerCount: number; constraintCount: number; appliedConstraintCount: number; failedConstraintIds: string[] } {
+	if (options.resetTemporalState) {
+		resetRigLayerTemporalState(scene);
+	}
+	const profiler = animationRigProfilerState(scene);
+	const profilingEnabled = profiler.settings.enabled;
+	if (profilingEnabled) {
+		profiler.evaluationCount++;
+	}
+	const captureProfile = profilingEnabled && (profiler.evaluationCount - 1) % profiler.settings.sampleEveryNEvaluations === 0;
+	const profileStarted = captureProfile ? animationRigJobElapsedStart() : 0;
+	const selectedLayerIds = options.layerIds ? new Set(options.layerIds) : null;
+	const selectedConstraintRefs = options.constraintRefs ? new Set(options.constraintRefs.map((reference) => `${reference.layerId}\u0000${reference.constraintId}`)) : null;
+	const layers = Array.isArray(scene.metadata?.babylonEditorRigLayers)
+		? [...scene.metadata.babylonEditorRigLayers].filter(
+				(layer) => (!options.skeletonId || layer.skeletonId === options.skeletonId) && (!selectedLayerIds || selectedLayerIds.has(layer.id))
+			)
+		: [];
 	layers.sort((left, right) => Number(left.order ?? 0) - Number(right.order ?? 0) || String(left.id).localeCompare(String(right.id)));
 	let constraintCount = 0;
 	let appliedConstraintCount = 0;
+	let disabledConstraintCount = 0;
 	const failedConstraintIds: string[] = [];
+	const visitedCustomJobs = new Set<string>();
+	const profileLayers: IAnimationRigLayerProfileSample[] = [];
+	let profileConstraintDetailCount = 0;
+	let truncatedLayerCount = 0;
+	let truncatedConstraintCount = 0;
+	let skippedLayerCount = 0;
 	for (const layer of layers) {
+		const layerStarted = captureProfile ? animationRigJobElapsedStart() : 0;
+		const profileLayer: IAnimationRigLayerProfileSample | null = captureProfile
+			? {
+					layerId: String(layer.id ?? ""),
+					name: String(layer.name ?? layer.id ?? "Rig Layer"),
+					skeletonId: String(layer.skeletonId ?? ""),
+					enabled: layer.enabled !== false,
+					weight: clamp01(layer.weight),
+					status: "applied",
+					durationMilliseconds: 0,
+					constraintCount: 0,
+					appliedConstraintCount: 0,
+					failedConstraintCount: 0,
+					disabledConstraintCount: 0,
+					constraints: [],
+					truncatedConstraintCount: 0,
+				}
+			: null;
 		if (layer.enabled === false || clamp01(layer.weight) <= 0 || !Array.isArray(layer.constraints)) {
+			if (captureProfile) {
+				skippedLayerCount++;
+			}
+			if (profileLayer) {
+				profileLayer.status = layer.enabled === false ? "disabled" : clamp01(layer.weight) <= 0 ? "zeroWeight" : "invalidConstraints";
+				profileLayer.durationMilliseconds = Math.max(0, animationRigJobElapsedStart() - layerStarted);
+				if (profileLayers.length < maximumAnimationRigProfileLayers) {
+					profileLayers.push(profileLayer);
+				} else {
+					truncatedLayerCount++;
+				}
+			}
 			continue;
 		}
 		for (const constraint of layer.constraints) {
-			constraintCount++;
-			if (constraint.enabled === false) {
+			if (selectedConstraintRefs && !selectedConstraintRefs.has(`${layer.id}\u0000${constraint.id}`)) {
 				continue;
 			}
-			const applied =
-				constraint.type === "multiParent"
-					? applyMultiParent(scene, layer, constraint)
-					: constraint.type === "twist"
-						? applyTwist(scene, layer, constraint)
-						: constraint.type === "chainIk"
-							? applyChainIk(scene, layer, constraint)
-							: constraint.type === "multiPosition"
-								? applyMultiPosition(scene, layer, constraint)
-								: constraint.type === "multiAim"
-									? applyMultiAim(scene, layer, constraint)
-									: constraint.type === "fullBodyIk"
-										? applyFullBodyIk(scene, layer, constraint)
-										: constraint.type === "overrideTransform"
-											? applyOverrideTransform(scene, layer, constraint)
-											: constraint.type === "dampedTransform"
-												? applyDampedTransform(scene, layer, constraint)
-												: constraint.type === "blendTransform"
-													? applyBlendTransform(scene, layer, constraint)
-													: false;
+			constraintCount++;
+			if (profileLayer) {
+				profileLayer.constraintCount++;
+			}
+			const constraintStarted = captureProfile ? animationRigJobElapsedStart() : 0;
+			if (constraint.enabled === false) {
+				disabledConstraintCount++;
+				if (profileLayer) {
+					profileLayer.disabledConstraintCount++;
+					if (profileConstraintDetailCount < maximumAnimationRigProfileConstraints) {
+						profileLayer.constraints.push({
+							constraintId: String(constraint.id ?? ""),
+							name: String(constraint.name ?? constraint.id ?? "Constraint"),
+							type: String(constraint.type ?? "unknown"),
+							enabled: false,
+							status: "disabled",
+							durationMilliseconds: Math.max(0, animationRigJobElapsedStart() - constraintStarted),
+						});
+						profileConstraintDetailCount++;
+					} else {
+						profileLayer.truncatedConstraintCount++;
+						truncatedConstraintCount++;
+					}
+				}
+				continue;
+			}
+			if (constraint.type === "customJob") {
+				visitedCustomJobs.add(animationRigJobStateKey(String(layer.id), String(constraint.id)));
+			}
+			const applied = applyRigConstraint(scene, layer, constraint, options.deltaTimeSeconds);
 			if (applied) {
 				appliedConstraintCount++;
+				if (profileLayer) {
+					profileLayer.appliedConstraintCount++;
+				}
 			} else {
 				failedConstraintIds.push(String(constraint.id ?? ""));
+				if (profileLayer) {
+					profileLayer.failedConstraintCount++;
+				}
+			}
+			if (profileLayer) {
+				if (profileConstraintDetailCount < maximumAnimationRigProfileConstraints) {
+					profileLayer.constraints.push({
+						constraintId: String(constraint.id ?? ""),
+						name: String(constraint.name ?? constraint.id ?? "Constraint"),
+						type: String(constraint.type ?? "unknown"),
+						enabled: true,
+						status: applied ? "applied" : "failed",
+						durationMilliseconds: Math.max(0, animationRigJobElapsedStart() - constraintStarted),
+					});
+					profileConstraintDetailCount++;
+				} else {
+					profileLayer.truncatedConstraintCount++;
+					truncatedConstraintCount++;
+				}
 			}
 		}
+		if (profileLayer) {
+			profileLayer.durationMilliseconds = Math.max(0, animationRigJobElapsedStart() - layerStarted);
+			if (profileLayers.length < maximumAnimationRigProfileLayers) {
+				profileLayers.push(profileLayer);
+			} else {
+				truncatedLayerCount++;
+			}
+		}
+	}
+	if (!options.skeletonId && !selectedLayerIds && !selectedConstraintRefs) {
+		const states = animationRigJobStates.get(scene);
+		if (states) {
+			for (const [key, state] of states) {
+				if (!visitedCustomJobs.has(key)) {
+					destroyAnimationRigJobState(state);
+					states.delete(key);
+				}
+			}
+		}
+	}
+	if (captureProfile) {
+		const requestedDelta = options.deltaTimeSeconds ?? (scene.getEngine().getDeltaTime() / 1000 || 1 / 60);
+		publishAnimationRigProfileSample(profiler, {
+			evaluationIndex: profiler.evaluationCount,
+			capturedAt: new Date().toISOString(),
+			deltaTimeSeconds: Math.min(1, Math.max(0, Number.isFinite(requestedDelta) ? requestedDelta : 1 / 60)),
+			durationMilliseconds: Math.max(0, animationRigJobElapsedStart() - profileStarted),
+			layerCount: layers.length,
+			constraintCount,
+			appliedConstraintCount,
+			failedConstraintCount: failedConstraintIds.length,
+			disabledConstraintCount,
+			skippedLayerCount,
+			failedConstraintIds: failedConstraintIds.slice(0, maximumAnimationRigProfileConstraints),
+			layers: profileLayers,
+			truncatedLayerCount,
+			truncatedConstraintCount,
+			selection: {
+				skeletonId: options.skeletonId ?? null,
+				layerIds: options.layerIds ? options.layerIds.slice(0, maximumAnimationRigProfileLayers) : null,
+				constraintRefs: options.constraintRefs ? options.constraintRefs.slice(0, maximumAnimationRigProfileConstraints).map((reference) => ({ ...reference })) : null,
+				fixedDeltaTimeSeconds: options.deltaTimeSeconds ?? null,
+				resetTemporalState: options.resetTemporalState === true,
+			},
+		});
 	}
 	return { layerCount: layers.length, constraintCount, appliedConstraintCount, failedConstraintIds };
 }

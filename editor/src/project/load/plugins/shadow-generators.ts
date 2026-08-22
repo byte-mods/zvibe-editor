@@ -1,5 +1,5 @@
 import { join } from "path/posix";
-import { readJSON } from "fs-extra";
+import { readSerializedJSON as readJSON } from "../../serialization-session";
 
 import { Scene, ShadowGenerator, CascadedShadowGenerator, RenderTargetTexture } from "babylonjs";
 

@@ -36,7 +36,27 @@ import {
 	stopHumanoidPosePreview,
 } from "../../../../mcp/rigging/humanoid-avatar";
 import { createHumanoidAvatarMask, deleteHumanoidAvatarMask, listHumanoidAvatarMasks, setHumanoidAvatarMask } from "../../../../mcp/rigging/avatar-masks";
-import { createRigConstraint, createRigLayer, deleteRigConstraint, deleteRigLayer, listRigLayers, setRigConstraint, setRigLayer } from "../../../../mcp/rigging/rig-layers";
+import {
+	clearAnimationRigProfile,
+	createRigConstraint,
+	createRigLayer,
+	deleteRigConstraint,
+	deleteRigLayer,
+	getAnimationRigProfile,
+	listAnimationRigJobTypes,
+	listRigLayers,
+	setAnimationRigProfile,
+	setRigConstraint,
+	setRigLayer,
+} from "../../../../mcp/rigging/rig-layers";
+import {
+	bakeRigToConstraintAnimation,
+	bakeRigToSkeletonAnimation,
+	bakeTwoBoneIKConstraintAnimation,
+	inspectRigToConstraintBake,
+	inspectRigToSkeletonBake,
+	inspectTwoBoneIKConstraintBake,
+} from "../../../../mcp/rigging/rig-baking";
 import {
 	captureMeshSkinWeightSnapshot,
 	getMeshSkinWeights,
@@ -75,6 +95,10 @@ interface IEditorSkeletonInspectorState {
 	rigTwistBoneNames: string;
 	rigChainRootBoneName: string;
 	rigChainTipBoneName: string;
+	rigCustomJobType: string;
+	rigCustomJobData: string;
+	rigBakeAnimationGroupName: string;
+	rigBakeSampleRate: number;
 	skinWeightMeshId: string;
 	skinWeightBoneName: string;
 	skinWeightValue: number;
@@ -114,6 +138,10 @@ export class EditorSkeletonInspector extends Component<IEditorInspectorImplement
 			rigTwistBoneNames: "",
 			rigChainRootBoneName: "",
 			rigChainTipBoneName: "",
+			rigCustomJobType: "",
+			rigCustomJobData: "{}",
+			rigBakeAnimationGroupName: "",
+			rigBakeSampleRate: 60,
 			skinWeightMeshId: "",
 			skinWeightBoneName: "",
 			skinWeightValue: 1,
@@ -381,21 +409,59 @@ export class EditorSkeletonInspector extends Component<IEditorInspectorImplement
 						</div>
 					)}
 					{ikControllers.map((controller) => (
-						<div key={controller.id} className="flex items-center gap-2 rounded-lg bg-muted-foreground/10 p-2 text-xs">
-							<span className="min-w-0 flex-1 truncate">
-								IK · {controller.boneName} → {scene.getNodeById(controller.targetNodeId)?.name ?? controller.targetNodeId}
-								{controller.poleTargetNodeId ? ` · pole ${scene.getNodeById(controller.poleTargetNodeId)?.name ?? controller.poleTargetNodeId}` : ""}
-							</span>
-							<Button
-								size="sm"
-								variant={controller.enabled === false ? "ghost" : "default"}
-								onClick={() => this._setIKEnabled(controller, controller.enabled === false)}
-							>
-								{controller.enabled === false ? "Enable" : "Disable"}
-							</Button>
-							<Button size="sm" variant="ghost" className="hover:bg-destructive" onClick={() => this._deleteIK(controller.id)}>
-								Remove
-							</Button>
+						<div key={controller.id} className="space-y-2 rounded-lg bg-muted-foreground/10 p-2 text-xs">
+							<div className="flex items-center gap-2">
+								<span className="min-w-0 flex-1 truncate">
+									IK · {controller.boneName} → {scene.getNodeById(controller.targetNodeId)?.name ?? controller.targetNodeId}
+									{controller.poleTargetNodeId ? ` · pole ${scene.getNodeById(controller.poleTargetNodeId)?.name ?? controller.poleTargetNodeId}` : ""}
+								</span>
+								<Button
+									size="sm"
+									variant={controller.enabled === false ? "ghost" : "default"}
+									onClick={() => this._setIKEnabled(controller, controller.enabled === false)}
+								>
+									{controller.enabled === false ? "Enable" : "Disable"}
+								</Button>
+								<Button size="sm" variant="ghost" className="hover:bg-destructive" onClick={() => this._deleteIK(controller.id)}>
+									Remove
+								</Button>
+							</div>
+							{[
+								{ label: "Target Position", property: "targetPositionWeight", value: controller.targetPositionWeight ?? 1 },
+								{ label: "Target Rotation", property: "targetRotationWeight", value: controller.targetRotationWeight ?? 0 },
+								{ label: "Hint Weight", property: "hintWeight", value: controller.hintWeight ?? 1 },
+							].map((field) => (
+								<label key={field.property} className="grid grid-cols-[86px_1fr_32px] items-center gap-1">
+									<span>{field.label}</span>
+									<input
+										type="range"
+										min="0"
+										max="1"
+										step="0.01"
+										value={field.value}
+										onChange={(event) => this._setIKControllerPatch(controller.id, { [field.property]: Number(event.target.value) })}
+									/>
+									<span>{Number(field.value).toFixed(2)}</span>
+								</label>
+							))}
+							<div className="flex gap-4">
+								<label>
+									<input
+										type="checkbox"
+										checked={controller.maintainTargetPositionOffset === true}
+										onChange={(event) => this._setIKControllerPatch(controller.id, { maintainTargetPositionOffset: event.target.checked })}
+									/>{" "}
+									Maintain Position Offset
+								</label>
+								<label>
+									<input
+										type="checkbox"
+										checked={controller.maintainTargetRotationOffset === true}
+										onChange={(event) => this._setIKControllerPatch(controller.id, { maintainTargetRotationOffset: event.target.checked })}
+									/>{" "}
+									Maintain Rotation Offset
+								</label>
+							</div>
 						</div>
 					))}
 					{lookAtConstraints.map((constraint) => (
@@ -768,9 +834,53 @@ export class EditorSkeletonInspector extends Component<IEditorInspectorImplement
 	}
 
 	private _renderRigLayers(rigLayers: any[], targetNodes: any[]): ReactNode {
+		const scene = this.props.object.getScene();
+		const customJobTypes = listAnimationRigJobTypes().jobTypes as any[];
+		const rigProfile = getAnimationRigProfile(scene, { skeletonId: this.props.object.id, includeSamples: true, sampleLimit: 1 });
+		const latestRigProfileSample = rigProfile.samples[0] as any;
+		const latestRigDuration = latestRigProfileSample?.layers.reduce((total: number, layer: any) => total + Number(layer.durationMilliseconds ?? 0), 0) ?? 0;
+		const averageRigDuration = rigProfile.layerSummaries.reduce((total: number, layer: any) => total + Number(layer.averageDurationMilliseconds ?? 0), 0);
+		const bakeAnimationGroupName = scene.animationGroups.some((group) => group.name === this.state.rigBakeAnimationGroupName)
+			? this.state.rigBakeAnimationGroupName
+			: (scene.animationGroups[0]?.name ?? "");
+		let bakePlan: any = null;
+		let constraintBakePlan: any = null;
+		let twoBoneIKBakePlan: any = null;
+		if (bakeAnimationGroupName && rigLayers.length) {
+			try {
+				bakePlan = inspectRigToSkeletonBake(scene, {
+					skeletonId: this.props.object.id,
+					sourceAnimationGroupName: bakeAnimationGroupName,
+					sampleRate: this.state.rigBakeSampleRate,
+				});
+			} catch {
+				bakePlan = null;
+			}
+			try {
+				constraintBakePlan = inspectRigToConstraintBake(scene, {
+					skeletonId: this.props.object.id,
+					sourceAnimationGroupName: bakeAnimationGroupName,
+					sampleRate: this.state.rigBakeSampleRate,
+				});
+			} catch {
+				constraintBakePlan = null;
+			}
+		}
+		if (bakeAnimationGroupName) {
+			try {
+				twoBoneIKBakePlan = inspectTwoBoneIKConstraintBake(scene, {
+					skeletonId: this.props.object.id,
+					sourceAnimationGroupName: bakeAnimationGroupName,
+					sampleRate: this.state.rigBakeSampleRate,
+				});
+			} catch {
+				twoBoneIKBakePlan = null;
+			}
+		}
 		const defaultBoneName = this.state.rigBoneName || this.props.object.bones[0]?.name || "";
 		const defaultSourceNodeId = this.state.rigSourceNodeId || targetNodes[0]?.id || "";
 		const defaultSecondarySourceNodeId = this.state.rigSecondarySourceNodeId || targetNodes.find((node) => node.id !== defaultSourceNodeId)?.id || "";
+		const defaultCustomJobType = this.state.rigCustomJobType || customJobTypes[0]?.id || "project.copy-position";
 		const axisOptions = [
 			{ label: "+X", value: "1,0,0" },
 			{ label: "-X", value: "-1,0,0" },
@@ -791,6 +901,154 @@ export class EditorSkeletonInspector extends Component<IEditorInspectorImplement
 					</div>
 					<Button size="sm" variant="secondary" onClick={() => this._createRigLayer()}>
 						Add Layer
+					</Button>
+				</div>
+				<div className="space-y-2 rounded-md border border-border bg-muted-foreground/5 p-2">
+					<div className="flex items-center justify-between gap-2">
+						<div>
+							<div className="text-xs font-medium">Animation Rig Profiler</div>
+							<div className="text-xs text-muted-foreground">Opt-in CPU timeline for the shared preview/export evaluator. Profiling adds timer overhead.</div>
+						</div>
+						<Button
+							size="sm"
+							variant={rigProfile.settings.enabled ? "destructive" : "secondary"}
+							onClick={() => this._setRigProfilerEnabled(!rigProfile.settings.enabled)}
+						>
+							{rigProfile.settings.enabled ? "Stop" : "Start"}
+						</Button>
+					</div>
+					<div className="grid grid-cols-2 gap-1 text-xs">
+						<label className="grid grid-cols-[1fr_58px] items-center gap-1">
+							<span>Sample capacity</span>
+							<input
+								type="number"
+								min="1"
+								max="256"
+								className="h-7 rounded border border-border bg-input px-1"
+								value={rigProfile.settings.sampleCapacity}
+								onChange={(event) => this._setRigProfilerBounds({ sampleCapacity: Math.max(1, Math.min(256, Number(event.target.value) || 1)) })}
+							/>
+						</label>
+						<label className="grid grid-cols-[1fr_48px] items-center gap-1">
+							<span>Every N evaluations</span>
+							<input
+								type="number"
+								min="1"
+								max="120"
+								className="h-7 rounded border border-border bg-input px-1"
+								value={rigProfile.settings.sampleEveryNEvaluations}
+								onChange={(event) => this._setRigProfilerBounds({ sampleEveryNEvaluations: Math.max(1, Math.min(120, Number(event.target.value) || 1)) })}
+							/>
+						</label>
+					</div>
+					<div className={rigProfile.settings.enabled ? "text-xs text-emerald-400" : "text-xs text-muted-foreground"}>
+						{rigProfile.settings.enabled ? "Recording" : "Stopped"} · {rigProfile.capturedSampleCount} captured · {rigProfile.retainedSampleCount} retained ·{" "}
+						{rigProfile.droppedSampleCount} dropped
+					</div>
+					<div className="grid grid-cols-2 gap-1 text-xs text-muted-foreground">
+						<span>Latest CPU: {latestRigDuration.toFixed(3)} ms</span>
+						<span>Layer avg total: {averageRigDuration.toFixed(3)} ms</span>
+						<span>Evaluations: {rigProfile.evaluationCount}</span>
+						<span>Failures: {rigProfile.constraintSummaries.reduce((total: number, constraint: any) => total + constraint.failedCount, 0)}</span>
+					</div>
+					{rigProfile.layerSummaries.slice(0, 8).map((layer: any) => (
+						<div key={layer.id} className="grid grid-cols-[1fr_auto] gap-2 rounded border border-border/50 px-1 py-0.5 text-xs">
+							<span className="truncate">{layer.name}</span>
+							<span>
+								avg {Number(layer.averageDurationMilliseconds).toFixed(3)} · max {Number(layer.maximumDurationMilliseconds).toFixed(3)} ms
+							</span>
+						</div>
+					))}
+					{rigProfile.constraintSummaries.slice(0, 8).map((constraint: any) => (
+						<div key={`${constraint.layerId}:${constraint.id}`} className="grid grid-cols-[1fr_auto] gap-2 px-1 text-xs text-muted-foreground">
+							<span className="truncate">
+								{constraint.name} · {constraint.type}
+							</span>
+							<span>{Number(constraint.averageDurationMilliseconds).toFixed(3)} ms</span>
+						</div>
+					))}
+					<div className="grid grid-cols-2 gap-1">
+						<Button size="sm" variant="outline" onClick={() => this.forceUpdate()}>
+							Refresh
+						</Button>
+						<Button size="sm" variant="ghost" onClick={() => this._clearRigProfiler()}>
+							Clear Samples
+						</Button>
+					</div>
+				</div>
+				<div className="space-y-1 rounded-md border border-border bg-muted-foreground/5 p-2">
+					<div className="text-xs font-medium">Bake Rig To Skeleton</div>
+					<div className="text-xs text-muted-foreground">Sample source animation, evaluate these rig layers, and create normal editable bone curves.</div>
+					<div className="grid grid-cols-[1fr_70px] gap-1">
+						<select
+							className="h-8 rounded-md border border-input bg-background px-1 text-xs"
+							value={bakeAnimationGroupName}
+							onChange={(event) => this.setState({ rigBakeAnimationGroupName: event.target.value })}
+						>
+							{scene.animationGroups.map((group) => (
+								<option key={group.name} value={group.name}>
+									{group.name}
+								</option>
+							))}
+						</select>
+						<input
+							type="number"
+							min="1"
+							max="120"
+							step="1"
+							title="Bake samples per second"
+							className="h-8 rounded-md border border-input bg-background px-1 text-xs"
+							value={this.state.rigBakeSampleRate}
+							onChange={(event) => this.setState({ rigBakeSampleRate: Math.max(1, Math.min(120, Number(event.target.value) || 1)) })}
+						/>
+					</div>
+					<div className={bakePlan?.canBake ? "text-xs text-emerald-400" : "text-xs text-muted-foreground"}>
+						{bakePlan
+							? `${bakePlan.canBake ? "Ready" : "Blocked"} · ${bakePlan.layerCount} layers · ${bakePlan.drivenBoneCount} bones · ${bakePlan.sampleCount} samples · ${bakePlan.keyCount} keys`
+							: "Add a source AnimationGroup and at least one valid rig layer."}
+					</div>
+					<Button
+						size="sm"
+						variant="secondary"
+						className="w-full"
+						disabled={!bakePlan?.canBake}
+						onClick={() => this._bakeRigToSkeleton(bakeAnimationGroupName, this.state.rigBakeSampleRate)}
+					>
+						Bake Rigged Clip
+					</Button>
+					<div className="mt-2 border-t border-border pt-2 text-xs font-medium">Bake Skeleton To Constraints</div>
+					<div className="text-xs text-muted-foreground">Transfer skeleton motion to inverse-capable Multi-Parent, Multi-Position, and Multi-Aim control curves.</div>
+					<div className={constraintBakePlan?.canBake ? "text-xs text-emerald-400" : "text-xs text-muted-foreground"}>
+						{constraintBakePlan
+							? `${constraintBakePlan.canBake ? "Ready" : "Blocked"} · ${constraintBakePlan.constraintCount} constraints · ${constraintBakePlan.controlNodeCount} controls · ${constraintBakePlan.keyCount} keys`
+							: "Add a source AnimationGroup and at least one inverse-capable rig constraint."}
+					</div>
+					<Button
+						size="sm"
+						variant="secondary"
+						className="w-full"
+						disabled={!constraintBakePlan?.canBake}
+						onClick={() => this._bakeRigToConstraint(bakeAnimationGroupName, this.state.rigBakeSampleRate)}
+					>
+						Bake Control Clip
+					</Button>
+					<div className="mt-2 border-t border-border pt-2 text-xs font-medium">Bake Native Two-Bone IK Controls</div>
+					<div className="text-xs text-muted-foreground">
+						Transfer skeleton motion to native IK target position/quaternion and optional pole/hint position curves, with exact forward validation.
+					</div>
+					<div className={twoBoneIKBakePlan?.canBake ? "text-xs text-emerald-400" : "text-xs text-muted-foreground"}>
+						{twoBoneIKBakePlan
+							? `${twoBoneIKBakePlan.canBake ? "Ready" : "Blocked"} · ${twoBoneIKBakePlan.controllerCount} controllers · ${twoBoneIKBakePlan.controlNodeCount} controls · ${twoBoneIKBakePlan.keyCount} keys`
+							: "Add a source AnimationGroup and at least one enabled native Two-Bone IK controller."}
+					</div>
+					<Button
+						size="sm"
+						variant="secondary"
+						className="w-full"
+						disabled={!twoBoneIKBakePlan?.canBake}
+						onClick={() => this._bakeTwoBoneIKToConstraint(bakeAnimationGroupName, this.state.rigBakeSampleRate)}
+					>
+						Bake IK Control Clip
 					</Button>
 				</div>
 				{rigLayers.map((layer) => (
@@ -1166,6 +1424,46 @@ export class EditorSkeletonInspector extends Component<IEditorInspectorImplement
 										)}
 									</div>
 								)}
+								{constraint.type === "customJob" && (
+									<div className="space-y-1 border-t border-border/50 pt-1">
+										<div className={constraint.valid ? "text-emerald-400" : "text-amber-400"}>
+											{constraint.registered ? "Registered" : "Missing registration"} · data v{constraint.jobVersion}
+											{constraint.registeredDataVersion ? ` / code v${constraint.registeredDataVersion}` : ""} ·{" "}
+											{constraint.lastSucceeded ? "last pass succeeded" : "not yet successful"}
+										</div>
+										{constraint.validationMessage && <div className="text-amber-400">{constraint.validationMessage}</div>}
+										<div className="grid grid-cols-[1fr_76px] gap-1">
+											<input
+												className="h-7 rounded border border-border bg-input px-1"
+												defaultValue={constraint.jobType}
+												onBlur={(event) =>
+													event.target.value !== constraint.jobType && this._setRigConstraint(layer.id, constraint.id, { jobType: event.target.value })
+												}
+												title="Registered custom Animation Rig job id"
+											/>
+											<input
+												type="number"
+												min="1"
+												max="100000"
+												className="h-7 rounded border border-border bg-input px-1"
+												value={constraint.jobVersion}
+												onChange={(event) => this._setRigConstraint(layer.id, constraint.id, { jobVersion: Number(event.target.value) })}
+												title="Serialized job data version"
+											/>
+										</div>
+										<textarea
+											className="min-h-16 w-full rounded border border-border bg-input p-1 font-mono text-[11px]"
+											defaultValue={JSON.stringify(constraint.jobData, null, 2)}
+											onBlur={(event) => this._setCustomJobData(layer.id, constraint.id, event.target.value)}
+											title="Complete bounded JSON job data"
+										/>
+										<div className="text-muted-foreground">
+											{constraint.boneNames.length} bone handle(s) · {constraint.nodeIds.length} node handle(s) · create {constraint.createCount} · update{" "}
+											{constraint.updateCount} · root motion {constraint.processRootMotionCount} · animation {constraint.processAnimationCount} · errors{" "}
+											{constraint.errorCount}
+										</div>
+									</div>
+								)}
 							</div>
 						))}
 						<div className="grid grid-cols-2 gap-1">
@@ -1311,6 +1609,35 @@ export class EditorSkeletonInspector extends Component<IEditorInspectorImplement
 								onClick={() => this._createFullBodyIkConstraint(layer.id, defaultChainRootBoneName, defaultChainTipBoneName, defaultSourceNodeId)}
 							>
 								Add Full-Body IK
+							</Button>
+							<input
+								className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+								list={`custom-rig-jobs-${layer.id}`}
+								placeholder="Registered job id"
+								value={defaultCustomJobType}
+								onChange={(event) => this.setState({ rigCustomJobType: event.target.value })}
+							/>
+							<datalist id={`custom-rig-jobs-${layer.id}`}>
+								{customJobTypes.map((jobType) => (
+									<option key={jobType.id} value={jobType.id}>
+										{jobType.displayName}
+									</option>
+								))}
+							</datalist>
+							<textarea
+								className="min-h-8 rounded-md border border-input bg-background px-2 py-1 font-mono text-[11px]"
+								value={this.state.rigCustomJobData}
+								onChange={(event) => this.setState({ rigCustomJobData: event.target.value })}
+								title="Initial custom job JSON data"
+							/>
+							<Button
+								size="sm"
+								variant="outline"
+								className="col-span-2"
+								disabled={!defaultCustomJobType}
+								onClick={() => this._createCustomJobConstraint(layer.id, defaultCustomJobType, defaultBoneName, defaultSourceNodeId)}
+							>
+								Add Custom Animation Job
 							</Button>
 						</div>
 					</div>
@@ -1701,9 +2028,95 @@ export class EditorSkeletonInspector extends Component<IEditorInspectorImplement
 		}
 	}
 
+	private async _bakeRigToSkeleton(sourceAnimationGroupName: string, sampleRate: number): Promise<void> {
+		const outputName = await showPrompt("Bake Rig To Skeleton", "Enter a name for the new editable AnimationGroup.", `${sourceAnimationGroupName} Rig Baked`);
+		if (!outputName) {
+			return;
+		}
+		try {
+			const scene = this.props.object.getScene();
+			const request = { skeletonId: this.props.object.id, sourceAnimationGroupName, sampleRate };
+			const inspection = inspectRigToSkeletonBake(scene, request);
+			const result = bakeRigToSkeletonAnimation(scene, { ...request, outputName, expectedFingerprint: inspection.fingerprint }, { editor: this.props.editor });
+			toast.success(`Baked ${result.drivenBoneCount} bone(s), ${result.trackCount} tracks, and ${result.keyCount} keys to "${result.name}".`);
+			this.forceUpdate();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
+	}
+
+	private async _bakeRigToConstraint(sourceAnimationGroupName: string, sampleRate: number): Promise<void> {
+		const outputName = await showPrompt(
+			"Bake Skeleton To Constraints",
+			"Enter a name for the new editable rig-control AnimationGroup.",
+			`${sourceAnimationGroupName} Controls Baked`
+		);
+		if (!outputName) {
+			return;
+		}
+		try {
+			const scene = this.props.object.getScene();
+			const request = { skeletonId: this.props.object.id, sourceAnimationGroupName, sampleRate };
+			const inspection = inspectRigToConstraintBake(scene, request);
+			const result = bakeRigToConstraintAnimation(scene, { ...request, outputName, expectedFingerprint: inspection.fingerprint }, { editor: this.props.editor });
+			toast.success(`Transferred ${result.transferredTrackCount} skeleton track(s) to ${result.controlTrackCount} control track(s) in "${result.name}".`);
+			this.forceUpdate();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
+	}
+
+	private async _bakeTwoBoneIKToConstraint(sourceAnimationGroupName: string, sampleRate: number): Promise<void> {
+		const outputName = await showPrompt(
+			"Bake Native Two-Bone IK Controls",
+			"Enter a name for the new editable IK-control AnimationGroup.",
+			`${sourceAnimationGroupName} Two-Bone IK Baked`
+		);
+		if (!outputName) {
+			return;
+		}
+		try {
+			const scene = this.props.object.getScene();
+			const request = { skeletonId: this.props.object.id, sourceAnimationGroupName, sampleRate };
+			const inspection = inspectTwoBoneIKConstraintBake(scene, request);
+			const result = bakeTwoBoneIKConstraintAnimation(scene, { ...request, outputName, expectedFingerprint: inspection.fingerprint }, { editor: this.props.editor });
+			toast.success(`Transferred ${result.transferredTrackCount} skeleton track(s) to ${result.controlTrackCount} native IK control track(s) in "${result.name}".`);
+			this.forceUpdate();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
+	}
+
 	private _createRigLayer(): void {
 		try {
 			createRigLayer(this.props.object.getScene(), { skeletonId: this.props.object.id, name: `${this.props.object.name} Rig` }, { editor: this.props.editor });
+			this.forceUpdate();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
+	}
+
+	private _setRigProfilerEnabled(enabled: boolean): void {
+		try {
+			setAnimationRigProfile(this.props.object.getScene(), { enabled }, { editor: this.props.editor });
+			this.forceUpdate();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
+	}
+
+	private _setRigProfilerBounds(settings: { sampleCapacity?: number; sampleEveryNEvaluations?: number }): void {
+		try {
+			setAnimationRigProfile(this.props.object.getScene(), settings, { editor: this.props.editor });
+			this.forceUpdate();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
+	}
+
+	private _clearRigProfiler(): void {
+		try {
+			clearAnimationRigProfile(this.props.object.getScene(), {}, { editor: this.props.editor });
 			this.forceUpdate();
 		} catch (error: any) {
 			toast.error(error.message);
@@ -1910,6 +2323,38 @@ export class EditorSkeletonInspector extends Component<IEditorInspectorImplement
 		}
 	}
 
+	private _createCustomJobConstraint(layerId: string, jobType: string, boneName: string, nodeId: string): void {
+		try {
+			const jobData = JSON.parse(this.state.rigCustomJobData || "{}");
+			const registered = (listAnimationRigJobTypes().jobTypes as any[]).find((candidate) => candidate.id === jobType);
+			createRigConstraint(
+				this.props.object.getScene(),
+				{
+					layerId,
+					type: "customJob",
+					name: registered?.displayName || jobType,
+					jobType,
+					jobVersion: registered?.dataVersion ?? 1,
+					boneNames: boneName ? [boneName] : [],
+					nodeIds: nodeId ? [nodeId] : [],
+					jobData,
+				},
+				{ editor: this.props.editor }
+			);
+			this.forceUpdate();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
+	}
+
+	private _setCustomJobData(layerId: string, constraintId: string, source: string): void {
+		try {
+			this._setRigConstraint(layerId, constraintId, { jobData: JSON.parse(source || "{}") });
+		} catch (error: any) {
+			toast.error(`Custom job data must be valid JSON: ${error.message}`);
+		}
+	}
+
 	private _fullBodyIkEffectors(constraint: any): any[] {
 		return constraint.effectors.map((effector: any) => ({
 			boneName: effector.boneName,
@@ -1995,6 +2440,15 @@ export class EditorSkeletonInspector extends Component<IEditorInspectorImplement
 	private _setIKEnabled(controller: any, enabled: boolean): void {
 		try {
 			setIKController(this.props.object.getScene(), { id: controller.id, enabled }, { editor: this.props.editor });
+			this.forceUpdate();
+		} catch (error: any) {
+			toast.error(error.message);
+		}
+	}
+
+	private _setIKControllerPatch(id: string, patch: Record<string, unknown>): void {
+		try {
+			setIKController(this.props.object.getScene(), { id, ...patch }, { editor: this.props.editor });
 			this.forceUpdate();
 		} catch (error: any) {
 			toast.error(error.message);

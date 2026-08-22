@@ -5,6 +5,7 @@ import { join } from "path";
 
 import { cancelAssetIndexingJob, getAssetIndexingStatus, queryAssetRegistry, rebuildAssetRegistry, startAssetIndexingJob } from "../../src/mcp/assets/registry";
 import { projectConfiguration } from "../../src/project/configuration";
+import { analyzeAssetFilesWithWorkers, IAssetFileWorkerAnalysis } from "../../src/mcp/assets/registry-worker-client";
 
 async function waitForJob(id: string): Promise<any> {
 	for (let attempt = 0; attempt < 200; attempt++) {
@@ -92,5 +93,43 @@ describe("background asset indexing", () => {
 		expect(() => startAssetIndexingJob({ mode: "refresh", paths: ["../escape"] })).toThrow("inside the open project");
 		expect(() => startAssetIndexingJob({ mode: "rebuild", workerCount: 9 })).toThrow("1 to 8");
 		expect(() => cancelAssetIndexingJob("missing-job")).toThrow("not found");
+	});
+
+	test("treats a file deleted after discovery as a completed skipped analysis", async () => {
+		const progress: Array<[number, number]> = [];
+		const retained = join(directory, "assets", "retained.json");
+		const deleted = join(directory, "assets", "deleted.json");
+		const analysis: IAssetFileWorkerAnalysis = {
+			absolutePath: retained,
+			sizeBytes: 2,
+			modifiedAt: new Date(0).toISOString(),
+			contentHash: "hash",
+			hashDeferred: false,
+			dependencyCandidates: [],
+			dependencyScanKind: "text",
+			dependencyScanStatus: "complete",
+			dependencyScanDeferred: false,
+			containerEntries: [],
+			containerDependencies: [],
+		};
+		const result = await analyzeAssetFilesWithWorkers(
+			[retained, deleted],
+			directory,
+			async (path) => {
+				if (path === deleted) {
+					const error = new Error("gone") as NodeJS.ErrnoException;
+					error.code = "ENOENT";
+					throw error;
+				}
+				return analysis;
+			},
+			{ onProgress: (completed, total) => progress.push([completed, total]) }
+		);
+
+		expect(result).toEqual([analysis]);
+		expect(progress).toEqual([
+			[1, 2],
+			[2, 2],
+		]);
 	});
 });

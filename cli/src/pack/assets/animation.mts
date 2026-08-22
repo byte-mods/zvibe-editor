@@ -7,8 +7,8 @@ const MAX_ANIMATION_SOURCE_BYTES = 64 * 1024 * 1024;
 
 /** Executes the shared Animation Importer semantics for CLI builds. */
 export async function processExportedAnimation(sourcePath: string, outputPath: string, settings: IAnimationImporterSettings): Promise<IAnimationImporterResult> {
-	if (![".animation", ".animations", ".animator", ".controller"].includes(extname(sourcePath).toLowerCase())) {
-		throw new Error("Animation importer supports .animation, .animations, .animator, and .controller assets.");
+	if (![".animation", ".animations", ".anim", ".animator", ".controller"].includes(extname(sourcePath).toLowerCase())) {
+		throw new Error("Animation importer supports Babylon .animation/.animations, Unity .anim, and .animator/.controller assets.");
 	}
 	const details = await fs.stat(sourcePath);
 	if (details.size > MAX_ANIMATION_SOURCE_BYTES) {
@@ -22,6 +22,8 @@ export async function processExportedAnimation(sourcePath: string, outputPath: s
 		sourcePath,
 		outputPath,
 		sourceKind: executed.sourceKind,
+		sourceFormat: executed.sourceFormat,
+		outputFormat: executed.outputFormat,
 		settings,
 		sourceBytes: details.size,
 		clips: executed.clips,
@@ -35,11 +37,22 @@ export async function processExportedAnimation(sourcePath: string, outputPath: s
 		controllerBlendTreeCount: executed.controllerBlendTreeCount,
 		controllerMotionBindings: executed.controllerMotionBindings,
 		controllerAvatarMaskBindings: executed.controllerAvatarMaskBindings,
+		controllerBehaviourBindings: executed.controllerBehaviourBindings,
+		controllerBehaviourBindingCount: executed.controllerBehaviourBindingCount,
+		controllerCompatibility: executed.controllerCompatibility,
 		controllerUnsupportedFeatures: executed.controllerUnsupportedFeatures,
+		activeStateCurveCount: executed.activeStateCurveCount,
+		compressedRotationCurveCount: executed.compressedRotationCurveCount,
+		objectReferenceCurves: executed.objectReferenceCurves,
 		sourceKeyCount: executed.sourceKeyCount,
 		sampledKeyCount: executed.sampledKeyCount,
 		outputKeyCount: executed.outputKeyCount,
 		reducedKeyCount: Math.max(0, executed.sampledKeyCount - executed.outputKeyCount),
+		removedConstantScaleTrackCount: executed.removedConstantScaleTrackCount,
+		roundTripSafe: executed.roundTripSafe,
+		preservedFeatures: executed.preservedFeatures,
+		approximatedFeatures: executed.approximatedFeatures,
+		unsupportedFeatures: executed.unsupportedFeatures,
 		valid: executed.errors.length === 0,
 		errors: [...new Set(executed.errors)],
 		warnings: [...new Set(executed.warnings)],

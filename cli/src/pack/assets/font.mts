@@ -76,6 +76,7 @@ export async function processExportedFont(sourcePath: string, requestedOutputPat
 			kernings: [],
 			missingCodepoints: [],
 			dynamicFontPath: basename(requestedOutputPath),
+			sourceFontPath: basename(requestedOutputPath),
 		};
 		await fs.writeJSON(manifestPath, manifest, { spaces: "\t" });
 		return {
@@ -90,8 +91,10 @@ export async function processExportedFont(sourcePath: string, requestedOutputPat
 			missingCodepoints: [],
 			pages: [],
 			dynamicFontPath: requestedOutputPath,
+			sourceFontPath: requestedOutputPath,
 		};
 	}
+	await fs.copyFile(sourcePath, requestedOutputPath);
 	const wasm = await fs.readFile(require.resolve("msdfgen-wasm/wasm"));
 	const generator = await Msdfgen.create(wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength) as ArrayBuffer);
 	generator.loadFont(await fs.readFile(sourcePath));
@@ -157,6 +160,7 @@ export async function processExportedFont(sourcePath: string, requestedOutputPat
 		kernings,
 		missingCodepoints,
 		dynamicFontPath: null,
+		sourceFontPath: basename(requestedOutputPath),
 	};
 	await fs.writeJSON(manifestPath, manifest, { spaces: "\t" });
 	return {
@@ -171,5 +175,6 @@ export async function processExportedFont(sourcePath: string, requestedOutputPat
 		missingCodepoints,
 		pages,
 		dynamicFontPath: null,
+		sourceFontPath: requestedOutputPath,
 	};
 }

@@ -6,6 +6,7 @@ import { isMesh } from "../../../tools/guards";
 
 import { configureTransformNodes } from "../../transform-node";
 import { configureGameObjectComponents } from "../../game-object-components";
+import { refreshAuthoredECSRuntime } from "../../../ecs/runtime";
 
 export async function preloadSceneScriptAsset(key: string, rootUrl: string, scene: Scene) {
 	const iblIntensity = scene.environmentIntensity;
@@ -30,6 +31,7 @@ export async function preloadSceneScriptAsset(key: string, rootUrl: string, scen
 
 	configureTransformNodes(scene);
 	configureGameObjectComponents(scene);
+	refreshAuthoredECSRuntime(scene);
 
 	return container;
 }

@@ -1,4 +1,4 @@
-import { basename, extname, join } from "path/posix";
+import { basenamePortablePath as basename, extnamePortablePath as extname, joinPortablePath as join } from "./portable-path";
 
 import { normalizeModelMaterialExtractionFolder, portableAssetFilenameStem } from "./model-material-extraction";
 

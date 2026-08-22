@@ -1,4 +1,4 @@
-import { extname } from "path/posix";
+import { extnamePortablePath as extname } from "./portable-path";
 
 export interface IPreparedModelImporterSource {
 	supported: boolean;

@@ -8,13 +8,13 @@ import { onNodeModifiedObservable } from "../../../../tools/observables";
 import { updateLightShadowMapRefreshRate, updatePointLightShadowMapRenderListPredicate } from "../../../../tools/light/shadows";
 
 import { IEditorInspectorImplementationProps } from "../inspector";
+import { LightRenderingLayersInspector } from "../rendering-layers";
 
 import { EditorInspectorColorField } from "../fields/color";
 import { EditorInspectorStringField } from "../fields/string";
 import { EditorInspectorVectorField } from "../fields/vector";
 import { EditorInspectorNumberField } from "../fields/number";
 import { EditorInspectorSectionField } from "../fields/section";
-// import { EditorInspectorTextureField } from "../fields/texture";
 
 import { ScriptInspectorComponent } from "../script/script";
 import { CustomMetadataInspector } from "../metadata/custom-metadata";
@@ -22,6 +22,7 @@ import { CustomMetadataInspector } from "../metadata/custom-metadata";
 import { EditorLightPBRInspector } from "./components/pbr";
 import { EditorLightClusterInspector } from "./components/cluster";
 import { EditorLightShadowsInspector } from "./components/shadows";
+import { EditorLightCookieInspector } from "./components/cookie";
 
 export class EditorSpotLightInspector extends Component<IEditorInspectorImplementationProps<SpotLight>> {
 	/**
@@ -49,6 +50,8 @@ export class EditorSpotLightInspector extends Component<IEditorInspectorImplemen
 						onChange={() => onNodeModifiedObservable.notifyObservers(this.props.object)}
 					/>
 				</EditorInspectorSectionField>
+
+				<LightRenderingLayersInspector editor={this.props.editor} light={this.props.object} onUpdate={() => this.forceUpdate()} />
 
 				<EditorInspectorSectionField title="Transforms">
 					<EditorInspectorVectorField
@@ -105,11 +108,8 @@ export class EditorSpotLightInspector extends Component<IEditorInspectorImplemen
 					<EditorInspectorNumberField label="Exponent" object={this.props.object} property="exponent" />
 				</EditorInspectorSectionField>
 
-				{/* <EditorInspectorSectionField title="Texture">
-                    <EditorInspectorTextureField object={this.props.object} title="Projection Texture" property="projectionTexture" onChange={() => this.forceUpdate()} />
-                </EditorInspectorSectionField> */}
-
 				<ScriptInspectorComponent editor={this.props.editor} object={this.props.object} />
+				<EditorLightCookieInspector light={this.props.object} />
 
 				<EditorLightShadowsInspector editor={this.props.editor} light={this.props.object} onShadowGeneratorChanged={() => this.forceUpdate()}>
 					<EditorInspectorNumberField label="Angle" object={this.props.object} property="shadowAngleScale" min={0} max={Math.PI * 2} />

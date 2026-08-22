@@ -1,10 +1,11 @@
-import type { ITextureImporterSettings, TextureImporterCompression, TextureImporterResizeAlgorithm } from "./texture-importer";
+import type { ITextureImporterSettings, TextureImporterCompression, TextureImporterOutputFormat, TextureImporterResizeAlgorithm } from "./texture-importer";
 
 export type TextureImporterPlatform = "default" | "web" | "desktop";
 export type TextureImporterOverridePlatform = Exclude<TextureImporterPlatform, "default">;
 
 export interface ITextureImporterPlatformOverride {
 	enabled: boolean;
+	outputFormat?: TextureImporterOutputFormat;
 	maxSize?: number;
 	resizeAlgorithm?: TextureImporterResizeAlgorithm;
 	compression?: TextureImporterCompression;
@@ -23,7 +24,7 @@ export interface IResolvedTextureImporterPlatformSettings {
 
 const maximumJsonLength = 65_536;
 const maximumSizes = new Set([32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384]);
-const overrideKeys = new Set(["enabled", "maxSize", "resizeAlgorithm", "compression", "generateMipmaps", "readable"]);
+const overrideKeys = new Set(["enabled", "outputFormat", "maxSize", "resizeAlgorithm", "compression", "generateMipmaps", "readable"]);
 
 function record(value: unknown, label: string): Record<string, unknown> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -54,6 +55,7 @@ function optionalEnum<T extends string>(source: Record<string, unknown>, key: st
 	return value as T;
 }
 
+/** Validates one closed platform override before it can alter deterministic build output. */
 function normalizeOverride(value: unknown): ITextureImporterPlatformOverride {
 	const source = record(value, "Texture platform override");
 	const unknown = Object.keys(source).filter((key) => !overrideKeys.has(key));
@@ -66,12 +68,14 @@ function normalizeOverride(value: unknown): ITextureImporterPlatformOverride {
 	if (source.maxSize !== undefined && (typeof source.maxSize !== "number" || !maximumSizes.has(source.maxSize))) {
 		throw new Error("Texture platform override maxSize must be a power of two from 32 through 16384.");
 	}
+	const outputFormat = optionalEnum(source, "outputFormat", ["automatic", "png", "jpeg", "webp"] as const);
 	const resizeAlgorithm = optionalEnum(source, "resizeAlgorithm", ["nearest", "bilinear", "bicubic", "lanczos3"] as const);
 	const compression = optionalEnum(source, "compression", ["none", "low", "normal", "high"] as const);
 	const generateMipmaps = optionalBoolean(source, "generateMipmaps");
 	const readable = optionalBoolean(source, "readable");
 	return {
 		enabled: source.enabled,
+		...(outputFormat !== undefined ? { outputFormat } : {}),
 		...(source.maxSize !== undefined ? { maxSize: source.maxSize as number } : {}),
 		...(resizeAlgorithm !== undefined ? { resizeAlgorithm } : {}),
 		...(compression !== undefined ? { compression } : {}),
@@ -115,7 +119,7 @@ export function serializeTextureImporterPlatformOverrides(value: unknown): strin
 
 /** Maps build-profile and CLI target names to executable texture target families. */
 export function normalizeTextureImporterPlatform(value: unknown): TextureImporterPlatform {
-	if (value === "web") {
+	if (value === "web" || value === "android" || value === "ios" || value === "webxr") {
 		return "web";
 	}
 	if (value === "desktop" || value === "electron") {

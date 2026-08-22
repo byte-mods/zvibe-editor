@@ -1,5 +1,6 @@
 import { join } from "path/posix";
-import { pathExists, readJSON } from "fs-extra";
+import { pathExists } from "fs-extra";
+import { readSerializedJSON as readJSON } from "../../serialization-session";
 
 import { Scene, Constants, Matrix, Mesh, SceneLoader, MultiMaterial, Geometry, Logger } from "babylonjs";
 

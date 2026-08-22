@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect Physics 2D settings and world authoring. What is the maximum number of scene-owned Physics 2D worlds?</question>
+      <answer>8</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the default Physics 2D settings view. What stable id is reserved for the required legacy-compatible world?</question>
+      <answer>default</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Physics 2D transform-plane authoring. Which four plane modes are supported? Answer as a comma-separated list in documented order.</question>
+      <answer>xy, xz, yz, custom</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect custom Physics 2D transform-plane validation. What two geometric requirements apply to xAxis and yAxis?</question>
+      <answer>normalized and orthogonal</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Physics 2D transform-write authoring. Which three write modes are supported? Answer as a comma-separated list in documented order.</question>
+      <answer>direct, interpolate, tween</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect per-world Physics 2D contact filtering. Which mode bypasses body layer masks while retaining same-world isolation?</question>
+      <answer>all</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Physics 2D world partitioning. Can a joint connect bodies assigned to different worlds? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect Physics 2D debug rendering. How many explicit camera ids can one world or snapshot request contain?</question>
+      <answer>16</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect paginated Physics 2D debug rendering. Are custom elements ordered before or after automatic body and joint drawing?</question>
+      <answer>after</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect release-build Physics 2D debug rendering. Which scene setting must be true for a release-build snapshot to be available?</question>
+      <answer>renderingAvailableInRelease</answer>
+   </qa_pair>
+</evaluation>

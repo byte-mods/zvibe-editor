@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { getInspectorPropertyValue, setInspectorEffectivePropertyValue } from "../../src/tools/property";
+import { getInspectorPropertyValue, onInspectorPropertyChangedObservable, setInspectorEffectivePropertyValue } from "../../src/tools/property";
 
 describe("tools/property", () => {
 	describe("getInspectorPropertyValue", () => {
@@ -45,6 +45,18 @@ describe("tools/property", () => {
 
 			setInspectorEffectivePropertyValue(o, "b.c", 47);
 			expect(o.b.c).toBe(47);
+		});
+
+		test("should emit the exact object and dotted property after mutation", () => {
+			const object = { position: { x: 1 } };
+			const events: any[] = [];
+			const observer = onInspectorPropertyChangedObservable.add((event) => events.push(event));
+
+			setInspectorEffectivePropertyValue(object, "position.x", 8);
+			onInspectorPropertyChangedObservable.remove(observer);
+
+			expect(events).toEqual([{ object, property: "position.x" }]);
+			expect(object.position.x).toBe(8);
 		});
 	});
 });

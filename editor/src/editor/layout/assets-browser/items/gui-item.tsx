@@ -37,6 +37,7 @@ export class AssetBrowserGUIItem extends AssetsBrowserItem {
 	protected async onDoubleClick(): Promise<void> {
 		ipcRenderer.send("window:open", "build/src/editor/windows/ge", {
 			filePath: this.props.absolutePath,
+			projectPath: this.props.editor.state.projectPath,
 		});
 	}
 }

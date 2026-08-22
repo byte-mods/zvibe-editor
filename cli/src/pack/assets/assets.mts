@@ -49,15 +49,13 @@ export async function createAssets(options: ICreateAssetsOptions) {
 		}
 
 		promises.push(
-			new Promise<void>(async (resolve) => {
+			(async () => {
 				await processAssetFile(file, {
 					...options,
 				});
 
 				options.onProgress?.((currentStep += step));
-
-				resolve();
-			})
+			})()
 		);
 	}
 

@@ -5,6 +5,8 @@ import { SpatialAudioAttachmentType } from "@babylonjs/core/AudioV2/spatialAudio
 import { IStaticSoundPlayOptions, IStaticSoundStopOptions, StaticSound } from "@babylonjs/core/AudioV2/abstractAudio/staticSound";
 import { IStreamingSoundPlayOptions, StreamingSound } from "@babylonjs/core/AudioV2/abstractAudio/streamingSound";
 
+import type { ScriptableAudioStreamingSound } from "../loading/scriptable-audio-playback";
+
 /**
  * This interface is used to define extra properties on TransformNode. For example for SoundNode support.
  */
@@ -13,7 +15,7 @@ export interface SoundNode extends TransformNode {
 	isSoundNode?: boolean;
 	soundRelativePath?: string;
 
-	sound?: StaticSound | StreamingSound;
+	sound?: StaticSound | StreamingSound | ScriptableAudioStreamingSound;
 
 	autoUpdateSpatial: boolean;
 

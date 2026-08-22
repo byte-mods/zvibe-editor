@@ -54,6 +54,7 @@ import { Editor } from "../../main";
 
 import { removeNodes } from "./remove";
 import { exportScene, exportNode } from "./export";
+import { showFbxExportDialog } from "./fbx-export";
 import { showUpdateResourcesFromAsset } from "./update-resources";
 
 export interface IEditorGraphContextMenuProps extends PropsWithChildren {
@@ -142,6 +143,20 @@ export class EditorGraphContextMenu extends Component<IEditorGraphContextMenuPro
 											<ContextMenuSeparator />
 										</>
 									)}
+
+									{isNode(this.props.object) && !isScene(this.props.object) && (
+										<>
+											<ContextMenuItem onClick={() => showFbxExportDialog(this.props.editor, this.props.object)}>Export Selection as FBX...</ContextMenuItem>
+											<ContextMenuSeparator />
+										</>
+									)}
+								</>
+							)}
+
+							{isScene(this.props.object) && (
+								<>
+									<ContextMenuItem onClick={() => showFbxExportDialog(this.props.editor)}>Export Scene as FBX...</ContextMenuItem>
+									<ContextMenuSeparator />
 								</>
 							)}
 

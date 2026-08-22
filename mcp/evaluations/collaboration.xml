@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Inspect the project collaboration capability contract. What integer contract version is reported?</question>
+      <answer>1</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the project collaboration capability contract. How many complete capability groups are listed?</question>
+      <answer>8</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect collaboration identity and roles. Which three named roles are supported? Answer as a comma-separated list in privilege order.</question>
+      <answer>admin, editor, viewer</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect collaborative text behavior. Which ordered replicated-data approach is named for UTF-8 text operations?</question>
+      <answer>RGA-style</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect semantic conflict behavior. Are incompatible same-path edits silently guessed and merged? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect semantic conflict behavior. Which two project asset forms support recursive three-way semantic merge?</question>
+      <answer>scene directories containing bounded JSON documents, .prefab JSON assets</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect the binary conflict boundary. Which coordination mechanism is used for binary and unsupported assets?</question>
+      <answer>locks and manual/source-control workflows</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect remote collaboration behavior. Which two transports provide off-machine editor access?</question>
+      <answer>HTTP/HTTPS gateway, outbound WSS relay</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Inspect scene coauthoring behavior. What prevents a stale scene edit from overwriting a newer edit?</question>
+      <answer>compare-and-swap revision guards</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare the collaboration contract with Unity service identity. Does the provider-neutral relay claim Unity service or protocol identity? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+</evaluation>

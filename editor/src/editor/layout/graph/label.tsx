@@ -127,6 +127,13 @@ export function EditorGraphLabel(props: IEditorGraphLabelProps) {
 		const absolutePaths = props.editor.layout.assets.state.selectedKeys;
 
 		absolutePaths.forEach(async (absolutePath) => {
+			if (absolutePath.toLowerCase().endsWith(".audio-generator.json")) {
+				if (isScene(props.object) || isMesh(props.object) || isInstancedMesh(props.object) || isTransformNode(props.object)) {
+					await applySoundAsset(props.editor, props.object, absolutePath);
+					props.editor.layout.graph.refresh();
+				}
+				return;
+			}
 			const extension = extname(absolutePath).toLowerCase();
 
 			switch (extension) {

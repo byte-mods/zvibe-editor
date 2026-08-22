@@ -7,7 +7,21 @@ import { toast } from "sonner";
 import { FaLink } from "react-icons/fa6";
 import { AiOutlinePlus } from "react-icons/ai";
 
-import { AbstractMesh, InstancedMesh, Material, MorphTarget, MultiMaterial, Node, Observer, PBRMaterial, StandardMaterial, NodeMaterial, TrailMesh } from "babylonjs";
+import {
+	AbstractMesh,
+	InstancedMesh,
+	Material,
+	Mesh,
+	MorphTarget,
+	MultiMaterial,
+	Node,
+	Observer,
+	PBRMaterial,
+	StandardMaterial,
+	NodeMaterial,
+	TrailMesh,
+	VertexBuffer,
+} from "babylonjs";
 import {
 	SkyMaterial,
 	GridMaterial,
@@ -60,21 +74,17 @@ import {
 	setMeshSelection,
 	setMeshVertexData,
 	setMeshUVProjection,
-	unwrapMeshUVs,
 	subdivideMesh,
 } from "../../../../mcp/meshes/meshes";
+import { getMeshUvLayout, setMeshUvSeams, unwrapMeshUVs } from "../../../../mcp/meshes/uv";
+import { captureLoopCutMeshSnapshot, loopCutMesh, restoreLoopCutMeshSnapshot } from "../../../../mcp/meshes/loop-cut";
+import { detachMeshFaces } from "../../../../mcp/meshes/detach";
+import { autoSmoothMeshFaces, getMeshSmoothingGroups, setMeshSmoothingGroup } from "../../../../mcp/meshes/smoothing";
+import { getMeshVertexColors, paintMeshVertexColors } from "../../../../mcp/meshes/vertex-colors";
+import { captureMeshIntegritySnapshot, inspectMeshIntegrity, repairMeshIntegrity, restoreMeshIntegritySnapshot } from "../../../../mcp/meshes/integrity";
+import { captureMeshPivotSnapshot, getMeshPivot, restoreMeshPivotSnapshot, setMeshPivot } from "../../../../mcp/meshes/pivot";
+import { captureMeshEditableSourceSnapshot, getMeshEditableSource, restoreMeshEditableSourceSnapshot, setMeshExportGeometry } from "../../../../mcp/meshes/editable-source";
 import { getVfxTrail, setVfxTrail } from "../../../../mcp/vfx/trails";
-import {
-	createPhysics2DEffector,
-	deletePhysics2DEffector,
-	generatePhysics2DPolygonCollider,
-	listPhysics2D,
-	listPhysics2DEffectors,
-	listPhysics2DMaterials,
-	removePhysics2DBody,
-	setPhysics2DBody,
-	setPhysics2DEffector,
-} from "../../../../mcp/physics2d/physics2d";
 import { createNavAgent, deleteNavAgent, listNavAgents, setNavAgent, setNavAgentDestination, startNavAgent, stopNavAgent } from "../../../../mcp/navmesh/navmesh";
 import {
 	applyPrefabInstanceBoundary,
@@ -87,6 +97,7 @@ import {
 	unpackPrefabInstance,
 } from "../../../../mcp/prefabs/prefabs";
 import { showConfirm } from "../../../../ui/dialog";
+import { NodeRenderingLayersInspector } from "../rendering-layers";
 
 import { EditorInspectorStringField } from "../fields/string";
 import { EditorInspectorSwitchField } from "../fields/switch";
@@ -127,15 +138,34 @@ import { EditorMeshCollisionInspector } from "./collision";
 import { openPrefabBulkOverrides } from "./prefab-bulk-overrides";
 import { openPrefabOverrides } from "./prefab-overrides";
 import { openPrefabMode } from "../../assets-browser/viewers/prefab-mode";
+import { SpriteShapeInspector } from "./sprite-shape";
+import { Physics2DEffectorInspector } from "./physics2d-effector";
+import { Physics2DBodyInspector } from "./physics2d-body";
 
 export interface IEditorMeshInspectorState {
 	dragOver: boolean;
 	selectionIndices: string | null;
 	faceOperationAmount: string;
+	edgeBevelAmount: string;
+	edgeBevelSegments: string;
+	loopCutCount: string;
+	loopCutOffset: string;
+	smoothingGroup: string;
+	smoothingAngle: string;
+	vertexPaintColor: string;
+	vertexPaintAlpha: string;
+	vertexPaintOpacity: string;
+	vertexPaintBlendMode: "replace" | "add" | "multiply";
+	vertexPaintSplitFaces: boolean;
+	meshIntegrity: any | null;
+	pivotWorldCoordinates: [string, string, string];
 	uvProjectionPlane: "xy" | "xz" | "yz";
 	uvProjectionScale: string;
+	uvChartPadding: string;
+	uvRelaxIterations: string;
+	uvRelaxStrength: string;
+	uvAllowRotation: boolean;
 	navMeshPath: string;
-	polygonColliderImagePath: string;
 	prefabLinks: any[];
 	prefabTargetIndex: number;
 	prefabBusy: boolean;
@@ -143,6 +173,15 @@ export interface IEditorMeshInspectorState {
 	prefabComparison: any | null;
 	prefabComparisonQuery: string;
 }
+
+interface IMeshUvVertexStreamSnapshot {
+	kind: string;
+	values: number[];
+	stride: number;
+	updatable: boolean;
+}
+
+const meshIntegrityReports = new WeakMap<Mesh, any>();
 
 export class EditorMeshInspector extends Component<IEditorInspectorImplementationProps<AbstractMesh>, IEditorMeshInspectorState> {
 	/**
@@ -160,15 +199,33 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 	public constructor(props: IEditorInspectorImplementationProps<AbstractMesh>) {
 		super(props);
+		props.object.computeWorldMatrix(true);
+		const pivotWorld = isMesh(props.object) ? props.object.getAbsolutePivotPoint().asArray() : [0, 0, 0];
 
 		this.state = {
 			dragOver: false,
 			selectionIndices: null,
 			faceOperationAmount: "10",
+			edgeBevelAmount: "0.2",
+			edgeBevelSegments: "1",
+			loopCutCount: "1",
+			loopCutOffset: "0",
+			smoothingGroup: "1",
+			smoothingAngle: "45",
+			vertexPaintColor: "#ff3b30",
+			vertexPaintAlpha: "1",
+			vertexPaintOpacity: "1",
+			vertexPaintBlendMode: "replace",
+			vertexPaintSplitFaces: true,
+			meshIntegrity: isMesh(props.object) ? (meshIntegrityReports.get(props.object) ?? null) : null,
+			pivotWorldCoordinates: pivotWorld.map((value) => String(value)) as [string, string, string],
 			uvProjectionPlane: "xz",
 			uvProjectionScale: "100",
+			uvChartPadding: "0.01",
+			uvRelaxIterations: "20",
+			uvRelaxStrength: "0.5",
+			uvAllowRotation: true,
 			navMeshPath: "",
-			polygonColliderImagePath: "",
 			prefabLinks: [],
 			prefabTargetIndex: 0,
 			prefabBusy: false,
@@ -226,6 +283,8 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 					)}
 				</EditorInspectorSectionField>
 
+				<NodeRenderingLayersInspector editor={this.props.editor} node={this.props.object} showMeshOrder onUpdate={() => this.forceUpdate()} />
+
 				<EditorInspectorSectionField title="Transforms">
 					<EditorInspectorVectorField
 						label={<div className="w-14">Position</div>}
@@ -247,6 +306,9 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 				{this._getSplineFollowerComponent()}
 				{this._getVfxTrailComponent()}
 				{this._getNavigationAgentComponent()}
+				{isMesh(this.props.object) && this.props.object.metadata?.babylonEditorSpriteShape?.model === "unity-sprite-shape-controller-v1" && (
+					<SpriteShapeInspector object={this.props.object} editor={this.props.editor} />
+				)}
 
 				{this.props.object.geometry && (
 					<>
@@ -279,8 +341,8 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 								Subdivide Mesh
 							</Button>
 						</EditorInspectorSectionField>
-						{this._getPhysics2DComponent()}
-						{this._getPhysics2DEffectorComponent()}
+						<Physics2DBodyInspector node={this.props.object} editor={this.props.editor} onChanged={() => this.forceUpdate()} />
+						<Physics2DEffectorInspector mesh={this.props.object} editor={this.props.editor} onChanged={() => this.forceUpdate()} />
 						<MeshDecalInspector object={this.props.object} />
 						<MeshLODInspector mesh={this.props.object} editor={this.props.editor} />
 					</>
@@ -733,7 +795,7 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 				{agent ? (
 					<div className="space-y-2">
 						<div className="text-xs text-muted-foreground">
-							{agent.navMeshPath} · {agent.isMoving ? "moving" : `${agent.path?.length ?? 0} path points`}
+							{agent.navMeshPath} · {agent.runtime ? `Detour ${agent.runtime.state} · ${agent.runtime.remainingDistance.toFixed(1)} remaining` : "crowd unavailable"}
 						</div>
 						<div className="grid grid-cols-3 gap-1">
 							<Input
@@ -771,20 +833,75 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 								onBlur={(event) => this._setNavAgentNumber(agent, "maxAcceleration", event.target.value)}
 							/>
 							<Input
-								defaultValue={String(agent.avoidanceRadius ?? agent.radius)}
+								defaultValue={String(agent.collisionQueryRange ?? agent.avoidanceRadius ?? agent.radius * 2)}
 								type="number"
 								min="0.001"
 								step="any"
-								aria-label="Nav agent avoidance radius"
-								onBlur={(event) => this._setNavAgentNumber(agent, "avoidanceRadius", event.target.value)}
+								aria-label="Nav agent collision query range"
+								onBlur={(event) => this._setNavAgentNumber(agent, "collisionQueryRange", event.target.value)}
 							/>
 							<Input
-								defaultValue={String(agent.avoidanceWeight ?? 1)}
+								defaultValue={String(agent.separationWeight ?? agent.avoidanceWeight ?? 1)}
 								type="number"
 								min="0"
 								step="any"
-								aria-label="Nav agent avoidance weight"
-								onBlur={(event) => this._setNavAgentNumber(agent, "avoidanceWeight", event.target.value)}
+								aria-label="Nav agent separation weight"
+								onBlur={(event) => this._setNavAgentNumber(agent, "separationWeight", event.target.value)}
+							/>
+						</div>
+						<div className="grid grid-cols-3 gap-1">
+							<Input
+								defaultValue={String(agent.pathOptimizationRange ?? agent.radius * 30)}
+								type="number"
+								min="0.001"
+								step="any"
+								aria-label="Nav agent path optimization range"
+								onBlur={(event) => this._setNavAgentNumber(agent, "pathOptimizationRange", event.target.value)}
+							/>
+							<Input
+								defaultValue={String(agent.reachRadius ?? agent.radius)}
+								type="number"
+								min="0.001"
+								step="any"
+								aria-label="Nav agent reach radius"
+								onBlur={(event) => this._setNavAgentNumber(agent, "reachRadius", event.target.value)}
+							/>
+							<Input
+								defaultValue={String(agent.queryFilterType ?? 0)}
+								type="number"
+								min="0"
+								max="15"
+								step="1"
+								aria-label="Nav agent query filter"
+								onBlur={(event) => this._setNavAgentNumber(agent, "queryFilterType", event.target.value)}
+							/>
+						</div>
+						<div className="grid grid-cols-3 gap-1">
+							<Input
+								defaultValue={String(agent.obstacleAvoidanceType ?? 0)}
+								type="number"
+								min="0"
+								max="7"
+								step="1"
+								aria-label="Nav agent avoidance quality"
+								onBlur={(event) => this._setNavAgentNumber(agent, "obstacleAvoidanceType", event.target.value)}
+							/>
+							<Input
+								defaultValue={String(agent.updateFlags ?? 31)}
+								type="number"
+								min="0"
+								max="31"
+								step="1"
+								aria-label="Nav agent Detour update flags"
+								onBlur={(event) => this._setNavAgentNumber(agent, "updateFlags", event.target.value)}
+							/>
+							<Input
+								defaultValue={String(agent.angularSpeed ?? Math.PI * 4)}
+								type="number"
+								min="0.001"
+								step="any"
+								aria-label="Nav agent angular speed"
+								onBlur={(event) => this._setNavAgentNumber(agent, "angularSpeed", event.target.value)}
 							/>
 						</div>
 						<Button
@@ -794,6 +911,22 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 							onClick={() => this._setNavAgentAvoidance(agent, agent.avoidanceEnabled === false)}
 						>
 							{agent.avoidanceEnabled === false ? "Enable Local Avoidance" : "Disable Local Avoidance"}
+						</Button>
+						<Button
+							size="sm"
+							variant={agent.updateRotation === false ? "ghost" : "secondary"}
+							className="w-full"
+							onClick={() => this._setNavAgentBoolean(agent, "updateRotation", agent.updateRotation === false)}
+						>
+							{agent.updateRotation === false ? "Enable Velocity Rotation" : "Disable Velocity Rotation"}
+						</Button>
+						<Button
+							size="sm"
+							variant={agent.autoRepath === false ? "ghost" : "secondary"}
+							className="w-full"
+							onClick={() => this._setNavAgentBoolean(agent, "autoRepath", agent.autoRepath === false)}
+						>
+							{agent.autoRepath === false ? "Enable Auto Repath" : "Disable Auto Repath"}
 						</Button>
 						<div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-1">
 							<Input
@@ -835,26 +968,43 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 			.catch((error: any) => toast.error(error.message));
 	}
 
-	private _setNavAgentNumber(agent: any, property: "radius" | "height" | "maxSpeed" | "maxAcceleration" | "avoidanceRadius" | "avoidanceWeight", value: string): void {
+	private _setNavAgentNumber(
+		agent: any,
+		property:
+			| "radius"
+			| "height"
+			| "maxSpeed"
+			| "maxAcceleration"
+			| "collisionQueryRange"
+			| "pathOptimizationRange"
+			| "separationWeight"
+			| "reachRadius"
+			| "queryFilterType"
+			| "obstacleAvoidanceType"
+			| "updateFlags"
+			| "angularSpeed",
+		value: string
+	): void {
 		const number = Number(value);
-		if (!Number.isFinite(number) || (property === "avoidanceWeight" ? number < 0 : number <= 0)) {
+		if (
+			!Number.isFinite(number) ||
+			(property === "separationWeight" || property === "queryFilterType" || property === "obstacleAvoidanceType" || property === "updateFlags" ? number < 0 : number <= 0)
+		) {
 			return;
 		}
-		try {
-			setNavAgent(this.props.object.getScene(), { id: agent.id, [property]: number }, { editor: this.props.editor });
-			this.forceUpdate();
-		} catch (error: any) {
-			toast.error(error.message);
-		}
+		setNavAgent(this.props.object.getScene(), { id: agent.id, [property]: number }, { editor: this.props.editor })
+			.then(() => this.forceUpdate())
+			.catch((error: Error) => toast.error(error.message));
 	}
 
 	private _setNavAgentAvoidance(agent: any, avoidanceEnabled: boolean): void {
-		try {
-			setNavAgent(this.props.object.getScene(), { id: agent.id, avoidanceEnabled }, { editor: this.props.editor });
-			this.forceUpdate();
-		} catch (error: any) {
-			toast.error(error.message);
-		}
+		this._setNavAgentBoolean(agent, "avoidanceEnabled", avoidanceEnabled);
+	}
+
+	private _setNavAgentBoolean(agent: any, property: "avoidanceEnabled" | "updateRotation" | "autoRepath", value: boolean): void {
+		setNavAgent(this.props.object.getScene(), { id: agent.id, [property]: value }, { editor: this.props.editor })
+			.then(() => this.forceUpdate())
+			.catch((error: Error) => toast.error(error.message));
 	}
 
 	private _setNavAgentDestination(agent: any, value: string): void {
@@ -868,30 +1018,21 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 	}
 
 	private _startNavAgent(agent: any): void {
-		try {
-			startNavAgent(this.props.object.getScene(), { id: agent.id }, { editor: this.props.editor });
-			this.forceUpdate();
-		} catch (error: any) {
-			toast.error(error.message);
-		}
+		startNavAgent(this.props.object.getScene(), { id: agent.id }, { editor: this.props.editor })
+			.then(() => this.forceUpdate())
+			.catch((error: Error) => toast.error(error.message));
 	}
 
 	private _stopNavAgent(agent: any): void {
-		try {
-			stopNavAgent(this.props.object.getScene(), { id: agent.id }, { editor: this.props.editor });
-			this.forceUpdate();
-		} catch (error: any) {
-			toast.error(error.message);
-		}
+		stopNavAgent(this.props.object.getScene(), { id: agent.id }, { editor: this.props.editor })
+			.then(() => this.forceUpdate())
+			.catch((error: Error) => toast.error(error.message));
 	}
 
 	private _deleteNavAgent(agent: any): void {
-		try {
-			deleteNavAgent(this.props.object.getScene(), { id: agent.id }, { editor: this.props.editor });
-			this.forceUpdate();
-		} catch (error: any) {
-			toast.error(error.message);
-		}
+		deleteNavAgent(this.props.object.getScene(), { id: agent.id }, { editor: this.props.editor })
+			.then(() => this.forceUpdate())
+			.catch((error: Error) => toast.error(error.message));
 	}
 
 	private _setVfxTrail(data: any): void {
@@ -1097,6 +1238,38 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 		const scene = mesh.getScene();
 		const selection = getMeshSelection(scene, { nodeId: mesh.id });
 		const topology = getMeshTopology(scene, { nodeId: mesh.id });
+		let uvLayout: ReturnType<typeof getMeshUvLayout> | null = null;
+		let selectedSmoothing: ReturnType<typeof getMeshSmoothingGroups> | null = null;
+		let selectedVertexColors: ReturnType<typeof getMeshVertexColors> | null = null;
+		let editableSource: ReturnType<typeof getMeshEditableSource> | null = null;
+		try {
+			editableSource = getMeshEditableSource(scene, { nodeId: mesh.id });
+		} catch {
+			// Invalid source topology remains repairable through Mesh Integrity.
+		}
+		try {
+			uvLayout = getMeshUvLayout(scene, { nodeId: mesh.id, offset: 0, limit: 1 });
+		} catch {
+			// Damaged topology must remain inspectable so Mesh Integrity can repair it.
+		}
+		if (selection.mode === "face" && selection.indices.length) {
+			try {
+				selectedSmoothing = getMeshSmoothingGroups(scene, { nodeId: mesh.id, faceIndices: selection.indices.slice(0, 256) });
+			} catch {
+				// Smoothing authoring stays unavailable until invalid faces are repaired.
+			}
+		}
+		if ((selection.mode === "vertex" || selection.mode === "face") && selection.indices.length) {
+			try {
+				selectedVertexColors = getMeshVertexColors(scene, { nodeId: mesh.id, selectedOnly: true, offset: 0, limit: 1 });
+			} catch {
+				// Vertex painting stays unavailable until invalid streams are repaired.
+			}
+		}
+		const meshIntegrity = this.state.meshIntegrity?.node?.id === mesh.id ? this.state.meshIntegrity : null;
+		mesh.computeWorldMatrix(true);
+		const pivotLocal = mesh.getPivotPoint().asArray();
+		const pivotWorld = mesh.getAbsolutePivotPoint().asArray();
 		const text = this.state.selectionIndices ?? selection.indices.join(", ");
 		const total = selection.mode === "vertex" ? topology.vertexCount : selection.mode === "edge" ? topology.edges.length : topology.faceCount;
 		return (
@@ -1132,43 +1305,337 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 					Ctrl/Cmd+Alt selects nearest edges.
 				</div>
 				{selection.mode === "face" && selection.indices.length > 0 && (
-					<div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
-						<Input
-							type="number"
-							min="0.0001"
-							step="0.1"
-							value={this.state.faceOperationAmount}
-							onChange={(event) => this.setState({ faceOperationAmount: event.target.value })}
-							aria-label="Selected face operation amount"
-						/>
-						<Button size="sm" variant="secondary" onClick={() => this._applySelectedFaceOperation("extrude")}>
-							Extrude
-						</Button>
-						<Button size="sm" variant="secondary" onClick={() => this._applySelectedFaceOperation("inset")}>
-							Inset
-						</Button>
+					<div className="space-y-2">
+						<div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
+							<Input
+								type="number"
+								min="0.0001"
+								step="0.1"
+								value={this.state.faceOperationAmount}
+								onChange={(event) => this.setState({ faceOperationAmount: event.target.value })}
+								aria-label="Selected face operation amount"
+							/>
+							<Button size="sm" variant="secondary" onClick={() => this._applySelectedFaceOperation("extrude")}>
+								Extrude
+							</Button>
+							<Button size="sm" variant="secondary" onClick={() => this._applySelectedFaceOperation("inset")}>
+								Inset
+							</Button>
+						</div>
+						<div className="grid grid-cols-3 gap-2">
+							<Button size="sm" variant="secondary" onClick={() => this._detachSelectedFaces("gameObject")}>
+								Detach To Game Object
+							</Button>
+							<Button size="sm" variant="secondary" onClick={() => this._detachSelectedFaces("submesh")}>
+								Detach To Submesh
+							</Button>
+						</div>
+						<div className="space-y-2 border-t border-input pt-2">
+							<div className="flex items-center justify-between text-xs text-muted-foreground">
+								<span>Smoothing Groups</span>
+								<span>
+									{selectedSmoothing?.faces.length
+										? new Set(selectedSmoothing.faces.map((face: any) => face.group)).size === 1
+											? selectedSmoothing.faces[0].group === 0
+												? "Hard"
+												: `Group ${selectedSmoothing.faces[0].group}`
+											: "Mixed"
+										: "No faces"}
+									· revision {selectedSmoothing?.revision ?? 0}
+								</span>
+							</div>
+							<div className="grid grid-cols-[6rem_minmax(0,1fr)_minmax(0,1fr)] gap-2">
+								<Input
+									type="number"
+									min="1"
+									max="24"
+									step="1"
+									value={this.state.smoothingGroup}
+									onChange={(event) => this.setState({ smoothingGroup: event.target.value })}
+									aria-label="Smoothing group"
+								/>
+								<Button size="sm" variant="secondary" onClick={() => this._applySelectedSmoothingGroup(Number(this.state.smoothingGroup))}>
+									Apply Group
+								</Button>
+								<Button size="sm" variant="secondary" onClick={() => this._applySelectedSmoothingGroup(0)}>
+									Clear To Hard
+								</Button>
+							</div>
+							<div className="grid grid-cols-[6rem_minmax(0,1fr)_minmax(0,1fr)] gap-2">
+								<Input
+									type="number"
+									min="0"
+									max="180"
+									step="1"
+									value={this.state.smoothingAngle}
+									onChange={(event) => this.setState({ smoothingAngle: event.target.value })}
+									aria-label="Auto smooth angle threshold"
+								/>
+								<Button size="sm" variant="secondary" onClick={() => this._autoSmoothSelectedFaces()}>
+									Auto Smooth
+								</Button>
+								<Button size="sm" variant="secondary" onClick={() => this._selectSmoothingGroup()}>
+									Select Group
+								</Button>
+							</div>
+							<div className="text-xs text-muted-foreground">
+								Group 0 is hard. Groups 1–24 average normals across coincident vertices without changing UV or material seams.
+							</div>
+						</div>
 					</div>
 				)}
-				{selection.mode === "edge" && selection.indices.length >= 1 && (
-					<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-						<Input
-							type="number"
-							min="0.0001"
-							max="0.999999"
-							step="0.1"
-							value={this.state.faceOperationAmount}
-							onChange={(event) => this.setState({ faceOperationAmount: event.target.value })}
-							aria-label="Selected edge bevel amount"
-						/>
-						<Button size="sm" variant="secondary" onClick={() => this._bevelSelectedEdge()}>
-							Bevel
+				{(selection.mode === "vertex" || selection.mode === "face") && selection.indices.length > 0 && (
+					<div className="space-y-2 border-t border-input pt-2">
+						<div className="flex items-center justify-between text-xs text-muted-foreground">
+							<span>Vertex Colors</span>
+							<span>
+								{selectedVertexColors?.selectedVertexCount ?? 0} selected · {selectedVertexColors?.paintedVertexCount ?? 0}/{selectedVertexColors?.vertexCount ?? 0}{" "}
+								painted · revision {selectedVertexColors?.revision ?? 0}
+							</span>
+						</div>
+						<div className="grid grid-cols-[4rem_5rem_minmax(0,1fr)] gap-2">
+							<Input
+								type="color"
+								value={this.state.vertexPaintColor}
+								onChange={(event) => this.setState({ vertexPaintColor: event.target.value })}
+								aria-label="Vertex paint color"
+							/>
+							<Input
+								type="number"
+								min="0"
+								max="1"
+								step="0.05"
+								value={this.state.vertexPaintAlpha}
+								onChange={(event) => this.setState({ vertexPaintAlpha: event.target.value })}
+								aria-label="Vertex paint alpha"
+							/>
+							<select
+								className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+								value={this.state.vertexPaintBlendMode}
+								onChange={(event) => this.setState({ vertexPaintBlendMode: event.target.value as IEditorMeshInspectorState["vertexPaintBlendMode"] })}
+								aria-label="Vertex paint blend mode"
+							>
+								<option value="replace">Replace</option>
+								<option value="add">Add</option>
+								<option value="multiply">Multiply</option>
+							</select>
+						</div>
+						<div className="grid grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)] gap-2">
+							<Input
+								type="number"
+								min="0"
+								max="1"
+								step="0.05"
+								value={this.state.vertexPaintOpacity}
+								onChange={(event) => this.setState({ vertexPaintOpacity: event.target.value })}
+								aria-label="Vertex paint opacity"
+							/>
+							<Button size="sm" variant="secondary" onClick={() => this._paintSelectedVertexColors(false)}>
+								Paint Colors
+							</Button>
+							<Button size="sm" variant="secondary" onClick={() => this._paintSelectedVertexColors(true)}>
+								Clear To White
+							</Button>
+						</div>
+						{selection.mode === "face" && (
+							<label className="flex items-center gap-2 text-xs text-muted-foreground">
+								<input
+									type="checkbox"
+									checked={this.state.vertexPaintSplitFaces}
+									onChange={(event) => this.setState({ vertexPaintSplitFaces: event.target.checked })}
+									aria-label="Isolate painted face boundaries"
+								/>
+								Isolate selected face corners so paint does not bleed into unselected faces
+							</label>
+						)}
+						<div className="text-xs text-muted-foreground">
+							RGBA is stored in Babylon's color vertex stream and participates in compatible Standard, PBR, and Node Materials.
+						</div>
+					</div>
+				)}
+				<div className="space-y-2 border-t border-input pt-2">
+					<div className="flex items-center justify-between text-xs text-muted-foreground">
+						<span>Pivot Editing</span>
+						<span>World {pivotWorld.map((value) => value.toFixed(3)).join(", ")}</span>
+					</div>
+					<div className="text-xs text-muted-foreground">Local {pivotLocal.map((value) => value.toFixed(3)).join(", ")}</div>
+					<div className="grid grid-cols-3 gap-2">
+						{this.state.pivotWorldCoordinates.map((value, index) => (
+							<Input
+								key={index}
+								type="number"
+								step="1"
+								value={value}
+								onChange={(event) => {
+									const next = [...this.state.pivotWorldCoordinates] as [string, string, string];
+									next[index] = event.target.value;
+									this.setState({ pivotWorldCoordinates: next });
+								}}
+								aria-label={`Pivot world ${["X", "Y", "Z"][index]}`}
+							/>
+						))}
+					</div>
+					<div className="grid grid-cols-3 gap-2">
+						<Button size="sm" variant="secondary" onClick={() => this._setSelectedMeshPivot("world")}>
+							Set World Pivot
 						</Button>
+						<Button size="sm" variant="secondary" onClick={() => this._setSelectedMeshPivot("boundsCenter")}>
+							Center Pivot
+						</Button>
+						<Button size="sm" variant="secondary" disabled={!selection.indices.length} onClick={() => this._setSelectedMeshPivot("selectionAverage")}>
+							Pivot To Selection
+						</Button>
+					</div>
+					<div className="text-xs text-muted-foreground">
+						Unity-style pivot relocation preserves world geometry, children, topology, rotation, and scale. The viewport transform gizmo anchors to this pivot.
+					</div>
+				</div>
+				{editableSource && (
+					<div className="space-y-2 border-t border-input pt-2">
+						<div className="flex items-center justify-between text-xs text-muted-foreground">
+							<span>Editable Source / Runtime Geometry</span>
+							<span>
+								revision {editableSource.source.revision} · settings {editableSource.exportSettings.revision}
+							</span>
+						</div>
+						<div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+							<div>
+								Source: {editableSource.source.vertexCount} vertices · {editableSource.source.faceCount} faces
+							</div>
+							<div>
+								Runtime: {editableSource.generated.vertexCount} vertices · {editableSource.generated.faceCount} faces
+							</div>
+						</div>
+						<label className="flex items-center justify-between gap-2 text-sm">
+							<span>Optimize Generated Geometry</span>
+							<input
+								type="checkbox"
+								checked={editableSource.exportSettings.optimize}
+								onChange={(event) => this._setMeshExportOptimization(event.target.checked)}
+								aria-label="Optimize generated runtime geometry"
+							/>
+						</label>
+						<div className="text-xs text-muted-foreground">
+							{editableSource.exportSettings.optimize && editableSource.generated.optimizationApplied
+								? `${editableSource.generated.removedUnusedOrDuplicateVertices} unused or bit-identical vertices removed from the detached runtime artifact.`
+								: "Runtime records preserve the canonical source layout."}
+						</div>
+						{editableSource.generated.optimizationBlockers.length > 0 && (
+							<div className="text-xs text-amber-400">Optimization held safely: {editableSource.generated.optimizationBlockers.join("; ")}.</div>
+						)}
+						<div className="text-xs text-muted-foreground">
+							Project source stays in geometries/. Generated output is written separately and excludes selection, UV-layout, smoothing-group, vertex-paint, and
+							source-manifest metadata.
+						</div>
+					</div>
+				)}
+				<div className="space-y-2 border-t border-input pt-2">
+					<div className="flex items-center justify-between text-xs text-muted-foreground">
+						<span>Mesh Integrity</span>
+						<span>
+							{meshIntegrity
+								? `${meshIntegrity.issueCounts.errors} errors · ${meshIntegrity.issueCounts.warnings} warnings · ${meshIntegrity.issueCounts.info} info`
+								: "Not inspected"}
+						</span>
+					</div>
+					<div className="grid grid-cols-2 gap-2">
+						<Button size="sm" variant="secondary" onClick={() => this._inspectSelectedMeshIntegrity()}>
+							Validate Mesh
+						</Button>
+						<Button size="sm" variant="secondary" onClick={() => this._repairSelectedMeshIntegrity()}>
+							Repair Mesh
+						</Button>
+					</div>
+					{meshIntegrity && (
+						<div className="text-xs text-muted-foreground">
+							{meshIntegrity.counts.vertices} vertices · {meshIntegrity.counts.completeFaces} faces · {meshIntegrity.counts.connectedComponents} components ·{" "}
+							{meshIntegrity.counts.boundaryEdges} boundaries · {meshIntegrity.counts.nonManifoldEdges} non-manifold
+						</div>
+					)}
+					<div className="text-xs text-muted-foreground">
+						Repair removes invalid, zero-area, and duplicate faces; compacts/welds compatible vertices; fixes winding, normals, skin weights, and submesh ranges.
+						Ambiguous holes and non-manifold ownership remain diagnostics.
+					</div>
+				</div>
+				{selection.mode === "edge" && selection.indices.length >= 1 && (
+					<div className="space-y-1">
+						<div className="grid grid-cols-[minmax(0,1fr)_7rem_auto] gap-2 text-xs text-muted-foreground">
+							<span>Amount</span>
+							<span>Segments</span>
+							<span />
+						</div>
+						<div className="grid grid-cols-[minmax(0,1fr)_7rem_auto] gap-2">
+							<Input
+								type="number"
+								min="0.0001"
+								max="0.999999"
+								step="0.1"
+								value={this.state.edgeBevelAmount}
+								onChange={(event) => this.setState({ edgeBevelAmount: event.target.value })}
+								aria-label="Selected edge bevel amount"
+							/>
+							<Input
+								type="number"
+								min="1"
+								max="8"
+								step="1"
+								value={this.state.edgeBevelSegments}
+								onChange={(event) => this.setState({ edgeBevelSegments: event.target.value })}
+								aria-label="Selected edge bevel segments"
+							/>
+							<Button size="sm" variant="secondary" onClick={() => this._bevelSelectedEdge()}>
+								Bevel Connected
+							</Button>
+						</div>
+					</div>
+				)}
+				{selection.mode === "edge" && selection.indices.length === 1 && (
+					<div className="space-y-1">
+						<div className="grid grid-cols-[7rem_7rem_minmax(0,1fr)] gap-2 text-xs text-muted-foreground">
+							<span>Loop Cuts</span>
+							<span>Offset</span>
+							<span />
+						</div>
+						<div className="grid grid-cols-[7rem_7rem_minmax(0,1fr)] gap-2">
+							<Input
+								type="number"
+								min="1"
+								max="8"
+								step="1"
+								value={this.state.loopCutCount}
+								onChange={(event) => this.setState({ loopCutCount: event.target.value })}
+								aria-label="Loop cut count"
+							/>
+							<Input
+								type="number"
+								min="-0.49"
+								max="0.49"
+								step="0.05"
+								value={this.state.loopCutOffset}
+								onChange={(event) => this.setState({ loopCutOffset: event.target.value })}
+								aria-label="Loop cut interval offset"
+							/>
+							<Button size="sm" variant="secondary" onClick={() => this._loopCutSelectedEdge()}>
+								Insert Edge Loop
+							</Button>
+						</div>
+						<div className="text-xs text-muted-foreground">Traverses opposite edges across the reconstructed manifold quad strip.</div>
 					</div>
 				)}
 				{selection.mode === "edge" && selection.indices.length === 2 && (
 					<Button size="sm" variant="secondary" className="w-full" onClick={() => this._bridgeSelectedEdges()}>
 						Bridge Selected Edges
 					</Button>
+				)}
+				{selection.mode === "edge" && selection.indices.length >= 1 && (
+					<div className="grid grid-cols-2 gap-2">
+						<Button size="sm" variant="secondary" onClick={() => this._setSelectedUvSeams("add")}>
+							Mark UV Seams
+						</Button>
+						<Button size="sm" variant="secondary" onClick={() => this._setSelectedUvSeams("remove")}>
+							Clear UV Seams
+						</Button>
+					</div>
 				)}
 				<div className="grid grid-cols-[6rem_minmax(0,1fr)_auto] gap-2 border-t border-input pt-2">
 					<select
@@ -1191,8 +1658,57 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 					<Button size="sm" variant="secondary" onClick={() => this._applyUVProjection()}>
 						Project UVs
 					</Button>
-					<Button size="sm" variant="secondary" onClick={() => this._unwrapMeshUVs()}>
-						Auto Unwrap
+				</div>
+				<div className="space-y-2 border-t border-input pt-2">
+					<div className="flex items-center justify-between text-xs text-muted-foreground">
+						<span>UV Charts</span>
+						<span>{uvLayout ? `${uvLayout.chartCount} charts · ${uvLayout.seamCount} seams · revision ${uvLayout.revision}` : "Unavailable until mesh repair"}</span>
+					</div>
+					<div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+						<span>Padding</span>
+						<span>Relax Iterations</span>
+						<span>Strength</span>
+					</div>
+					<div className="grid grid-cols-3 gap-2">
+						<Input
+							type="number"
+							min="0"
+							max="0.1"
+							step="0.005"
+							value={this.state.uvChartPadding}
+							onChange={(event) => this.setState({ uvChartPadding: event.target.value })}
+							aria-label="UV chart padding"
+						/>
+						<Input
+							type="number"
+							min="0"
+							max="100"
+							step="1"
+							value={this.state.uvRelaxIterations}
+							onChange={(event) => this.setState({ uvRelaxIterations: event.target.value })}
+							aria-label="UV relax iterations"
+						/>
+						<Input
+							type="number"
+							min="0.01"
+							max="1"
+							step="0.1"
+							value={this.state.uvRelaxStrength}
+							onChange={(event) => this.setState({ uvRelaxStrength: event.target.value })}
+							aria-label="UV relax strength"
+						/>
+					</div>
+					<label className="flex items-center gap-2 text-xs text-muted-foreground">
+						<input
+							type="checkbox"
+							checked={this.state.uvAllowRotation}
+							onChange={(event) => this.setState({ uvAllowRotation: event.target.checked })}
+							aria-label="Allow UV chart rotation"
+						/>
+						Allow 90° chart rotation · harmonic relax · equal texel density
+					</label>
+					<Button size="sm" variant="secondary" className="w-full" onClick={() => this._unwrapMeshUVs()}>
+						Relax &amp; Pack UV Charts
 					</Button>
 				</div>
 			</div>
@@ -1248,6 +1764,363 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 		});
 	}
 
+	private _detachSelectedFaces(mode: "gameObject" | "submesh"): void {
+		const mesh = this.props.object;
+		if (!isMesh(mesh)) {
+			return;
+		}
+		const scene = mesh.getScene();
+		const selection = getMeshSelection(scene, { nodeId: mesh.id });
+		if (selection.mode !== "face" || !selection.indices.length) {
+			return;
+		}
+		const options = { editor: this.props.editor };
+		const before = captureLoopCutMeshSnapshot(scene, { nodeId: mesh.id });
+		let after: ReturnType<typeof captureLoopCutMeshSnapshot> | null = null;
+		let detachedId: string | null = null;
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => {
+				if (detachedId) {
+					scene.getMeshById(detachedId)?.dispose(false, false);
+					void this.props.editor.layout.graph.refresh().then(() => this.props.editor.layout.graph.setSelectedNode(mesh));
+				}
+				restoreLoopCutMeshSnapshot(scene, { nodeId: mesh.id }, before, options);
+			},
+			redo: () => {
+				if (mode === "submesh" && after) {
+					restoreLoopCutMeshSnapshot(scene, { nodeId: mesh.id }, after, options);
+					return;
+				}
+				const topology = getMeshTopology(scene, { nodeId: mesh.id });
+				const result = detachMeshFaces(
+					scene,
+					{
+						nodeId: mesh.id,
+						expectedTopologyFingerprint: topology.topologyFingerprint,
+						faceIndices: selection.indices,
+						mode,
+						name: mode === "gameObject" ? `${mesh.name} Detached` : undefined,
+						detachedId: detachedId ?? undefined,
+					},
+					options
+				);
+				detachedId = result.detachedMesh?.id ?? null;
+				after = captureLoopCutMeshSnapshot(scene, { nodeId: mesh.id });
+			},
+			action: () => this.props.editor.layout.inspector.forceUpdate(),
+		});
+	}
+
+	private _applySelectedSmoothingGroup(group: number): void {
+		const mesh = this.props.object;
+		if (!isMesh(mesh) || !Number.isInteger(group) || group < 0 || group > 24) {
+			return;
+		}
+		const scene = mesh.getScene();
+		const selection = getMeshSelection(scene, { nodeId: mesh.id });
+		if (selection.mode !== "face" || !selection.indices.length) {
+			return;
+		}
+		const options = { editor: this.props.editor };
+		const before = captureLoopCutMeshSnapshot(scene, { nodeId: mesh.id });
+		let after: ReturnType<typeof captureLoopCutMeshSnapshot> | null = null;
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => restoreLoopCutMeshSnapshot(scene, { nodeId: mesh.id }, before, options),
+			redo: () => {
+				if (after) {
+					restoreLoopCutMeshSnapshot(scene, { nodeId: mesh.id }, after, options);
+					return;
+				}
+				const state = getMeshSmoothingGroups(scene, { nodeId: mesh.id, faceIndices: selection.indices.slice(0, 256) });
+				setMeshSmoothingGroup(
+					scene,
+					{
+						nodeId: mesh.id,
+						expectedTopologyFingerprint: state.topologyFingerprint,
+						expectedRevision: state.revision,
+						faceIndices: selection.indices,
+						group,
+					},
+					options
+				);
+				after = captureLoopCutMeshSnapshot(scene, { nodeId: mesh.id });
+			},
+			action: () => this.props.editor.layout.inspector.forceUpdate(),
+		});
+	}
+
+	private _autoSmoothSelectedFaces(): void {
+		const mesh = this.props.object;
+		const angleThreshold = Number(this.state.smoothingAngle);
+		if (!isMesh(mesh) || !Number.isFinite(angleThreshold) || angleThreshold < 0 || angleThreshold > 180) {
+			return;
+		}
+		const scene = mesh.getScene();
+		const selection = getMeshSelection(scene, { nodeId: mesh.id });
+		if (selection.mode !== "face" || !selection.indices.length) {
+			return;
+		}
+		const options = { editor: this.props.editor };
+		const before = captureLoopCutMeshSnapshot(scene, { nodeId: mesh.id });
+		let after: ReturnType<typeof captureLoopCutMeshSnapshot> | null = null;
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => restoreLoopCutMeshSnapshot(scene, { nodeId: mesh.id }, before, options),
+			redo: () => {
+				if (after) {
+					restoreLoopCutMeshSnapshot(scene, { nodeId: mesh.id }, after, options);
+					return;
+				}
+				const state = getMeshSmoothingGroups(scene, { nodeId: mesh.id, faceIndices: selection.indices.slice(0, 256) });
+				autoSmoothMeshFaces(
+					scene,
+					{
+						nodeId: mesh.id,
+						expectedTopologyFingerprint: state.topologyFingerprint,
+						expectedRevision: state.revision,
+						faceIndices: selection.indices,
+						angleThreshold,
+					},
+					options
+				);
+				after = captureLoopCutMeshSnapshot(scene, { nodeId: mesh.id });
+			},
+			action: () => this.props.editor.layout.inspector.forceUpdate(),
+		});
+	}
+
+	private _selectSmoothingGroup(): void {
+		const mesh = this.props.object;
+		const group = Number(this.state.smoothingGroup);
+		if (!isMesh(mesh) || !Number.isInteger(group) || group < 0 || group > 24) {
+			return;
+		}
+		const scene = mesh.getScene();
+		const indices: number[] = [];
+		let offset = 0;
+		while (true) {
+			const page = getMeshSmoothingGroups(scene, { nodeId: mesh.id, group, offset, limit: 256 });
+			indices.push(...page.faces.map((face: any) => face.faceIndex));
+			if (!page.hasMore) {
+				break;
+			}
+			offset += page.returned;
+		}
+		this._setMeshComponentSelection("face", indices);
+	}
+
+	private _paintSelectedVertexColors(clear: boolean): void {
+		const mesh = this.props.object;
+		if (!isMesh(mesh)) {
+			return;
+		}
+		const alpha = clear ? 1 : Number(this.state.vertexPaintAlpha);
+		const opacity = clear ? 1 : Number(this.state.vertexPaintOpacity);
+		const match = /^#([0-9a-f]{6})$/i.exec(this.state.vertexPaintColor);
+		if (!match || !Number.isFinite(alpha) || alpha < 0 || alpha > 1 || !Number.isFinite(opacity) || opacity < 0 || opacity > 1) {
+			return;
+		}
+		const scene = mesh.getScene();
+		const selection = getMeshSelection(scene, { nodeId: mesh.id });
+		if ((selection.mode !== "vertex" && selection.mode !== "face") || !selection.indices.length) {
+			return;
+		}
+		const integer = Number.parseInt(match[1], 16);
+		const color: [number, number, number, number] = clear ? [1, 1, 1, 1] : [((integer >> 16) & 255) / 255, ((integer >> 8) & 255) / 255, (integer & 255) / 255, alpha];
+		const options = { editor: this.props.editor };
+		const before = captureLoopCutMeshSnapshot(scene, { nodeId: mesh.id });
+		let after: ReturnType<typeof captureLoopCutMeshSnapshot> | null = null;
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => restoreLoopCutMeshSnapshot(scene, { nodeId: mesh.id }, before, options),
+			redo: () => {
+				if (after) {
+					restoreLoopCutMeshSnapshot(scene, { nodeId: mesh.id }, after, options);
+					return;
+				}
+				const state = getMeshVertexColors(scene, { nodeId: mesh.id, selectedOnly: true, offset: 0, limit: 1 });
+				paintMeshVertexColors(
+					scene,
+					{
+						nodeId: mesh.id,
+						expectedTopologyFingerprint: state.topologyFingerprint,
+						expectedColorFingerprint: state.colorFingerprint,
+						expectedRevision: state.revision,
+						targetMode: selection.mode,
+						vertexIndices: selection.mode === "vertex" ? selection.indices : undefined,
+						faceIndices: selection.mode === "face" ? selection.indices : undefined,
+						color,
+						blendMode: clear ? "replace" : this.state.vertexPaintBlendMode,
+						opacity,
+						splitFaceBoundaries: selection.mode === "face" ? this.state.vertexPaintSplitFaces : undefined,
+					},
+					options
+				);
+				after = captureLoopCutMeshSnapshot(scene, { nodeId: mesh.id });
+			},
+			action: () => this.props.editor.layout.inspector.forceUpdate(),
+		});
+	}
+
+	private _inspectSelectedMeshIntegrity(): void {
+		const mesh = this.props.object;
+		if (!isMesh(mesh)) {
+			return;
+		}
+		const integrity = inspectMeshIntegrity(mesh.getScene(), { nodeId: mesh.id, offset: 0, limit: 256 });
+		meshIntegrityReports.set(mesh, integrity);
+		this.setState({ meshIntegrity: integrity });
+	}
+
+	private _syncPivotWorldCoordinates(mesh: Mesh): void {
+		mesh.computeWorldMatrix(true);
+		this.setState({
+			pivotWorldCoordinates: mesh
+				.getAbsolutePivotPoint()
+				.asArray()
+				.map((value) => String(value)) as [string, string, string],
+		});
+	}
+
+	private _setSelectedMeshPivot(mode: "world" | "boundsCenter" | "selectionAverage"): void {
+		const mesh = this.props.object;
+		if (!isMesh(mesh)) {
+			return;
+		}
+		const worldPosition = this.state.pivotWorldCoordinates.map(Number);
+		if (mode === "world" && worldPosition.some((value) => !Number.isFinite(value))) {
+			toast.error("World pivot coordinates must be finite numbers.");
+			return;
+		}
+		const scene = mesh.getScene();
+		const selection = getMeshSelection(scene, { nodeId: mesh.id });
+		if (mode === "selectionAverage" && !selection.indices.length) {
+			toast.error("Select at least one vertex, edge, or face before setting the pivot to selection.");
+			return;
+		}
+		const options = { editor: this.props.editor };
+		const before = captureMeshPivotSnapshot(scene, { nodeId: mesh.id });
+		let after: ReturnType<typeof captureMeshPivotSnapshot> | null = null;
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => restoreMeshPivotSnapshot(scene, { nodeId: mesh.id }, before, options),
+			redo: () => {
+				if (after) {
+					restoreMeshPivotSnapshot(scene, { nodeId: mesh.id }, after, options);
+					return;
+				}
+				const inspected = getMeshPivot(scene, { nodeId: mesh.id });
+				setMeshPivot(
+					scene,
+					{
+						nodeId: mesh.id,
+						expectedPivotFingerprint: inspected.pivotFingerprint,
+						mode,
+						worldPosition: mode === "world" ? worldPosition : undefined,
+						selectionMode: mode === "selectionAverage" ? selection.mode : undefined,
+						componentIndices: mode === "selectionAverage" ? selection.indices : undefined,
+					},
+					options
+				);
+				after = captureMeshPivotSnapshot(scene, { nodeId: mesh.id });
+			},
+			action: () => {
+				this._syncPivotWorldCoordinates(mesh);
+				onNodeModifiedObservable.notifyObservers(mesh);
+				updateIblShadowsRenderPipeline(scene);
+			},
+		});
+	}
+
+	private _setMeshExportOptimization(optimize: boolean): void {
+		const mesh = this.props.object;
+		if (!isMesh(mesh)) {
+			return;
+		}
+		const scene = mesh.getScene();
+		const options = { editor: this.props.editor };
+		const before = captureMeshEditableSourceSnapshot(scene, { nodeId: mesh.id });
+		let after: ReturnType<typeof captureMeshEditableSourceSnapshot> | null = null;
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => restoreMeshEditableSourceSnapshot(scene, { nodeId: mesh.id }, before, options),
+			redo: () => {
+				if (after) {
+					restoreMeshEditableSourceSnapshot(scene, { nodeId: mesh.id }, after, options);
+					return;
+				}
+				const inspected = getMeshEditableSource(scene, { nodeId: mesh.id });
+				setMeshExportGeometry(
+					scene,
+					{
+						nodeId: mesh.id,
+						expectedSourceFingerprint: inspected.source.fingerprint,
+						expectedSourceRevision: inspected.source.revision,
+						expectedExportSettingsRevision: inspected.exportSettings.revision,
+						optimize,
+					},
+					options
+				);
+				after = captureMeshEditableSourceSnapshot(scene, { nodeId: mesh.id });
+			},
+			action: () => {
+				onNodeModifiedObservable.notifyObservers(mesh);
+				this.props.editor.layout.inspector.forceUpdate();
+			},
+		});
+	}
+
+	private _repairSelectedMeshIntegrity(): void {
+		const mesh = this.props.object;
+		if (!isMesh(mesh)) {
+			return;
+		}
+		const scene = mesh.getScene();
+		const options = { editor: this.props.editor };
+		const before = captureMeshIntegritySnapshot(scene, { nodeId: mesh.id });
+		let after: ReturnType<typeof captureMeshIntegritySnapshot> | null = null;
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => restoreMeshIntegritySnapshot(scene, { nodeId: mesh.id }, before, options),
+			redo: () => {
+				if (after) {
+					restoreMeshIntegritySnapshot(scene, { nodeId: mesh.id }, after, options);
+					return;
+				}
+				const inspected = inspectMeshIntegrity(scene, { nodeId: mesh.id, offset: 0, limit: 256 });
+				const repaired = repairMeshIntegrity(
+					scene,
+					{
+						nodeId: mesh.id,
+						expectedIntegrityFingerprint: inspected.integrityFingerprint,
+						operations: [
+							"removeInvalidFaces",
+							"removeDegenerateFaces",
+							"removeDuplicateFaces",
+							"removeUnusedVertices",
+							"weldIdenticalVertices",
+							"fixWinding",
+							"rebuildNormals",
+							"normalizeSkinWeights",
+							"rebuildSubMeshes",
+						],
+						confirm: true,
+					},
+					options
+				);
+				meshIntegrityReports.set(mesh, repaired);
+				after = captureMeshIntegritySnapshot(scene, { nodeId: mesh.id });
+			},
+			action: () => {
+				const integrity = inspectMeshIntegrity(scene, { nodeId: mesh.id, offset: 0, limit: 256 });
+				meshIntegrityReports.set(mesh, integrity);
+				this.setState({ meshIntegrity: integrity });
+			},
+		});
+	}
+
 	private _bridgeSelectedEdges(): void {
 		const mesh = this.props.object;
 		if (!isMesh(mesh)) {
@@ -1281,13 +2154,61 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 		});
 	}
 
+	private _loopCutSelectedEdge(): void {
+		const mesh = this.props.object;
+		if (!isMesh(mesh)) {
+			return;
+		}
+		const cuts = Number(this.state.loopCutCount);
+		const offset = Number(this.state.loopCutOffset);
+		if (!Number.isInteger(cuts) || cuts < 1 || cuts > 8 || !Number.isFinite(offset) || offset < -0.49 || offset > 0.49) {
+			return;
+		}
+		const scene = mesh.getScene();
+		const selection = getMeshSelection(scene, { nodeId: mesh.id });
+		if (selection.mode !== "edge" || selection.indices.length !== 1) {
+			return;
+		}
+		const options = { editor: this.props.editor };
+		const before = captureLoopCutMeshSnapshot(scene, { nodeId: mesh.id });
+		let after: ReturnType<typeof captureLoopCutMeshSnapshot> | null = null;
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => restoreLoopCutMeshSnapshot(scene, { nodeId: mesh.id }, before, options),
+			redo: () => {
+				if (!after) {
+					const topology = getMeshTopology(scene, { nodeId: mesh.id });
+					loopCutMesh(
+						scene,
+						{
+							nodeId: mesh.id,
+							expectedTopologyFingerprint: topology.topologyFingerprint,
+							edgeIndex: selection.indices[0],
+							cuts,
+							offset,
+						},
+						options
+					);
+					after = captureLoopCutMeshSnapshot(scene, { nodeId: mesh.id });
+				} else {
+					restoreLoopCutMeshSnapshot(scene, { nodeId: mesh.id }, after, options);
+				}
+			},
+			action: () => this.props.editor.layout.inspector.forceUpdate(),
+		});
+	}
+
 	private _bevelSelectedEdge(): void {
 		const mesh = this.props.object;
 		if (!isMesh(mesh)) {
 			return;
 		}
-		const amount = Number(this.state.faceOperationAmount);
+		const amount = Number(this.state.edgeBevelAmount);
+		const segments = Number(this.state.edgeBevelSegments);
 		if (!(amount > 0 && amount < 1)) {
+			return;
+		}
+		if (!Number.isInteger(segments) || segments < 1 || segments > 8) {
 			return;
 		}
 		const scene = mesh.getScene();
@@ -1300,15 +2221,56 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 		let after: any = null;
 		registerUndoRedo({
 			executeRedo: true,
-			undo: () => setMeshVertexData(scene, { nodeId: mesh.id, positions: before.positions, normals: before.normals, uvs: before.uvs, indices: before.indices }, options),
+			undo: () => {
+				setMeshVertexData(scene, { nodeId: mesh.id, positions: before.positions, normals: before.normals, uvs: before.uvs, indices: before.indices }, options);
+				setMeshSelection(scene, { nodeId: mesh.id, mode: "edge", indices: selection.indices }, options);
+			},
 			redo: () => {
 				if (!after) {
 					after =
 						selection.indices.length === 1
-							? bevelMeshEdge(scene, { nodeId: mesh.id, edgeIndex: selection.indices[0], amount }, options)
-							: bevelMeshEdges(scene, { nodeId: mesh.id, edgeIndices: selection.indices, amount }, options);
+							? bevelMeshEdge(scene, { nodeId: mesh.id, edgeIndex: selection.indices[0], amount, segments }, options)
+							: bevelMeshEdges(scene, { nodeId: mesh.id, edgeIndices: selection.indices, amount, segments }, options);
 				} else {
 					setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+					setMeshSelection(scene, { nodeId: mesh.id, mode: "edge", indices: [] }, options);
+				}
+			},
+		});
+	}
+
+	private _setSelectedUvSeams(mode: "add" | "remove"): void {
+		const mesh = this.props.object;
+		if (!isMesh(mesh)) {
+			return;
+		}
+		const scene = mesh.getScene();
+		const selection = getMeshSelection(scene, { nodeId: mesh.id });
+		if (selection.mode !== "edge" || !selection.indices.length) {
+			return;
+		}
+		const options = { editor: this.props.editor };
+		const beforeMetadata = mesh.metadata?.babylonEditorUvLayout ? JSON.parse(JSON.stringify(mesh.metadata.babylonEditorUvLayout)) : undefined;
+		let afterMetadata: any;
+		const restoreMetadata = (value: any): void => {
+			mesh.metadata ??= {};
+			if (value === undefined) {
+				delete mesh.metadata.babylonEditorUvLayout;
+			} else {
+				mesh.metadata.babylonEditorUvLayout = JSON.parse(JSON.stringify(value));
+			}
+			this.props.editor.layout.inspector.forceUpdate();
+		};
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => restoreMetadata(beforeMetadata),
+			redo: () => {
+				if (afterMetadata === undefined) {
+					const layout = getMeshUvLayout(scene, { nodeId: mesh.id, offset: 0, limit: 1 });
+					setMeshUvSeams(scene, { nodeId: mesh.id, expectedRevision: layout.revision, mode, edgeIndices: selection.indices }, options);
+					afterMetadata = JSON.parse(JSON.stringify(mesh.metadata.babylonEditorUvLayout));
+				} else {
+					restoreMetadata(afterMetadata);
 				}
 			},
 		});
@@ -1341,395 +2303,135 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 		});
 	}
 
+	private _captureUvVertexStreams(mesh: Mesh): IMeshUvVertexStreamSnapshot[] {
+		const managedKinds = new Set([
+			VertexBuffer.PositionKind,
+			VertexBuffer.NormalKind,
+			VertexBuffer.UVKind,
+			VertexBuffer.MatricesIndicesKind,
+			VertexBuffer.MatricesWeightsKind,
+			VertexBuffer.MatricesIndicesExtraKind,
+			VertexBuffer.MatricesWeightsExtraKind,
+		]);
+		return mesh
+			.getVerticesDataKinds()
+			.filter((kind) => !managedKinds.has(kind))
+			.flatMap((kind) => {
+				const buffer = mesh.getVertexBuffer(kind);
+				const values = mesh.getVerticesData(kind, false);
+				return buffer && values ? [{ kind, values: Array.from(values), stride: buffer.getStrideSize(), updatable: buffer.isUpdatable() }] : [];
+			});
+	}
+
+	private _restoreUvVertexStreams(mesh: Mesh, streams: IMeshUvVertexStreamSnapshot[]): void {
+		const kinds = new Set(streams.map((stream) => stream.kind));
+		for (const currentKind of this._captureUvVertexStreams(mesh).map((stream) => stream.kind)) {
+			if (!kinds.has(currentKind)) {
+				mesh.removeVerticesData(currentKind);
+			}
+		}
+		for (const stream of streams) {
+			mesh.setVerticesData(stream.kind, stream.values, stream.updatable, stream.stride);
+		}
+	}
+
 	private _unwrapMeshUVs(): void {
 		const mesh = this.props.object;
 		if (!isMesh(mesh)) {
 			return;
 		}
+		const padding = Number(this.state.uvChartPadding);
+		const relaxIterations = Number(this.state.uvRelaxIterations);
+		const relaxStrength = Number(this.state.uvRelaxStrength);
+		if (
+			!Number.isFinite(padding) ||
+			padding < 0 ||
+			padding > 0.1 ||
+			!Number.isInteger(relaxIterations) ||
+			relaxIterations < 0 ||
+			relaxIterations > 100 ||
+			!(relaxStrength > 0 && relaxStrength <= 1)
+		) {
+			return;
+		}
 		const scene = mesh.getScene();
 		const options = { editor: this.props.editor };
 		const before = getMeshVertexData(scene, { nodeId: mesh.id });
-		let after: ReturnType<typeof getMeshVertexData> | null = null;
+		const beforeVertexStreams = this._captureUvVertexStreams(mesh);
+		const beforeMetadata = mesh.metadata?.babylonEditorUvLayout ? JSON.parse(JSON.stringify(mesh.metadata.babylonEditorUvLayout)) : undefined;
+		let after: any = null;
+		let afterVertexStreams: IMeshUvVertexStreamSnapshot[] = [];
+		let afterMetadata: any;
+		const restoreMetadata = (value: any): void => {
+			mesh.metadata ??= {};
+			if (value === undefined) {
+				delete mesh.metadata.babylonEditorUvLayout;
+			} else {
+				mesh.metadata.babylonEditorUvLayout = JSON.parse(JSON.stringify(value));
+			}
+		};
 		registerUndoRedo({
 			executeRedo: true,
-			undo: () => setMeshVertexData(scene, { nodeId: mesh.id, positions: before.positions, normals: before.normals, uvs: before.uvs, indices: before.indices }, options),
+			undo: () => {
+				setMeshVertexData(
+					scene,
+					{
+						nodeId: mesh.id,
+						positions: before.positions,
+						normals: before.normals,
+						uvs: before.uvs,
+						indices: before.indices,
+						matricesIndices: before.matricesIndices,
+						matricesWeights: before.matricesWeights,
+						matricesIndicesExtra: before.matricesIndicesExtra,
+						matricesWeightsExtra: before.matricesWeightsExtra,
+					},
+					options
+				);
+				this._restoreUvVertexStreams(mesh, beforeVertexStreams);
+				restoreMetadata(beforeMetadata);
+			},
 			redo: () => {
 				if (!after) {
-					after = unwrapMeshUVs(scene, { nodeId: mesh.id }, options);
+					const layout = getMeshUvLayout(scene, { nodeId: mesh.id, offset: 0, limit: 1 });
+					after = unwrapMeshUVs(
+						scene,
+						{
+							nodeId: mesh.id,
+							expectedRevision: layout.revision,
+							padding,
+							relaxIterations,
+							relaxStrength,
+							allowRotation: this.state.uvAllowRotation,
+							autoSeams: true,
+							normalizeTexelDensity: true,
+						},
+						options
+					);
+					afterVertexStreams = this._captureUvVertexStreams(mesh);
+					afterMetadata = JSON.parse(JSON.stringify(mesh.metadata.babylonEditorUvLayout));
 				} else {
-					setMeshVertexData(scene, { nodeId: mesh.id, positions: after.positions, normals: after.normals, uvs: after.uvs, indices: after.indices }, options);
+					setMeshVertexData(
+						scene,
+						{
+							nodeId: mesh.id,
+							positions: after.positions,
+							normals: after.normals,
+							uvs: after.uvs,
+							indices: after.indices,
+							matricesIndices: after.matricesIndices,
+							matricesWeights: after.matricesWeights,
+							matricesIndicesExtra: after.matricesIndicesExtra,
+							matricesWeightsExtra: after.matricesWeightsExtra,
+						},
+						options
+					);
+					this._restoreUvVertexStreams(mesh, afterVertexStreams);
+					restoreMetadata(afterMetadata);
 				}
 			},
 			action: () => this.props.editor.layout.inspector.forceUpdate(),
 		});
-	}
-
-	private _getPhysics2DComponent(): ReactNode {
-		const mesh = this.props.object;
-		if (!isMesh(mesh)) {
-			return null;
-		}
-		const body = listPhysics2D(mesh.getScene()).bodies.find((candidate: any) => candidate.nodeId === mesh.id);
-		const physicsMaterials = listPhysics2DMaterials(mesh.getScene()).materials;
-		return (
-			<EditorInspectorSectionField
-				title="2D Physics"
-				tooltip="Lightweight X/Y-plane body, collider, trigger, and material simulation. Configure joints and numeric solver settings through MCP."
-			>
-				{!body ? (
-					<Button variant="secondary" className="w-full" onClick={() => this._setPhysics2DBody()}>
-						Add 2D Body
-					</Button>
-				) : (
-					<>
-						<div className="grid grid-cols-2 gap-2">
-							<select
-								className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-								value={body.bodyType}
-								onChange={(event) => this._setPhysics2DBody({ bodyType: event.target.value })}
-							>
-								<option value="dynamic">Dynamic</option>
-								<option value="static">Static</option>
-							</select>
-							<Button variant={body.isTrigger ? "default" : "secondary"} onClick={() => this._setPhysics2DBody({ isTrigger: !body.isTrigger })}>
-								{body.isTrigger ? "Trigger" : "Solid"}
-							</Button>
-						</div>
-						<div className="text-xs text-muted-foreground">
-							{body.collider.shape === "circle"
-								? `Circle radius ${body.collider.radius}`
-								: body.collider.shape === "polygon"
-									? `${body.collider.parts?.length > 1 ? "Concave" : "Convex"} polygon (${body.collider.points.length} vertices${body.collider.parts?.length > 1 ? `, ${body.collider.parts.length} parts` : ""})`
-									: `Box ${body.collider.size[0]} × ${body.collider.size[1]}`}{" "}
-							cm
-						</div>
-						<select
-							className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-							value={body.collider.shape}
-							onChange={(event) => this._setPhysics2DColliderShape(event.target.value)}
-						>
-							<option value="box">Box collider</option>
-							<option value="circle">Circle collider</option>
-							<option value="polygon">Polygon collider</option>
-						</select>
-						{body.collider.shape === "circle" ? (
-							<label className="flex items-center justify-between gap-2 text-sm">
-								Radius (cm)
-								<input
-									className="h-9 w-24 rounded-md border border-input bg-background px-3 text-sm"
-									type="number"
-									min={0.01}
-									step={1}
-									value={body.collider.radius}
-									onChange={(event) => this._setPhysics2DCircleRadius(event.target.value)}
-								/>
-							</label>
-						) : body.collider.shape === "polygon" ? (
-							<>
-								<label className="flex flex-col gap-1 text-sm">
-									<span>Vertices (local x,y; x,y…)</span>
-									<textarea
-										className="min-h-16 rounded-md border border-input bg-background p-2 font-mono text-xs"
-										defaultValue={body.collider.points.map((point: number[]) => point.join(",")).join("; ")}
-										onBlur={(event) => this._setPhysics2DPolygonVertices(event.currentTarget.value)}
-									/>
-								</label>
-								<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-									<Input
-										value={this.state.polygonColliderImagePath}
-										onChange={(event) => this.setState({ polygonColliderImagePath: event.currentTarget.value })}
-										placeholder="assets/sprite.png"
-										aria-label="Polygon collider source image"
-									/>
-									<div className="flex gap-2">
-										<Button
-											variant="secondary"
-											disabled={!this.state.polygonColliderImagePath.trim()}
-											onClick={() => this._generatePhysics2DPolygonCollider("convex")}
-										>
-											Convex Outline
-										</Button>
-										<Button
-											variant="secondary"
-											disabled={!this.state.polygonColliderImagePath.trim()}
-											onClick={() => this._generatePhysics2DPolygonCollider("concave")}
-										>
-											Concave Outline
-										</Button>
-									</div>
-								</div>
-							</>
-						) : (
-							<div className="grid grid-cols-2 gap-2">
-								<label className="flex items-center justify-between gap-2 text-sm">
-									W (cm)
-									<input
-										className="h-9 w-20 rounded-md border border-input bg-background px-3 text-sm"
-										type="number"
-										min={0.01}
-										step={1}
-										value={body.collider.size[0]}
-										onChange={(event) => this._setPhysics2DBoxSize(event.target.value, body.collider.size[1])}
-									/>
-								</label>
-								<label className="flex items-center justify-between gap-2 text-sm">
-									H (cm)
-									<input
-										className="h-9 w-20 rounded-md border border-input bg-background px-3 text-sm"
-										type="number"
-										min={0.01}
-										step={1}
-										value={body.collider.size[1]}
-										onChange={(event) => this._setPhysics2DBoxSize(body.collider.size[0], event.target.value)}
-									/>
-								</label>
-							</div>
-						)}
-						<select
-							className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-							value={body.materialId ?? ""}
-							onChange={(event) => this._setPhysics2DBody({ materialId: event.target.value || null })}
-						>
-							<option value="">No 2D material</option>
-							{physicsMaterials.map((material: any) => (
-								<option key={material.id} value={material.id}>
-									{material.name} ({material.friction} friction, {material.restitution} bounce)
-								</option>
-							))}
-						</select>
-						<Button variant="ghost" className="w-full hover:bg-destructive" onClick={() => this._removePhysics2DBody()}>
-							Remove 2D Body
-						</Button>
-					</>
-				)}
-			</EditorInspectorSectionField>
-		);
-	}
-
-	private _setPhysics2DBody(update: any = {}): void {
-		const mesh = this.props.object;
-		if (!isMesh(mesh)) {
-			return;
-		}
-		const current = listPhysics2D(mesh.getScene()).bodies.find((candidate: any) => candidate.nodeId === mesh.id);
-		setPhysics2DBody(
-			mesh.getScene(),
-			{
-				nodeId: mesh.id,
-				bodyType: current?.bodyType ?? "dynamic",
-				collider: current?.collider ?? { shape: "box", size: [100, 100] },
-				...update,
-			},
-			{ editor: this.props.editor }
-		);
-		this.forceUpdate();
-	}
-
-	private _setPhysics2DColliderShape(shape: string): void {
-		const mesh = this.props.object;
-		if (!isMesh(mesh)) {
-			return;
-		}
-		const body = listPhysics2D(mesh.getScene()).bodies.find((candidate: any) => candidate.nodeId === mesh.id);
-		const collider =
-			shape === "circle"
-				? { shape, radius: body?.collider.radius ?? 50 }
-				: shape === "polygon"
-					? {
-							shape,
-							points: body?.collider.points ?? [
-								[-50, -50],
-								[50, -50],
-								[50, 50],
-								[-50, 50],
-							],
-						}
-					: { shape: "box", size: body?.collider.size ?? [100, 100] };
-		this._setPhysics2DBody({ collider });
-	}
-
-	private _setPhysics2DPolygonVertices(value: string): void {
-		const points = value
-			.split(";")
-			.map((pair) => pair.split(",").map(Number))
-			.filter((point) => point.length === 2 && point.every(Number.isFinite));
-		if (points.length < 3) {
-			return;
-		}
-		this._setPhysics2DBody({ collider: { shape: "polygon", points } });
-	}
-
-	private async _generatePhysics2DPolygonCollider(outline: "convex" | "concave"): Promise<void> {
-		const mesh = this.props.object;
-		if (!isMesh(mesh)) {
-			return;
-		}
-		try {
-			await generatePhysics2DPolygonCollider(
-				mesh.getScene(),
-				{ nodeId: mesh.id, imagePath: this.state.polygonColliderImagePath.trim(), outline },
-				{ editor: this.props.editor }
-			);
-			this.forceUpdate();
-		} catch (error) {
-			toast.error(error instanceof Error ? error.message : "Could not generate the polygon collider.");
-		}
-	}
-
-	private _setPhysics2DCircleRadius(value: string): void {
-		const radius = Number(value);
-		if (radius > 0) {
-			this._setPhysics2DBody({ collider: { shape: "circle", radius } });
-		}
-	}
-
-	private _setPhysics2DBoxSize(widthValue: string | number, heightValue: string | number): void {
-		const width = Number(widthValue);
-		const height = Number(heightValue);
-		if (width > 0 && height > 0) {
-			this._setPhysics2DBody({ collider: { shape: "box", size: [width, height] } });
-		}
-	}
-
-	private _removePhysics2DBody(): void {
-		const mesh = this.props.object;
-		if (!isMesh(mesh)) {
-			return;
-		}
-		removePhysics2DBody(mesh.getScene(), { nodeId: mesh.id }, { editor: this.props.editor });
-		this.forceUpdate();
-	}
-
-	private _getPhysics2DEffectorComponent(): ReactNode {
-		const mesh = this.props.object;
-		if (!isMesh(mesh)) {
-			return null;
-		}
-		const effector = listPhysics2DEffectors(mesh.getScene()).effectors.find((candidate: any) => candidate.nodeId === mesh.id);
-		return (
-			<EditorInspectorSectionField title="2D Effector" tooltip="Point, Area, Surface, or one-way Platform behavior in the local X/Y plane.">
-				{!effector ? (
-					<Button variant="secondary" className="w-full" onClick={() => this._createPhysics2DEffector()}>
-						Add Point Effector
-					</Button>
-				) : (
-					<>
-						<select
-							className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-							value={effector.type ?? "point"}
-							onChange={(event) => this._setPhysics2DEffector(effector, { type: event.target.value })}
-						>
-							<option value="point">Point (attract / repel)</option>
-							<option value="area">Area (directional)</option>
-							<option value="surface">Surface (tangential ring)</option>
-							<option value="platform">Platform (one-way collision)</option>
-						</select>
-						<label className="flex items-center justify-between gap-2 text-sm">
-							Radius (cm)
-							<input
-								className="h-9 w-24 rounded-md border border-input bg-background px-3 text-sm"
-								type="number"
-								min={0.01}
-								step={1}
-								value={effector.radius}
-								onChange={(event) => this._setPhysics2DEffectorNumber(effector, "radius", event.target.value)}
-							/>
-						</label>
-						<label className="flex items-center justify-between gap-2 text-sm">
-							Force
-							<input
-								className="h-9 w-24 rounded-md border border-input bg-background px-3 text-sm"
-								type="number"
-								step={1}
-								value={effector.force}
-								onChange={(event) => this._setPhysics2DEffectorNumber(effector, "force", event.target.value)}
-							/>
-						</label>
-						<label className="flex items-center justify-between gap-2 text-sm">
-							Falloff
-							<input
-								className="h-9 w-24 rounded-md border border-input bg-background px-3 text-sm"
-								type="number"
-								min={0}
-								step={0.1}
-								value={effector.falloff}
-								onChange={(event) => this._setPhysics2DEffectorNumber(effector, "falloff", event.target.value)}
-							/>
-						</label>
-						{effector.type === "area" && (
-							<label className="flex items-center justify-between gap-2 text-sm">
-								Angle (deg)
-								<input
-									className="h-9 w-24 rounded-md border border-input bg-background px-3 text-sm"
-									type="number"
-									step={1}
-									value={effector.forceAngle ?? 0}
-									onChange={(event) => this._setPhysics2DEffectorNumber(effector, "forceAngle", event.target.value)}
-								/>
-							</label>
-						)}
-						{effector.type === "surface" && (
-							<label className="flex items-center justify-between gap-2 text-sm">
-								Ring thickness (cm)
-								<input
-									className="h-9 w-24 rounded-md border border-input bg-background px-3 text-sm"
-									type="number"
-									min={0.01}
-									step={1}
-									value={effector.surfaceThickness ?? 20}
-									onChange={(event) => this._setPhysics2DEffectorNumber(effector, "surfaceThickness", event.target.value)}
-								/>
-							</label>
-						)}
-						{effector.type === "platform" && (
-							<label className="flex items-center justify-between gap-2 text-sm">
-								Surface side (deg)
-								<input
-									className="h-9 w-24 rounded-md border border-input bg-background px-3 text-sm"
-									type="number"
-									step={1}
-									value={effector.platformAngle ?? 90}
-									onChange={(event) => this._setPhysics2DEffectorNumber(effector, "platformAngle", event.target.value)}
-								/>
-							</label>
-						)}
-						<Button variant="ghost" className="w-full hover:bg-destructive" onClick={() => this._deletePhysics2DEffector(effector.id)}>
-							Remove Effector
-						</Button>
-					</>
-				)}
-			</EditorInspectorSectionField>
-		);
-	}
-
-	private _createPhysics2DEffector(): void {
-		const mesh = this.props.object;
-		if (!isMesh(mesh)) {
-			return;
-		}
-		createPhysics2DEffector(mesh.getScene(), { nodeId: mesh.id }, { editor: this.props.editor });
-		this.forceUpdate();
-	}
-
-	private _setPhysics2DEffector(effector: any, update: any): void {
-		setPhysics2DEffector(this.props.object.getScene(), { id: effector.id, ...update }, { editor: this.props.editor });
-		this.forceUpdate();
-	}
-
-	private _setPhysics2DEffectorNumber(effector: any, property: "radius" | "force" | "falloff" | "forceAngle" | "surfaceThickness" | "platformAngle", value: string): void {
-		const number = Number(value);
-		if (
-			Number.isFinite(number) &&
-			(property === "force" || property === "forceAngle" || property === "platformAngle" || number >= 0) &&
-			(!["radius", "surfaceThickness"].includes(property) || number > 0)
-		) {
-			this._setPhysics2DEffector(effector, { [property]: number });
-		}
-	}
-
-	private _deletePhysics2DEffector(id: string): void {
-		deletePhysics2DEffector(this.props.object.getScene(), { id }, { editor: this.props.editor });
-		this.forceUpdate();
 	}
 
 	private _getMaterialInspectorComponent(material: Material): ReactNode {
@@ -1741,7 +2443,7 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 				return <EditorStandardMaterialInspector mesh={this.props.object} material={this.props.object.material as StandardMaterial} />;
 
 			case "NodeMaterial":
-				return <EditorNodeMaterialInspector mesh={this.props.object} material={this.props.object.material as NodeMaterial} />;
+				return <EditorNodeMaterialInspector mesh={this.props.object} material={this.props.object.material as NodeMaterial} editor={this.props.editor} />;
 
 			case "MultiMaterial":
 				return <EditorMultiMaterialInspector editor={this.props.editor} material={this.props.object.material as MultiMaterial} />;

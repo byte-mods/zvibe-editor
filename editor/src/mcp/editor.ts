@@ -1,8 +1,17 @@
-import { Engine, EngineInstrumentation, Scene, Tools } from "babylonjs";
+import { Engine, EngineInstrumentation, Scene } from "babylonjs";
 
 import { getUndoRedoState, redo, undo } from "../tools/undoredo";
 
 import { IMCPActionOptions } from "./action";
+
+export {
+	activateDeviceSimulatorProfile,
+	deleteDeviceSimulatorProfile,
+	getDeviceSimulation,
+	listDeviceSimulatorProfiles,
+	setDeviceSimulation,
+	setDeviceSimulatorProfile,
+} from "./device/simulation";
 
 const engineInstrumentation = new WeakMap<Engine, EngineInstrumentation>();
 
@@ -46,6 +55,15 @@ export function getEditorStatus(scene: Scene, _data: any, options: IMCPActionOpt
 	};
 }
 
+/** Applies the visible Inspector field filter through the same state owner as direct UI input. */
+export function setInspectorSearchQuery(_scene: Scene, data: any, options: IMCPActionOptions): any {
+	if (typeof data.query !== "string" || data.query.length > 128) {
+		throw new Error("Inspector search query must be a string of at most 128 characters.");
+	}
+	options.editor.layout.inspector.setSearch(data.query);
+	return { query: data.query };
+}
+
 /**
  * Gets the editor feature areas exposed by this version of the MCP bridge.
  */
@@ -58,9 +76,44 @@ export function getEditorCapabilities(_scene: Scene, _data: any, options: IMCPAc
 			nodes: true,
 			meshes: true,
 			lights: true,
+			lighting2D: true,
+			lightingSearchWorkspace: true,
+			lightingSearchQueryTree: true,
+			lightingSearchLightmapPreview: true,
+			lightingSearchBatchEditing: true,
+			light2DProviderRegistry: true,
+			shadowShape2DProviderLifecycle: true,
+			lighting2DEditPlayDiagnostics: true,
 			cameras: true,
 			rendering: true,
+			occlusionCulling: true,
+			bakedOcclusionPvs: true,
+			occlusionAreas: true,
+			occlusionVisualization: true,
+			dynamicOcclusionQueries: true,
+			onTileValidation: true,
+			onTilePostProcessing: true,
+			tileOnlyRendererExtensions: true,
+			onTileRuntimeSuppression: true,
+			onTileNativeMemoryEvidence: false,
 			materials: true,
+			shaderGraphTemplates: true,
+			shaderGraphMultiCaseSwitch: true,
+			shaderGraphStaticSubgraphInputs: true,
+			shaderGraphReflectedFunctions: true,
+			shaderGraphFloatModes: true,
+			vfxGraphTemplates: true,
+			vfxGraphTemplateSearchAndFiltering: true,
+			vfxBatchReleaseOnDisable: true,
+			guiUXMLUpgradeService: true,
+			guiPanelRenderer: true,
+			guiWorldSpacePanelRenderer: true,
+			guiUSSStatistics: true,
+			guiStylesheetStaging: true,
+			guiVisualElementReferences: true,
+			guiAttributeOverrides: true,
+			guiRetainedAnimations: true,
+			guiWorldSpaceTestClicks: true,
 			assets: true,
 			persistentAssetRegistry: true,
 			assetRegistryDuplicateGuidRepair: true,
@@ -77,22 +130,142 @@ export function getEditorCapabilities(_scene: Scene, _data: any, options: IMCPAc
 			assetImportStateDiagnostics: true,
 			typedAssetImporters: true,
 			buildAwareAssetImporters: true,
+			textureInspectorChannelPreview: true,
 			particles: true,
 			sounds: true,
+			scriptableAudioGenerators: true,
 			animationGroups: true,
 			animatorControllers: true,
 			animatorRuntime: true,
+			entitiesECS: true,
+			ecsTypedChunks: true,
+			ecsIncrementalBaking: true,
+			ecsSceneStreaming: true,
+			ecsCompiledSystems: true,
+			ecsDependencyScheduling: true,
+			ecsWorkerExecution: true,
+			ecsDeferredCommands: true,
+			ecsDebugger: true,
+			ecsExactRevisionAuthoring: true,
+			ecsHierarchyPreferences: true,
+			ecsSystemQuickSearch: true,
+			ecsNamespaceFiltering: true,
+			ecsAssemblyTypeRegistrationPolicy: true,
 			terrain: true,
 			splines: true,
 			virtualCameras: true,
 			diagnostics: true,
+			renderDebugViews: true,
+			portableProfiler: true,
+			profilerCpuHierarchy: true,
+			profilerMemorySnapshots: true,
+			profilerAssetLoadingEvents: true,
+			profilerScriptMarkers: true,
+			profilerEditPlayTargets: true,
+			profilerConnectedPlayers: true,
+			profilerPortableReports: true,
+			profiler2DAtlasUsage: true,
 			inputActions: true,
 			inputActionsRuntime: true,
 			audioMixer: true,
 			buildProfiles: true,
+			buildProfileFooterExtensionActions: true,
+			buildPipelineExactRevisions: true,
+			buildPipelineIncrementalCache: true,
+			buildPipelineSigningEnvironment: true,
+			buildPipelineStageReports: true,
+			buildPipelineBackgroundJobs: true,
+			androidBuildProfileLtoAndInitializationMarkers: true,
+			shaderVariantAutomaticTracingAndPrewarming: true,
+			linuxArm64DedicatedServerPublicSourceBuild: true,
+			webBuildModuleStrippingEvidence: true,
+			webAssembly2023BuildProfiles: true,
+			emscripten4019AdapterValidation: true,
+			browserNativeImageCodecEvidence: true,
+			developmentBuildCodeCoverage: true,
+			serializationSessionDiagnostics: true,
+			packageManagerSamplesView: true,
+			packageManagerSampleImages: true,
+			packageManagerSampleLocate: true,
+			packageManagerSamplePublishDateSort: true,
+			developmentPackageTechnicalNameEditing: true,
+			packageManagerDetailCards: true,
+			platformCapabilityInventory: true,
+			platformToolchainDiagnostics: true,
+			platformScaffolds: true,
+			installedPlatformRestartFlow: true,
+			experimentalSwiftIosProjectGeneration: true,
+			deviceSimulatorProfiles: true,
+			deviceSimulatorSystemClasses: true,
+			remoteDeviceLab: true,
+			remoteDeviceLogs: true,
+			remoteDeviceMetrics: true,
+			remoteDeviceScreenshots: true,
+			remoteDevicePointerInput: true,
+			dedicatedServerScaffold: true,
+			productionHeadlessSceneRuntime: true,
+			serverAuthoritativeRuntime: true,
+			serverContainerPipeline: true,
+			serverKubernetesDeployment: true,
+			serverFleetWorkflows: true,
+			licensedConsoleProviders: true,
+			mobileNativeWrapperScaffolds: true,
+			mobileTouchControls: true,
+			mobileTouchLayoutWorkspace: true,
+			mobileNativePackaging: true,
+			mobileEnvironmentSigning: true,
+			mobileConnectedDevices: true,
+			mobileBoundedLogCapture: true,
+			mobileStoreSubmissionPlans: true,
+			adaptivePerformanceBasicProvider: true,
+			adaptivePerformanceAppleBridge: true,
+			adaptivePerformanceScalers: true,
+			adaptivePerformanceThermalSimulation: true,
+			androidWindowInsetPolicy: true,
+			androidWindowInsetsNativeBridge: true,
+			iosThermalFrameRateControl: true,
+			visionOSMinimumTargetVersion: true,
+			portableGrpcWebTransport: true,
+			portableConnectTransport: true,
+			grpcResponseTrailers: true,
+			webXRPlatformIntegration: true,
+			webXRSessionLifecycle: true,
+			webXRInteractionToolkit: true,
+			webXRDesktopSimulation: true,
+			webXRTargetValidation: true,
+			webXRExactRevisionAuthoring: true,
+			buildAndRun: true,
+			projectServices: true,
+			projectServiceEnvironments: true,
+			projectServiceDeploymentPlans: true,
+			projectServicesEmulator: true,
+			projectServicesPortableRuntimeClient: true,
+			sourceControlWorkspace65: true,
+			sourceControlBranchExplorer: true,
+			sourceControlChangesetDiffProperties: true,
+			sourceControlFolderActions: true,
+			sourceControlPartialShelvesetApply: true,
+			sourceControlPersistentSplitters: true,
+			sourceControlF2RefRename: true,
+			networkingTransport: true,
+			networkReplication: true,
+			networkPredictionReconciliation: true,
+			gameplaySessionHost: true,
+			gameplayLobbyRelay: true,
+			multiplayerPlayMode: true,
+			networkSimulation: true,
 			reflectionProbes: true,
 			materialVariants: true,
 			physicsConstraints: true,
+			hybridPhysicsSolver: true,
+			directPhysicsConstraintRows: true,
+			iterativePhysicsContactCoupling: true,
+			physicsGearCouplings: true,
+			chainGearsPhysicsSample: true,
+			physicsContactCapture: true,
+			physicsContactHistoryAssets: true,
+			physicsContactHistoryReplay: true,
+			physicsForceVisualization: true,
 			navAgents: true,
 			navOffMeshLinks: true,
 			navAgentPathFollowing: true,
@@ -102,7 +275,14 @@ export function getEditorCapabilities(_scene: Scene, _data: any, options: IMCPAc
 			humanoidMuscleLimits: true,
 			humanoidAvatarMasks: true,
 			clothPhysics: true,
+			clothConstraintPainting: true,
+			clothTriangleColliders: true,
 			physics2D: true,
+			physics2DWorlds: true,
+			physics2DCustomTransformPlanes: true,
+			physics2DTransformWriteEvents: true,
+			physics2DPerWorldContactFiltering: true,
+			physics2DMultiCameraDebugRendering: true,
 			proBuilderFaceExtrusion: true,
 			proBuilderCSG: true,
 			proBuilderBridge: true,
@@ -120,11 +300,72 @@ export function getEditorCapabilities(_scene: Scene, _data: any, options: IMCPAc
 			prefabRootApplyRevert: true,
 			prefabNestedApplyRevert: true,
 			visualScripting: true,
+			visualScriptingFlowGraphs: true,
+			visualScriptingStateGraphs: true,
+			visualScriptingCustomUnits: true,
+			visualScriptingDebugger: true,
+			visualScriptingExportRuntime: true,
+			graphToolkitExpressions: true,
+			graphToolkitUntypedPorts: true,
+			graphToolkitMultilinePortsAndOptions: true,
+			graphToolkitCustomTypeStyles: true,
+			graphToolkitEditableCollections: true,
+			guiCanvasGroups: true,
+			guiRaycastReceivers: true,
+			guiLocalUsageTracking: true,
+			inspectorStyledCollections: true,
 			sceneTestRunner: true,
+			versionedTestSuites: true,
+			editModeTests: true,
+			playModeTests: true,
+			connectedPlayerTests: true,
+			performanceTestSampling: true,
+			visualTestCases: true,
+			projectCodeTests: true,
+			compileTimeSerializationDiagnostics: true,
+			asynchronousProjectAuditor: true,
+			projectAuditorParticleTextureReadability: true,
+			projectAuditorObsoleteApis: true,
+			projectAuditorAtlasWaste: true,
+			linuxPlayerLtoModes: true,
+			linuxPlayerIme: true,
+			macosDisplayLinkFramePacing: true,
+			platformPlayerRuntimeEvidence: true,
+			windowsAssetStreamingBuildProfiles: true,
+			portableAsyncAssetStreaming: true,
+			assetStreamingRuntimeDiagnostics: true,
+			nativeMicrosoftDirectStorageAdapter: false,
+			headlessTestCli: true,
+			testReports: true,
 			addressablesCatalog: true,
 			addressablesRuntime: true,
+			addressablesProfiles: true,
+			addressablesContentUpdates: true,
+			addressablesRemoteCatalogs: true,
+			addressablesDeployment: true,
+			addressablesBuildReports: true,
+			addressablesRuntimeCache: true,
+			addressablesSharedTypeTrees: true,
+			addressablesPortableBundles: true,
 			localizationRuntime: true,
 			behaviorTrees: true,
+			behaviorGraphBlackboard: true,
+			behaviorGraphSubgraphs: true,
+			behaviorGraphEvents: true,
+			behaviorGraphUtilityAI: true,
+			behaviorGraphNavigation: true,
+			behaviorGraphCustomNodes: true,
+			behaviorGraphDebugger: true,
+			behaviorGraphExportRuntime: true,
+			runtimeAiInference: true,
+			onnxModelAssets: true,
+			liteRtModelAssets: true,
+			pytorchExportModelAssets: true,
+			runtimeAiWasm: true,
+			runtimeAiWebGpu: typeof navigator !== "undefined" && "gpu" in navigator && !!navigator.gpu,
+			runtimeAiLiteRt: true,
+			runtimeAiExportedPyTorch: true,
+			runtimeAiModelGraphs: true,
 			projectPackages: true,
 			sourceControlStatus: true,
 			collaborationAssetLocks: true,
@@ -144,9 +385,26 @@ export function getEditorCapabilities(_scene: Scene, _data: any, options: IMCPAc
 			navMesh: true,
 			ragdoll: true,
 			sprites: true,
+			weightedSpriteSkinning: true,
+			spriteBonePainting: true,
+			psdSpriteRigging: true,
+			spriteAnimationWorkspace: true,
 			gui: true,
 			cinematic: true,
+			cinematicTimelineV2: true,
+			cinematicExactRevisionAuthoring: true,
+			cinematicDeterministicPreview: true,
+			cinematicDeterministicVisualCapture: true,
+			cinematicBuiltInAudioCapture: true,
+			cinematicOfflineMasterBusCapture: true,
 			projectPreferences: true,
+			projectPlayerSettings: true,
+			projectSettingsExactRevisions: true,
+			projectSettingsPlatformOverrides: true,
+			importAccelerator: true,
+			importAcceleratorMcpManagement: true,
+			editorUserPreferences: true,
+			editorPreferencesExactRevisions: true,
 			export: true,
 			editorControls: true,
 		},
@@ -197,7 +455,7 @@ export async function setPreviewPlayMode(_scene: Scene, data: any, options: IMCP
 			break;
 		case "stop":
 			if (play.state.playing) {
-				play.stop();
+				await new Promise<void>((resolve) => play.stop(resolve));
 			}
 			break;
 		case "restart":
@@ -239,203 +497,22 @@ export function getSceneDiagnostics(scene: Scene): any {
 	};
 }
 
-function deviceSimulation(scene: Scene): any {
-	scene.metadata ??= {};
-	return (scene.metadata.babylonEditorDeviceSimulation ??= { enabled: false, width: 1170, height: 2532, dpi: 460, orientation: "portrait", safeArea: [0, 0, 0, 0] });
-}
-
-/** Gets the persisted editor preview device simulator profile. */
-export function getDeviceSimulation(scene: Scene): any {
-	return structuredClone(deviceSimulation(scene));
-}
-
-/** Sets a persisted preview device profile and resizes the live Babylon engine view when enabled. */
-export function setDeviceSimulation(scene: Scene, data: any, options: any): any {
-	const current = deviceSimulation(scene);
-	const next = {
-		...current,
-		...data,
-		safeArea: data.safeArea ?? current.safeArea,
-	};
-	if (!Number.isInteger(next.width) || next.width < 160 || next.width > 16384 || !Number.isInteger(next.height) || next.height < 160 || next.height > 16384) {
-		throw new Error("Device simulation width and height must be integers from 160 to 16384 pixels.");
-	}
-	if (!Number.isFinite(next.dpi) || next.dpi <= 0 || next.dpi > 2000) {
-		throw new Error("Device simulation dpi must be greater than 0 and no more than 2000.");
-	}
-	if (!["portrait", "landscape"].includes(next.orientation)) {
-		throw new Error("Device simulation orientation must be portrait or landscape.");
-	}
-	if (!Array.isArray(next.safeArea) || next.safeArea.length !== 4 || next.safeArea.some((value: any) => !Number.isFinite(value) || value < 0)) {
-		throw new Error("safeArea must be [top, right, bottom, left] non-negative pixels.");
-	}
-	const [top, right, bottom, left] = next.safeArea;
-	if (top + bottom >= next.height || left + right >= next.width) {
-		throw new Error("safeArea must leave a positive visible area.");
-	}
-	Object.assign(current, next);
-	const dimensions = next.orientation === "landscape" ? { width: next.height, height: next.width } : { width: next.width, height: next.height };
-	options.editor?.layout?.preview?.setDeviceSimulation(next.enabled ? { ...dimensions, dpi: next.dpi, safeArea: next.safeArea } : null);
-	options.editor?.layout?.inspector?.forceUpdate();
-	return structuredClone(current);
-}
-
-function snapshots(scene: Scene): any[] {
-	scene.metadata ??= {};
-	return (scene.metadata.babylonEditorProfilerSnapshots ??= []);
-}
-
-type IProfilerCaptureRuntime = { observer: any; elapsedMilliseconds: number };
-const profilerCaptureRuntimes = new WeakMap<Scene, Map<string, IProfilerCaptureRuntime>>();
-
-function captures(scene: Scene): any[] {
-	scene.metadata ??= {};
-	return (scene.metadata.babylonEditorProfilerCaptures ??= []);
-}
-
-function captureRuntime(scene: Scene): Map<string, IProfilerCaptureRuntime> {
-	let values = profilerCaptureRuntimes.get(scene);
-	if (!values) {
-		profilerCaptureRuntimes.set(scene, (values = new Map()));
-	}
-	return values;
-}
-
-function summarizeCapture(capture: any): any {
-	const samples = capture.samples ?? [];
-	const summary: any = {};
-	for (const key of Object.keys(samples[0]?.metrics ?? {})) {
-		const values = samples.map((sample: any) => sample.metrics[key]).filter((value: unknown) => typeof value === "number" && Number.isFinite(value));
-		if (!values.length) {
-			continue;
-		}
-		summary[key] = { min: Math.min(...values), max: Math.max(...values), average: values.reduce((total: number, value: number) => total + value, 0) / values.length };
-	}
-	return summary;
-}
-
-function describeCapture(capture: any, includeSamples = false): any {
-	return {
-		id: capture.id,
-		name: capture.name,
-		startedAt: capture.startedAt,
-		stoppedAt: capture.stoppedAt ?? null,
-		sampleIntervalMs: capture.sampleIntervalMs,
-		maxSamples: capture.maxSamples,
-		sampleCount: capture.samples.length,
-		summary: summarizeCapture(capture),
-		...(includeSamples ? { samples: structuredClone(capture.samples) } : {}),
-	};
-}
-
-/** Lists bounded profiler captures and numeric summaries without returning every sample. */
-export function listProfilerCaptures(scene: Scene): any {
-	const active = captureRuntime(scene);
-	return { captures: captures(scene).map((capture) => ({ ...describeCapture(capture), active: active.has(capture.id) })) };
-}
-
-/** Reads one profiler capture including its timestamped samples. */
-export function getProfilerCapture(scene: Scene, data: any): any {
-	const capture = captures(scene).find((candidate) => candidate.id === data.id || candidate.name === data.name);
-	if (!capture) {
-		throw new Error("Profiler capture not found. Provide id (preferred) or name.");
-	}
-	return { ...describeCapture(capture, true), active: captureRuntime(scene).has(capture.id) };
-}
-
-/** Starts a bounded sampling capture of the preview renderer and scene metrics. */
-export function startProfilerCapture(scene: Scene, data: any, options: any): any {
-	if (!data.name?.trim()) {
-		throw new Error("Profiler capture name is required.");
-	}
-	const sampleIntervalMs = data.sampleIntervalMs ?? 100;
-	const maxSamples = data.maxSamples ?? 600;
-	if (!Number.isInteger(sampleIntervalMs) || sampleIntervalMs < 1 || sampleIntervalMs > 10000) {
-		throw new Error("sampleIntervalMs must be an integer from 1 to 10000.");
-	}
-	if (!Number.isInteger(maxSamples) || maxSamples < 1 || maxSamples > 36000) {
-		throw new Error("maxSamples must be an integer from 1 to 36000.");
-	}
-	if (captures(scene).some((capture) => capture.name === data.name && !capture.stoppedAt)) {
-		throw new Error(`Profiler capture "${data.name}" is already active.`);
-	}
-	const capture = { id: data.id ?? Tools.RandomId(), name: data.name, startedAt: new Date().toISOString(), sampleIntervalMs, maxSamples, samples: [] as any[] };
-	captures(scene).push(capture);
-	const runtime: IProfilerCaptureRuntime = { observer: null, elapsedMilliseconds: sampleIntervalMs };
-	runtime.observer = scene.onBeforeRenderObservable.add(() => {
-		runtime.elapsedMilliseconds += Math.max(0, scene.getEngine().getDeltaTime());
-		if (runtime.elapsedMilliseconds < capture.sampleIntervalMs) {
-			return;
-		}
-		runtime.elapsedMilliseconds %= capture.sampleIntervalMs;
-		capture.samples.push({ capturedAt: new Date().toISOString(), metrics: getSceneDiagnostics(scene) });
-		if (capture.samples.length >= capture.maxSamples) {
-			stopProfilerCapture(scene, { id: capture.id }, options);
-		}
-	});
-	captureRuntime(scene).set(capture.id, runtime);
-	options.editor?.layout?.inspector?.forceUpdate();
-	return { ...describeCapture(capture), active: true };
-}
-
-/** Stops an active profiler capture while retaining its collected samples and summary. */
-export function stopProfilerCapture(scene: Scene, data: any, options: any): any {
-	const capture = captures(scene).find((candidate) => candidate.id === data.id || candidate.name === data.name);
-	if (!capture) {
-		throw new Error("Profiler capture not found. Provide id (preferred) or name.");
-	}
-	const runtime = captureRuntime(scene).get(capture.id);
-	if (runtime) {
-		scene.onBeforeRenderObservable.remove(runtime.observer);
-	}
-	captureRuntime(scene).delete(capture.id);
-	capture.stoppedAt ??= new Date().toISOString();
-	options?.editor?.layout?.inspector?.forceUpdate();
-	return { ...describeCapture(capture), active: false };
-}
-
-/** Deletes an inactive profiler capture and its sampled metrics. */
-export function deleteProfilerCapture(scene: Scene, data: any, options: any): any {
-	const index = captures(scene).findIndex((candidate) => candidate.id === data.id || candidate.name === data.name);
-	if (index === -1) {
-		throw new Error("Profiler capture not found. Provide id (preferred) or name.");
-	}
-	const capture = captures(scene)[index];
-	if (captureRuntime(scene).has(capture.id)) {
-		stopProfilerCapture(scene, { id: capture.id }, options);
-	}
-	captures(scene).splice(index, 1);
-	options?.editor?.layout?.inspector?.forceUpdate();
-	return { deleted: true, id: capture.id };
-}
-/** Lists persisted profiler snapshots. */
-export function listProfilerSnapshots(scene: Scene): any {
-	return { snapshots: structuredClone(snapshots(scene)) };
-}
-/** Captures the current renderer diagnostics under a reusable name. */
-export function captureProfilerSnapshot(scene: Scene, data: any): any {
-	const value = { id: data.id ?? `${Date.now()}`, name: data.name, capturedAt: new Date().toISOString(), metrics: getSceneDiagnostics(scene) };
-	const index = snapshots(scene).findIndex((snapshot) => snapshot.name === value.name);
-	if (index === -1) {
-		snapshots(scene).push(value);
-	} else {
-		snapshots(scene)[index] = value;
-	}
-	return structuredClone(value);
-}
-/** Compares two persisted profiler snapshots metric-by-metric. */
-export function compareProfilerSnapshots(scene: Scene, data: any): any {
-	const find = (name: string) => snapshots(scene).find((snapshot) => snapshot.id === name || snapshot.name === name);
-	const baseline = find(data.baseline),
-		current = find(data.current);
-	if (!baseline || !current) {
-		throw new Error("Both profiler snapshots must exist.");
-	}
-	const delta: any = {};
-	for (const key of Object.keys(current.metrics)) {
-		if (typeof current.metrics[key] === "number" && typeof baseline.metrics[key] === "number") {
-			delta[key] = current.metrics[key] - baseline.metrics[key];
-		}
-	}
-	return { baseline: baseline.name, current: current.name, delta };
-}
+export {
+	captureProfilerSnapshot,
+	clearProfilerData,
+	compareProfilerSnapshots,
+	deleteProfilerCapture,
+	deleteProfilerSnapshot,
+	exportProfilerCapture,
+	getProfilerCapabilities,
+	getProfilerCapture,
+	getProfiler2DState,
+	getProfilerRunStatus,
+	getProfilerState,
+	importProfilerCapture,
+	listProfilerCaptures,
+	listProfilerSnapshots,
+	shutdownProfiling,
+	startProfilerCapture,
+	stopProfilerCapture,
+} from "./profiling/runner";

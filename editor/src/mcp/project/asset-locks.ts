@@ -1,20 +1,24 @@
 import { createHash, randomUUID } from "crypto";
-import { mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "fs/promises";
-import { dirname, join, normalize, relative, resolve } from "path/posix";
+import { open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "fs/promises";
+import { dirname, join, relative, resolve } from "path";
+import { normalize } from "path/posix";
 
 import { Scene } from "babylonjs";
 
 import { IMCPActionOptions } from "../action";
-import { resolveProjectCollaborationActor } from "./collaboration";
+import { IProjectAssetLockRule, projectAssetLockRuleMatches, readProjectAssetLockRules } from "./asset-lock-rules";
+import { getProjectCollaborationStatus, resolveProjectCollaborationActor } from "./collaboration";
+import { ensureProjectStoreDirectory, inspectProjectStoreDirectory, projectPathContains } from "./project-store";
+import { inspectProjectSourceControlLockFreshness } from "./source-control";
 
-const assetLockVersion = 2;
+const assetLockVersion = 3;
 const defaultTtlSeconds = 1800;
 const minimumTtlSeconds = 30;
 const maximumTtlSeconds = 604800;
 const operationGuardStaleMilliseconds = 10000;
 
 export interface IProjectAssetLock {
-	version: 1 | 2;
+	version: 1 | 2 | 3;
 	path: string;
 	owner: string;
 	memberId?: string;
@@ -24,6 +28,18 @@ export interface IProjectAssetLock {
 	createdAt: string;
 	updatedAt: string;
 	expiresAt: string;
+	smartLock?: {
+		ruleId: string;
+		ruleName: string;
+		retention: "manual" | "untilMerged";
+		acquisitionBranch: string;
+		acquisitionHeadHash: string;
+		destinationBranch: string;
+		destinationRemote: string | null;
+		destinationHash: string;
+		acquisitionAssetHash: string | null;
+		destinationAssetHash: string | null;
+	};
 }
 
 function projectDirectory(options: IMCPActionOptions): string {
@@ -70,7 +86,7 @@ function validateTtlSeconds(value: unknown): number {
 	return ttlSeconds as number;
 }
 
-async function validateAssetPath(root: string, value: unknown): Promise<string> {
+function validateAssetLockPath(value: unknown): string {
 	if (typeof value !== "string" || !value.trim() || value.includes("\0")) {
 		throw new Error("path must be a non-empty project-relative asset or editor-file path.");
 	}
@@ -79,11 +95,16 @@ async function validateAssetPath(root: string, value: unknown): Promise<string> 
 	if (path === "." || path.startsWith("/") || path.split("/").includes("..") || path.startsWith(".babylon-editor/asset-locks")) {
 		throw new Error("path must stay inside the active project and cannot target the asset-lock store.");
 	}
+	return path;
+}
+
+async function validateAssetPath(root: string, value: unknown): Promise<string> {
+	const path = validateAssetLockPath(value);
 	const absolute = resolve(root, path);
 	const [realRoot, realTarget, targetStat] = await Promise.all([realpath(root), realpath(absolute), stat(absolute)]).catch(() => {
 		throw new Error(`Cannot lock missing project file: ${path}`);
 	});
-	if (realTarget !== realRoot && !realTarget.startsWith(`${realRoot}/`)) {
+	if (!projectPathContains(realRoot, realTarget)) {
 		throw new Error("path must resolve inside the active project.");
 	}
 	if (!targetStat.isFile()) {
@@ -94,7 +115,7 @@ async function validateAssetPath(root: string, value: unknown): Promise<string> 
 
 function isAssetLock(value: any): value is IProjectAssetLock {
 	return (
-		(value?.version === 1 || value?.version === assetLockVersion) &&
+		(value?.version === 1 || value?.version === 2 || value?.version === 3) &&
 		typeof value.path === "string" &&
 		typeof value.owner === "string" &&
 		typeof value.lockId === "string" &&
@@ -103,7 +124,35 @@ function isAssetLock(value: any): value is IProjectAssetLock {
 		(value.clientName === undefined || typeof value.clientName === "string") &&
 		Number.isFinite(Date.parse(value.createdAt)) &&
 		Number.isFinite(Date.parse(value.updatedAt)) &&
-		Number.isFinite(Date.parse(value.expiresAt))
+		Number.isFinite(Date.parse(value.expiresAt)) &&
+		(value.smartLock === undefined ||
+			(typeof value.smartLock?.ruleId === "string" &&
+				typeof value.smartLock.ruleName === "string" &&
+				(value.smartLock.retention === "manual" || value.smartLock.retention === "untilMerged") &&
+				typeof value.smartLock.acquisitionBranch === "string" &&
+				/^[a-f0-9]{40,64}$/i.test(value.smartLock.acquisitionHeadHash) &&
+				typeof value.smartLock.destinationBranch === "string" &&
+				(value.smartLock.destinationRemote === null || typeof value.smartLock.destinationRemote === "string") &&
+				/^[a-f0-9]{40,64}$/i.test(value.smartLock.destinationHash) &&
+				(value.smartLock.acquisitionAssetHash === null || /^[a-f0-9]{40,64}$/i.test(value.smartLock.acquisitionAssetHash)) &&
+				(value.smartLock.destinationAssetHash === null || /^[a-f0-9]{40,64}$/i.test(value.smartLock.destinationAssetHash))))
+	);
+}
+
+function matchingSmartLockRules(rules: IProjectAssetLockRule[], path: string): IProjectAssetLockRule[] {
+	return rules.filter((rule) => projectAssetLockRuleMatches(rule, path));
+}
+
+async function smartLockFreshness(rule: IProjectAssetLockRule, path: string, options: IMCPActionOptions, acquisitionHeadHash?: string): Promise<any> {
+	return inspectProjectSourceControlLockFreshness(
+		{} as Scene,
+		{
+			path,
+			destinationBranch: rule.destinationBranch,
+			destinationRemote: rule.destinationRemote,
+			acquisitionHeadHash,
+		},
+		options
 	);
 }
 
@@ -148,9 +197,40 @@ function isExpired(lock: IProjectAssetLock, now = Date.now()): boolean {
 	return Date.parse(lock.expiresAt) <= now;
 }
 
+async function smartLockRetention(lock: IProjectAssetLock, options: IMCPActionOptions): Promise<any | null> {
+	if (lock.smartLock?.retention !== "untilMerged") {
+		return null;
+	}
+	try {
+		const evidence = await inspectProjectSourceControlLockFreshness(
+			{} as Scene,
+			{
+				path: lock.path,
+				destinationBranch: lock.smartLock.destinationBranch,
+				destinationRemote: lock.smartLock.destinationRemote,
+				acquisitionHeadHash: lock.smartLock.acquisitionHeadHash,
+				acquisitionBranch: lock.smartLock.acquisitionBranch,
+			},
+			options
+		);
+		return {
+			mode: lock.smartLock.retention,
+			retained: evidence.acquisitionMergedToDestination !== true || !evidence.pathClean,
+			releaseReady: evidence.acquisitionMergedToDestination === true && evidence.pathClean,
+			destinationAdvanced: evidence.destinationHash !== lock.smartLock.destinationHash,
+			acquisitionMergedToDestination: evidence.acquisitionMergedToDestination,
+			retainedRevisionHash: evidence.retainedRevisionHash,
+			pathClean: evidence.pathClean,
+			currentDestinationHash: evidence.destinationHash,
+			destinationRef: evidence.destinationRef,
+		};
+	} catch (error: any) {
+		return { mode: lock.smartLock.retention, retained: true, releaseReady: false, error: error.message };
+	}
+}
+
 async function withStoreGuard<T>(root: string, action: (directory: string) => Promise<T>): Promise<T> {
-	const directory = storageDirectory(root);
-	await mkdir(directory, { recursive: true });
+	const directory = await ensureProjectStoreDirectory(root, ".babylon-editor", "asset-locks");
 	const guardPath = join(directory, ".operation");
 	let handle: Awaited<ReturnType<typeof open>> | null = null;
 	for (let attempt = 0; attempt < 100; attempt++) {
@@ -192,35 +272,61 @@ async function withStoreGuard<T>(root: string, action: (directory: string) => Pr
 export async function listProjectAssetLocks(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
 	const root = projectDirectory(options);
 	const actor = await optionalActor(data, options);
-	const directory = storageDirectory(root);
+	const directory = await inspectProjectStoreDirectory(root, ".babylon-editor", "asset-locks");
 	const includeExpired = data.includeExpired === true;
-	const files = await readdir(directory).catch((error: any) => {
-		if (error?.code === "ENOENT") {
-			return [];
-		}
-		throw error;
-	});
+	const files = directory
+		? await readdir(directory).catch((error: any) => {
+				if (error?.code === "ENOENT") {
+					return [];
+				}
+				throw error;
+			})
+		: [];
 	const now = Date.now();
-	const locks: Array<IProjectAssetLock & { expired: boolean; remainingSeconds: number }> = [];
+	const locks: Array<IProjectAssetLock & { expired: boolean; retainedByPolicy: boolean; remainingSeconds: number }> = [];
 	let invalidEntryCount = 0;
 	for (const file of files.filter((candidate) => candidate.endsWith(".lock.json")).sort()) {
-		const lock = await readLock(join(directory, file));
+		const lock = await readLock(join(directory!, file));
 		if (!lock || lockFileName(lock.path) !== file) {
 			invalidEntryCount++;
 			continue;
 		}
 		const expired = isExpired(lock, now);
-		if (!expired || includeExpired) {
-			locks.push({ ...lock, expired, remainingSeconds: Math.max(0, Math.ceil((Date.parse(lock.expiresAt) - now) / 1000)) });
+		const retainedByPolicy = lock.smartLock?.retention === "untilMerged";
+		if (!expired || includeExpired || retainedByPolicy) {
+			locks.push({ ...lock, expired, retainedByPolicy, remainingSeconds: Math.max(0, Math.ceil((Date.parse(lock.expiresAt) - now) / 1000)) });
 		}
 	}
 	locks.sort((first, second) => first.path.localeCompare(second.path) || first.owner.localeCompare(second.owner));
 	return {
-		storage: relative(root, directory),
+		storage: relative(root, storageDirectory(root)),
 		activeCount: locks.filter((lock) => !lock.expired).length,
+		retainedPolicyCount: locks.filter((lock) => lock.retainedByPolicy).length,
 		invalidEntryCount,
 		federated: Boolean(actor),
-		locks: locks.map((lock) => ({ ...publicLock(lock, actor), expired: lock.expired, remainingSeconds: lock.remainingSeconds })),
+		locks: locks.map((lock) => ({ ...publicLock(lock, actor), expired: lock.expired, retainedByPolicy: lock.retainedByPolicy, remainingSeconds: lock.remainingSeconds })),
+	};
+}
+
+/** Evaluates the first matching Smart Lock rule, exact destination freshness, and retained-lock release evidence for one asset. */
+export async function inspectProjectAssetLockPolicy(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+	const root = projectDirectory(options);
+	const path = await validateAssetPath(root, data.path);
+	const actor = await optionalActor(data, options);
+	const rules = matchingSmartLockRules(await readProjectAssetLockRules(options), path);
+	const rule = rules[0] ?? null;
+	const lockDirectory = await inspectProjectStoreDirectory(root, ".babylon-editor", "asset-locks");
+	const lock = lockDirectory ? await readLock(join(lockDirectory, lockFileName(path))) : null;
+	const freshness = rule ? await smartLockFreshness(rule, path, options) : null;
+	const retention = lock ? await smartLockRetention(lock, options) : null;
+	return {
+		path,
+		smartLockRequired: Boolean(rule),
+		matchedRuleCount: rules.length,
+		rule,
+		freshness,
+		lock: lock ? { ...publicLock(lock, actor), expired: isExpired(lock) } : null,
+		retention,
 	};
 }
 
@@ -232,15 +338,55 @@ export async function acquireProjectAssetLock(_scene: Scene, data: any, options:
 	const owner = actor ? actor.memberName : validateOwner(data.owner);
 	const note = validateNote(data.note);
 	const ttlSeconds = validateTtlSeconds(data.ttlSeconds);
+	const matchingRules = matchingSmartLockRules(await readProjectAssetLockRules(options), path);
+	const rule = matchingRules[0] ?? null;
 	return withStoreGuard(root, async () => {
 		const filePath = lockFilePath(root, path);
 		const existing = await readLock(filePath);
 		const now = new Date();
+		const existingRetention = existing ? await smartLockRetention(existing, options) : null;
+		const retained = existingRetention?.retained === true;
 		const sameOwner = existing ? (actor ? existing.memberId === actor.memberId : !existing.memberId && existing.owner === owner) : false;
-		if (existing && !isExpired(existing, now.getTime()) && !sameOwner) {
-			return { acquired: false, reused: false, conflict: publicLock(existing, actor) };
+		if (existing && (!isExpired(existing, now.getTime()) || retained) && !sameOwner) {
+			return { acquired: false, reused: false, retained, retention: existingRetention, conflict: publicLock(existing, actor) };
 		}
-		const reused = Boolean(existing && !isExpired(existing, now.getTime()) && sameOwner);
+		const reused = Boolean(existing && (!isExpired(existing, now.getTime()) || retained) && sameOwner);
+		const freshness = rule ? await smartLockFreshness(rule, path, options) : null;
+		if (freshness) {
+			if (typeof data.expectedHeadHash !== "string" || !/^[a-f0-9]{40,64}$/i.test(data.expectedHeadHash)) {
+				throw new Error("expectedHeadHash is required from Smart Lock policy inspection when a rule matches.");
+			}
+			if (typeof data.expectedDestinationHash !== "string" || !/^[a-f0-9]{40,64}$/i.test(data.expectedDestinationHash)) {
+				throw new Error("expectedDestinationHash is required from Smart Lock policy inspection when a rule matches.");
+			}
+			if (freshness.headHash !== data.expectedHeadHash || freshness.destinationHash !== data.expectedDestinationHash) {
+				throw new Error("Smart Lock Git revisions changed since policy inspection. Inspect the asset policy again before acquiring its lock.");
+			}
+			if (!freshness.containsDestination) {
+				throw new Error(
+					`The current branch does not contain destination ${freshness.destinationRef}. Fetch and merge or rebase the destination before acquiring this Smart Lock.`
+				);
+			}
+			if (!freshness.pathClean) {
+				throw new Error(`Smart Lock acquisition requires ${path} to be clean in the Git worktree and index.`);
+			}
+		}
+		const smartLock = rule
+			? reused && existing?.smartLock?.ruleId === rule.id
+				? existing.smartLock
+				: {
+						ruleId: rule.id,
+						ruleName: rule.name,
+						retention: rule.retention,
+						acquisitionBranch: freshness.currentBranch,
+						acquisitionHeadHash: freshness.headHash,
+						destinationBranch: rule.destinationBranch,
+						destinationRemote: rule.destinationRemote,
+						destinationHash: freshness.destinationHash,
+						acquisitionAssetHash: freshness.headAssetHash,
+						destinationAssetHash: freshness.destinationAssetHash,
+					}
+			: undefined;
 		const lock: IProjectAssetLock = {
 			version: assetLockVersion,
 			path,
@@ -251,9 +397,20 @@ export async function acquireProjectAssetLock(_scene: Scene, data: any, options:
 			createdAt: reused ? existing!.createdAt : now.toISOString(),
 			updatedAt: now.toISOString(),
 			expiresAt: new Date(now.getTime() + ttlSeconds * 1000).toISOString(),
+			...(smartLock ? { smartLock } : {}),
 		};
 		await writeLock(filePath, lock);
-		return { acquired: true, reused, replacedExpired: Boolean(existing && isExpired(existing, now.getTime())), federated: Boolean(actor), lock: publicLock(lock, actor) };
+		return {
+			acquired: true,
+			reused,
+			replacedExpired: Boolean(existing && isExpired(existing, now.getTime()) && !retained),
+			federated: Boolean(actor),
+			smartLockRequired: Boolean(rule),
+			matchedRuleCount: matchingRules.length,
+			rule,
+			freshness,
+			lock: publicLock(lock, actor),
+		};
 	});
 }
 
@@ -289,12 +446,15 @@ export async function refreshProjectAssetLock(_scene: Scene, data: any, options:
 }
 
 /** Releases one owned lock, or force-releases it when explicitly requested. */
-export async function releaseProjectAssetLock(_scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
+export async function releaseProjectAssetLock(scene: Scene, data: any, options: IMCPActionOptions): Promise<any> {
 	const root = projectDirectory(options);
-	const path = await validateAssetPath(root, data.path);
+	const path = validateAssetLockPath(data.path);
 	const actor = await optionalActor(data, options);
-	if (data.force === true && actor && actor.role !== "admin") {
-		throw new Error("Forced asset-lock release requires the collaboration admin role.");
+	if (data.force === true) {
+		const collaboration = await getProjectCollaborationStatus(scene, { collaborationToken: data.collaborationToken }, options);
+		if ((collaboration.enforcementEnabled || actor) && actor?.role !== "admin") {
+			throw new Error("Forced asset-lock release requires the collaboration admin role.");
+		}
 	}
 	if (data.force !== true && (typeof data.lockId !== "string" || !data.lockId)) {
 		throw new Error("lockId is required unless force is explicitly true.");
@@ -311,11 +471,17 @@ export async function releaseProjectAssetLock(_scene: Scene, data: any, options:
 		if (data.force !== true && existing.memberId && !actorOwnsLock(actor, existing)) {
 			throw new Error(`Asset lock ${path} belongs to another collaboration member.`);
 		}
+		const retention = data.force === true ? null : await smartLockRetention(existing, options);
+		if (retention?.retained) {
+			throw new Error(
+				`Smart Lock ${path} is retained until ${existing.smartLock!.acquisitionBranch} is clean and revision ${(retention.retainedRevisionHash ?? existing.smartLock!.acquisitionHeadHash).slice(0, 12)} is merged into ${retention.destinationRef ?? existing.smartLock!.destinationBranch}. Use an administrator force release only when recovery requires it.`
+			);
+		}
 		await unlink(filePath).catch((error: any) => {
 			if (error?.code !== "ENOENT") {
 				throw error;
 			}
 		});
-		return { released: true, forced: data.force === true, federated: Boolean(actor), lock: publicLock(existing, actor) };
+		return { released: true, forced: data.force === true, federated: Boolean(actor), retention, lock: publicLock(existing, actor) };
 	});
 }

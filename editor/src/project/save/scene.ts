@@ -1,10 +1,10 @@
 import { join, basename } from "path/posix";
-import { pathExists, readJSON, remove, stat, writeFile, writeJSON } from "fs-extra";
+import { pathExists, readJSON, remove, stat, writeFile } from "fs-extra";
 
 import filenamify from "filenamify";
 
 import { Node, RenderTargetTexture, SceneSerializer } from "babylonjs";
-import { stopAllHumanoidMusclePosePreviews } from "babylonjs-editor-tools";
+import { ALEMBIC_OBJECT_METADATA_KEY, stopAllHumanoidMusclePosePreviews } from "babylonjs-editor-tools";
 
 import { Editor } from "../../editor/main";
 
@@ -32,9 +32,11 @@ import { motionBlurPostProcessCameraConfigurations } from "../../editor/renderin
 import { iblShadowsRenderingPipelineCameraConfigurations } from "../../editor/rendering/ibl-shadows";
 import { customColorPostProcessCameraConfigurations } from "../../editor/rendering/custom-color";
 import { stopHumanoidRetargetDebugVisualization } from "../../mcp/rigging/humanoid-avatar";
+import { buildGeneratedEditableMeshGeometry, recordGeneratedEditableMeshArtifact, synchronizeEditableMeshSourceManifest } from "../../mcp/meshes/editable-source";
 
 import { writeBinaryGeometry } from "../tools/geometry";
 import { writeBinaryMorphTarget } from "../tools/morph-target";
+import { writeSerializedJSON as writeJSON } from "../serialization-session";
 
 import { saveMergedDecals } from "./decals";
 import { showSaveSceneProgressDialog } from "./dialog";
@@ -53,6 +55,7 @@ export function ensureSceneFolders(scenePath: string) {
 		createDirectoryIfNotExist(join(scenePath, "lights")),
 		createDirectoryIfNotExist(join(scenePath, "cameras")),
 		createDirectoryIfNotExist(join(scenePath, "geometries")),
+		createDirectoryIfNotExist(join(scenePath, "generatedGeometries")),
 		createDirectoryIfNotExist(join(scenePath, "skeletons")),
 		createDirectoryIfNotExist(join(scenePath, "shadowGenerators")),
 		createDirectoryIfNotExist(join(scenePath, "sceneLinks")),
@@ -102,10 +105,18 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	const linkedObjects = new Set(scene.transformNodes.filter(isSceneLinkNode).flatMap((sceneLink) => sceneLink.getLoadedObjects()));
 	const belongsToScene = (object: object): boolean => !linkedObjects.has(object) && belongsToOwnedScene(object);
 	const getOwnedParentUniqueId = (node: Node): number | undefined => (node.parent && belongsToScene(node.parent) ? node.parent.uniqueId : undefined);
+	const isGeneratedAlembicNode = (node: Node): boolean => node.metadata?.[ALEMBIC_OBJECT_METADATA_KEY]?.version === 1;
 	stopAllHumanoidMusclePosePreviews(scene as any);
 	stopHumanoidRetargetDebugVisualization(scene);
 	const meshesToSave = scene.meshes.filter((mesh) => {
-		if (!belongsToScene(mesh) || (!isMesh(mesh) && !isCollisionMesh(mesh)) || mesh._masterMesh || isFromSceneLink(mesh) || !isNodeVisibleInGraph(mesh)) {
+		if (
+			!belongsToScene(mesh) ||
+			isGeneratedAlembicNode(mesh) ||
+			(!isMesh(mesh) && !isCollisionMesh(mesh)) ||
+			mesh._masterMesh ||
+			isFromSceneLink(mesh) ||
+			!isNodeVisibleInGraph(mesh)
+		) {
 			return false;
 		}
 
@@ -125,13 +136,21 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 
 	const savedFiles: string[] = [];
 	const savedGeometryIds: string[] = [];
+	const savedGeneratedMeshIds: string[] = [];
 
 	storeTexturesBaseSize(scene);
 
 	// Write geometries and meshes
 	await Promise.all(
 		meshesToSave.map(async (mesh) => {
-			if (!belongsToScene(mesh) || (!isMesh(mesh) && !isCollisionMesh(mesh)) || mesh._masterMesh || isFromSceneLink(mesh) || !isNodeVisibleInGraph(mesh)) {
+			if (
+				!belongsToScene(mesh) ||
+				isGeneratedAlembicNode(mesh) ||
+				(!isMesh(mesh) && !isCollisionMesh(mesh)) ||
+				mesh._masterMesh ||
+				isFromSceneLink(mesh) ||
+				!isNodeVisibleInGraph(mesh)
+			) {
 				return;
 			}
 
@@ -141,6 +160,10 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 				meshes.map(async (meshToSerialize) => {
 					if (!meshToSerialize) {
 						return null;
+					}
+
+					if (isMesh(meshToSerialize) && (meshToSerialize.getTotalVertices() > 0 || meshToSerialize.getTotalIndices() > 0)) {
+						synchronizeEditableMeshSourceManifest(meshToSerialize);
 					}
 
 					meshToSerialize.material?.getActiveTextures().forEach((texture) => {
@@ -269,6 +292,39 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 										path: geometryPath,
 										write: writeGeometry,
 									});
+
+									if (instantiatedMesh && isMesh(instantiatedMesh)) {
+										const generated = buildGeneratedEditableMeshGeometry(instantiatedMesh);
+										if (!generated.evidence.portableBinaryOutput) {
+											throw new Error(
+												`Mesh "${instantiatedMesh.name}" has unsupported generated binary streams: ${generated.evidence.unsupportedSerializedStreams.join(", ")}.`
+											);
+										}
+										const generatedFileName = `${instantiatedMesh.id}.babylonbinarymeshdata`;
+										const generatedPath = join(scenePath, "generatedGeometries", generatedFileName);
+										const generatedMeshData: any = {
+											_binaryInfo: {},
+											subMeshes: generated.snapshot.subMeshes.map((subMesh) => ({ ...subMesh })),
+										};
+										const writeGenerated = !savedGeneratedMeshIds.includes(instantiatedMesh.id);
+										if (writeGenerated) {
+											savedGeneratedMeshIds.push(instantiatedMesh.id);
+										}
+										await writeBinaryGeometry({
+											mesh: generatedMeshData,
+											geometry: generated.geometry,
+											path: generatedPath,
+											write: writeGenerated,
+										});
+										const manifest = recordGeneratedEditableMeshArtifact(instantiatedMesh, {
+											file: join("generatedGeometries", generatedFileName),
+											binaryInfo: generatedMeshData._binaryInfo,
+											evidence: generated.evidence,
+										});
+										mesh.metadata ??= {};
+										mesh.metadata.babylonEditorEditableMeshSource = JSON.parse(JSON.stringify(manifest));
+										savedFiles.push(generatedPath);
+									}
 
 									let geometryIndex = -1;
 									do {
@@ -485,7 +541,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	// Write cameras
 	await Promise.all(
 		scene.cameras.map(async (camera) => {
-			if (!belongsToScene(camera) || isEditorCamera(camera) || isFromSceneLink(camera)) {
+			if (!belongsToScene(camera) || isGeneratedAlembicNode(camera) || isEditorCamera(camera) || isFromSceneLink(camera)) {
 				return;
 			}
 
@@ -775,17 +831,19 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 		if (isLightingScene && scene.activeCamera) {
 			saveRenderingConfigurationForCamera(scene.activeCamera);
 		}
-		const rendering = scene.cameras.filter(belongsToScene).map((camera) => ({
-			cameraId: camera.id,
-			ssao2RenderingPipeline: ssaoRenderingPipelineCameraConfigurations.get(camera),
-			vlsPostProcess: vlsPostProcessCameraConfigurations.get(camera),
-			ssrRenderingPipeline: ssrRenderingPipelineCameraConfigurations.get(camera),
-			motionBlurPostProcess: motionBlurPostProcessCameraConfigurations.get(camera),
-			defaultRenderingPipeline: defaultPipelineCameraConfigurations.get(camera),
-			taaRenderingPipeline: taaPipelineCameraConfigurations.get(camera),
-			customColorPostProcess: customColorPostProcessCameraConfigurations.get(camera),
-			iblShadowsRenderPipeline: iblShadowsRenderingPipelineCameraConfigurations.get(camera),
-		}));
+		const rendering = scene.cameras
+			.filter((camera) => belongsToScene(camera) && !isGeneratedAlembicNode(camera))
+			.map((camera) => ({
+				cameraId: camera.id,
+				ssao2RenderingPipeline: ssaoRenderingPipelineCameraConfigurations.get(camera),
+				vlsPostProcess: vlsPostProcessCameraConfigurations.get(camera),
+				ssrRenderingPipeline: ssrRenderingPipelineCameraConfigurations.get(camera),
+				motionBlurPostProcess: motionBlurPostProcessCameraConfigurations.get(camera),
+				defaultRenderingPipeline: defaultPipelineCameraConfigurations.get(camera),
+				taaRenderingPipeline: taaPipelineCameraConfigurations.get(camera),
+				customColorPostProcess: customColorPostProcessCameraConfigurations.get(camera),
+				iblShadowsRenderPipeline: iblShadowsRenderingPipelineCameraConfigurations.get(camera),
+			}));
 		const liveGlobalConfiguration = {
 			clearColor: scene.clearColor.asArray(),
 			ambientColor: scene.ambientColor.asArray(),

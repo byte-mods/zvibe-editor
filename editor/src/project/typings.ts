@@ -27,6 +27,9 @@ export interface IEditorProject {
 	 */
 	plugins: IEditorProjectPlugin[];
 
+	/** Shared enablement for package-managed editor extensions; executable trust remains machine-local. */
+	editorExtensions?: IEditorProjectExtension[];
+
 	/**
 	 * Defines the software used for compressing textures.
 	 */
@@ -63,6 +66,9 @@ export interface IEditorProject {
 	 */
 	externalEditorCommand?: string;
 
+	/** Versioned Unity-style Editor and Player settings shared by every scene and build. */
+	projectSettings?: IEditorProjectSettings;
+
 	/** Project-wide behavior-script execution orders, applied to every exported scene. */
 	scriptExecutionOrders?: Record<string, number>;
 
@@ -70,6 +76,100 @@ export interface IEditorProject {
 	 * Gizmo snap preferences (translate / rotate / scale).
 	 */
 	gizmoSnap?: IGizmoSnapPreferences;
+}
+
+export const editorProjectSettingsVersion = 2 as const;
+
+export type EditorPlayerFullscreenMode = "windowed" | "fullscreen" | "borderless";
+export type EditorPlayerColorSpace = "gamma" | "linear";
+export type EditorPlayerRenderingBackend = "auto" | "webgl2" | "webgpu";
+export type EditorAssetSerializationMode = "forceText" | "mixed" | "forceBinary";
+export type EditorDefaultBehaviorMode = "2d" | "3d";
+export type EditorProjectBuildTarget = "web" | "electron" | "headless" | "android" | "ios";
+
+export interface IEditorPlayerIdentitySettings {
+	companyName: string;
+	productName: string;
+	version: string;
+	applicationId: string;
+}
+
+export interface IEditorPlayerDisplaySettings {
+	defaultWidth: number;
+	defaultHeight: number;
+	fullscreenMode: EditorPlayerFullscreenMode;
+	resizableWindow: boolean;
+	runInBackground: boolean;
+	allowHighDpi: boolean;
+}
+
+export interface IEditorPlayerRenderingSettings {
+	colorSpace: EditorPlayerColorSpace;
+	renderingBackend: EditorPlayerRenderingBackend;
+	powerPreference: "default" | "high-performance" | "low-power";
+	targetFrameRate: number;
+	maximumDevicePixelRatio: number;
+	preserveDrawingBuffer: boolean;
+}
+
+export interface IEditorPlayerRuntimeSettings {
+	showBabylonLoadingScreen: boolean;
+	disableContextMenu: boolean;
+	dataCaching: boolean;
+	deterministicLockstep: boolean;
+	lockstepMaxSteps: number;
+}
+
+export type EditorImportAcceleratorContentValidation = "disabled" | "uploadOnly" | "enabled" | "required";
+
+/** Project-owned remote import-result cache policy. Authentication values are resolved from the named environment variable and are never persisted here. */
+export interface IEditorImportAcceleratorSettings {
+	enabled: boolean;
+	endpoint: string;
+	namespacePrefix: string;
+	downloadEnabled: boolean;
+	uploadEnabled: boolean;
+	authenticationEnvironmentVariable: string;
+	contentValidation: EditorImportAcceleratorContentValidation;
+	downloadBatchSize: number;
+	requestTimeoutMilliseconds: number;
+	maximumResultSizeBytes: number;
+}
+
+export interface IEditorAssetPipelineSettings {
+	autoRefresh: boolean;
+	autoRefreshOnFocus: boolean;
+	directoryMonitoring: boolean;
+	importWorkerCount: number;
+	serializationMode: EditorAssetSerializationMode;
+	reduceVersionControlNoise: boolean;
+	accelerator: IEditorImportAcceleratorSettings;
+}
+
+export interface IEditorPlayModeSettings {
+	reloadScene: boolean;
+	reloadScripts: boolean;
+	muteAudio: boolean;
+	maximizeOnPlay: boolean;
+}
+
+export interface IEditorPlatformSettingsOverride {
+	display?: Partial<IEditorPlayerDisplaySettings>;
+	rendering?: Partial<IEditorPlayerRenderingSettings>;
+	runtime?: Partial<IEditorPlayerRuntimeSettings>;
+}
+
+export interface IEditorProjectSettings {
+	version: typeof editorProjectSettingsVersion;
+	revision: number;
+	identity: IEditorPlayerIdentitySettings;
+	display: IEditorPlayerDisplaySettings;
+	rendering: IEditorPlayerRenderingSettings;
+	runtime: IEditorPlayerRuntimeSettings;
+	assetPipeline: IEditorAssetPipelineSettings;
+	playMode: IEditorPlayModeSettings;
+	defaultBehaviorMode: EditorDefaultBehaviorMode;
+	platformOverrides: Partial<Record<EditorProjectBuildTarget, IEditorPlatformSettingsOverride>>;
 }
 
 export interface IEditorSceneBuildSettings {
@@ -130,6 +230,14 @@ export interface IEditorProjectPlugin {
 	 * The name or path of the plugin.
 	 */
 	nameOrPath: string;
+}
+
+/** Project-shared extension choice intentionally excludes executable trust. */
+export interface IEditorProjectExtension {
+	/** Must name a direct dependency in the active project's package.json. */
+	packageName: string;
+	/** Disabled extensions remain configured but execute no editor code. */
+	enabled: boolean;
 }
 
 export type EditorProjectCompressedTextureSoftware = "PVRTexTool" | "Khronos KTX-Software";

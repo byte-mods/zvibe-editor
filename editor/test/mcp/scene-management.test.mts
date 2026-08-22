@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("../../src/project/save/save", () => ({
 	saveProject: vi.fn(async () => undefined),
+	saveProjectForRestart: vi.fn(async () => undefined),
 	saveProjectConfiguration: vi.fn(async () => ({})),
 }));
 
@@ -14,6 +15,7 @@ import { projectConfiguration } from "../../src/project/configuration";
 import { EditorSceneManager } from "../../src/editor/dialogs/scene-manager/scene-manager";
 import {
 	createProjectSceneTemplate,
+	createScene as createManagedScene,
 	deleteProjectSceneTemplate,
 	getSceneBuildSettings,
 	instantiateProjectSceneTemplate,
@@ -92,6 +94,10 @@ describe("mcp/scene-management", () => {
 			{ path: "assets/A.scene", enabled: false },
 		]);
 		expect(editor.state.sceneBuildSettings).toEqual({ version: 1, scenes: updated.scenes });
+	});
+
+	test("rejects hidden scene paths that project discovery cannot retain", async () => {
+		await expect(createManagedScene(scene, { path: "scenes/.hidden.scene" }, { editor })).rejects.toThrow("hidden path segments");
 	});
 
 	test("exposes template creation, bounded listing, instantiation, and guarded deletion", async () => {

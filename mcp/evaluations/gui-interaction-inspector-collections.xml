@@ -1,0 +1,42 @@
+<evaluation>
+	<qa_pair>
+		<question>Inspect the GUI interaction capability contract. What is the inclusive maximum authored CanvasGroup alpha? Answer with one number.</question>
+		<answer>1</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect GUI interaction capabilities. Can nested CanvasGroups ignore inherited parent-group policy? Answer True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect GUI interaction capabilities. Does RaycastReceiver draw visible pixels? Answer True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect GUI interaction capabilities. What is the maximum retained count of recent UGUI usage events? Answer with one integer.</question>
+		<answer>2048</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect GUI interaction capabilities. Is UGUI usage evidence transmitted outside the editor process? Answer True or False.</question>
+		<answer>False</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect Inspector collection capabilities. How many public collection decorators are advertised? Answer with one integer.</question>
+		<answer>2</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect Inspector collection capabilities. What is the maximum number of rows the reusable editor field accepts? Answer with one integer.</question>
+		<answer>256</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect Inspector collection capabilities. Which exact tool replaces a complete exported list or array value?</question>
+		<answer>set_script_exported_value</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect Inspector collection capabilities. Are add, remove, and move all supported row operations? Answer True or False.</question>
+		<answer>True</answer>
+	</qa_pair>
+	<qa_pair>
+		<question>Inspect Inspector collection capabilities. Which style variant places each item on a separate surface? Answer with the exact lowercase variant id.</question>
+		<answer>cards</answer>
+	</qa_pair>
+</evaluation>

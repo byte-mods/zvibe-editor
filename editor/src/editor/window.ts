@@ -2,6 +2,7 @@ import { join } from "path/posix";
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen } from "electron";
 
 import { closeAllNodePtyForWebContentsId } from "../electron/node-pty";
+import { logSerializationSessionShutdown } from "../electron/serialization-session";
 import { shouldAutoOpenDevTools } from "../tools/devtools";
 
 /**
@@ -72,6 +73,7 @@ export async function createEditorWindow(): Promise<BrowserWindow> {
 			});
 
 		window.webContents.send("editor:closed");
+		logSerializationSessionShutdown(window.webContents.id);
 
 		const index = editorWindows.indexOf(window);
 		if (index !== -1) {

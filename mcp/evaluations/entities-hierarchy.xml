@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which MCP tool persists whether hidden Entities appear in the main Hierarchy?</question>
+      <answer>set_ecs_hierarchy_preferences</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which three Entity hierarchy world modes are supported? Answer as a comma-separated list in reported order.</question>
+      <answer>authoring, runtime, combined</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which exact live lease is required for runtime or combined hierarchy reads?</question>
+      <answer>expectedGeneration</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool returns bounded Entity hierarchy pages with parent paths and hidden/origin evidence?</question>
+      <answer>query_ecs_hierarchy</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which quick-search token filters Systems by a namespace or namespace prefix?</question>
+      <answer>namespace:</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool runs the shared Systems quick-search language?</question>
+      <answer>query_ecs_systems_window</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Besides namespace, which five Systems quick filters are supported? Answer as a comma-separated list.</question>
+      <answer>phase, enabled, reads, writes, component</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool reads effective registered and excluded component types?</question>
+      <answer>inspect_ecs_type_registry</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>When assembly auto-registration is disabled, which policy field lists the component types that remain usable?</question>
+      <answer>registeredTypeIds</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does the portable assembly policy claim Unity TypeManager or C# assembly-attribute identity? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+</evaluation>

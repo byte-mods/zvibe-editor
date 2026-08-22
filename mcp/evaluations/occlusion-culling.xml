@@ -1,0 +1,42 @@
+<evaluation>
+   <qa_pair>
+      <question>Which MCP tool reports static PVS, area, visualization, additive-runtime, hardware-query, and explicit non-Umbra Occlusion Culling capabilities without mutating the scene?</question>
+      <answer>get_occlusion_culling_capabilities</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which two mesh roles contribute opaque blocking geometry and receive baked cell visibility respectively?</question>
+      <answer>Static Occluder and Static Occludee</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Can a Dynamic Occlusion Query mesh contribute blocking geometry to the static bake? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which MCP tool validates generated cells and work bounds and returns the exact source fingerprint required before baking?</question>
+      <answer>inspect_occlusion_culling_bake</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What fingerprint algorithm leases Occlusion Culling bake sources and persisted bake output?</question>
+      <answer>SHA-256</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Does cancellation publish the cells completed before an Occlusion Culling bake was cancelled? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What conservative behavior is used when bake data is stale, a camera is outside every cell, or a cell fails Backface Threshold validation?</question>
+      <answer>Fail open and preserve visibility</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>What is the hard maximum number of generated Occlusion Culling cells?</question>
+      <answer>4096</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Are meshes created by set_occlusion_culling_visualization persisted into scene saves or exported games? Respond True or False.</question>
+      <answer>False</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which destructive MCP tool removes only exact persisted bake data while preserving mesh, camera, settings, and area authoring?</question>
+      <answer>clear_occlusion_culling_bake</answer>
+   </qa_pair>
+</evaluation>
