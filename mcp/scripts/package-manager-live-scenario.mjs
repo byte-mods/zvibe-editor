@@ -317,7 +317,9 @@ try {
 				`document.querySelector('[data-testid="package-samples-view-more"]') ? true : document.querySelector('[data-testid="package-manager-samples-view"]')?.closest('section,div')?.innerText.slice(0, 1500) ?? false`
 			),
 		(value) => value === true,
-		"View More Samples button"
+		"View More Samples button",
+		// Listing samples reads every installed package's manifest, which takes seconds on a slow machine.
+		120_000
 	);
 	const normalUi = await cdp.evaluate(`({
 		samples: Boolean(document.querySelector('[data-testid="package-manager-samples-view"]')),
