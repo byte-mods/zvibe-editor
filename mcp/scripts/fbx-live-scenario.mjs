@@ -394,6 +394,12 @@ try {
 	if (stderr.trim()) console.error(stderr.trim());
 	process.exitCode = 1;
 } finally {
+	// A failed export leaves the modal FBX dialog open, which blocks every later UI scenario; cancel it before disconnecting.
+	await fbxUi
+		?.evaluate(
+			`(() => { let node = document.querySelector('[data-testid=fbx-destination]'); while (node && ![...node.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Cancel')) node = node.parentElement; [...(node?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.trim() === 'Cancel')?.click(); })()`
+		)
+		.catch(() => undefined);
 	fbxUi?.socket?.close();
 	if (!completed && !retainFixtures) {
 		if (importedRootId) await safeCall("delete_node", { nodeId: importedRootId });
