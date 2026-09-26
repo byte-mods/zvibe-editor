@@ -8,6 +8,7 @@ import { Scene } from "babylonjs";
 import sharp from "sharp";
 
 import { IMCPActionOptions } from "../../action";
+import { isAssetMetadataPath } from "../../assets/registry";
 import { projectPathContains } from "../project-store";
 import { getProjectPackageContext, packageSha256 } from "./context";
 import { IProjectPackageContext, ProjectPackageDependencyType } from "./types";
@@ -238,6 +239,10 @@ async function scanSampleTree(root: string): Promise<ISampleTreeEvidence> {
 		const entries = await readdir(current.absolute, { withFileTypes: true });
 		entries.sort((left, right) => left.name.localeCompare(right.name));
 		for (const entry of entries) {
+			// The editor writes asset metadata sidecars next to imported files; they are not part of the sample content.
+			if (entry.isFile() && isAssetMetadataPath(entry.name)) {
+				continue;
+			}
 			const absolutePath = join(current.absolute, entry.name);
 			const entryStat = await lstat(absolutePath);
 			if (entryStat.isSymbolicLink()) {

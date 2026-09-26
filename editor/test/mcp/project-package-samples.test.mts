@@ -101,6 +101,10 @@ describe("mcp/project-package-samples", () => {
 		await expect(locateProjectPackageSample(scene, lease, options)).rejects.toThrow(/Import it first/);
 		const plan = await planProjectPackageSampleImport(scene, lease, options);
 		await applyProjectPackageSampleImport(scene, { planId: plan.id, expectedSourceSha256: sample.sourceSha256, confirm: true }, options);
+		// The editor's asset registry adds metadata sidecars next to imported files; they must not break the source match.
+		const targetDirectory = join(directory, ...plan.targetPath.split("/"));
+		const [importedFile] = (await readdir(targetDirectory)).sort();
+		await writeJSON(join(targetDirectory, `${importedFile}.bjsmeta.json`), { guid: "sidecar" });
 		const located = await locateProjectPackageSample(scene, { ...lease, targetPath: plan.targetPath }, options);
 		expect(located).toMatchObject({ located: true, targetPath: plan.targetPath, fileCount: 2, matchesSource: true });
 		expect(options.editor.layout.assets.setBrowsePath).toHaveBeenCalledWith(await realpath(join(directory, ...plan.targetPath.split("/"))));
