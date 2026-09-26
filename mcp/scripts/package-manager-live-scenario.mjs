@@ -311,7 +311,14 @@ try {
 		refresh?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		return Boolean(refresh);
 	})()`);
-	await waitFor(() => cdp.evaluate(`Boolean(document.querySelector('[data-testid="package-samples-view-more"]'))`), Boolean, "View More Samples button");
+	await waitFor(
+		() =>
+			cdp.evaluate(
+				`document.querySelector('[data-testid="package-samples-view-more"]') ? true : document.querySelector('[data-testid="package-manager-samples-view"]')?.closest('section,div')?.innerText.slice(0, 1500) ?? false`
+			),
+		(value) => value === true,
+		"View More Samples button"
+	);
 	const normalUi = await cdp.evaluate(`({
 		samples: Boolean(document.querySelector('[data-testid="package-manager-samples-view"]')),
 		viewMore: Boolean(document.querySelector('[data-testid="package-samples-view-more"]')),
