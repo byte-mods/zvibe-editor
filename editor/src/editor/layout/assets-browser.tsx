@@ -701,15 +701,37 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 
 		const browsedPath = this.state.browsedPath ?? (projectConfiguration.path ? dirname(projectConfiguration.path) : null);
 		if (browsedPath) {
-			void this.setBrowsePath(browsedPath).catch((error) => {
-				console.error("Failed to refresh the Assets Browser.", error);
-			});
+			void this._getExistingBrowsePath(browsedPath)
+				.then((path) => this.setBrowsePath(path))
+				.catch((error) => {
+					console.error("Failed to refresh the Assets Browser.", error);
+				});
 		}
 
 		if (projectConfiguration.path) {
 			this._refreshFilesTreeNodes(projectConfiguration.path!);
 			void this._refreshImporterPresets();
 		}
+	}
+
+	/**
+	 * Returns the given path, or its closest existing parent when the browsed folder has been deleted or moved,
+	 * so refreshing never keeps pointing at a folder that no longer exists.
+	 */
+	private async _getExistingBrowsePath(path: string): Promise<string> {
+		const projectRoot = projectConfiguration.path ? dirname(projectConfiguration.path) : null;
+
+		let current = path;
+		while (!(await pathExists(current))) {
+			const parent = dirname(current);
+			if (parent === current || (projectRoot && !isInsideAssetRoot(parent, projectRoot))) {
+				return projectRoot ?? path;
+			}
+
+			current = parent;
+		}
+
+		return current;
 	}
 
 	/**
