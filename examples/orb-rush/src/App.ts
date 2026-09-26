@@ -1,0 +1,135 @@
+import { Scene } from "@babylonjs/core/scene";
+// Registers TransformNode.Parse and keeps InstancedMesh side effects: the .pure
+// loader chain never installs them, and any scene containing transform nodes or
+// instanced meshes fails to parse ("loadAssets of unknown") without this.
+import { RegisterTransformNode } from "@babylonjs/core/Meshes/transformNode.pure";
+import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
+import { Engine } from "@babylonjs/core/Engines/engine";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { SceneLoaderFlags } from "@babylonjs/core/Loading/sceneLoaderFlags";
+import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
+
+import { CreateAudioEngineAsync } from "@babylonjs/core/AudioV2/webAudio/webAudioEngine";
+
+import HavokPhysics from "@babylonjs/havok";
+
+import "@babylonjs/core/Loading/loadingScreen";
+import "@babylonjs/core/Loading/Plugins/babylonFileLoader";
+
+import "@babylonjs/core/Cameras/camera";
+import "@babylonjs/core/Cameras/universalCamera";
+
+import "@babylonjs/core/Meshes/groundMesh";
+
+import "@babylonjs/core/Lights/directionalLight";
+import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
+
+import "@babylonjs/core/Materials/PBR/pbrMaterial";
+import "@babylonjs/core/Materials/standardMaterial";
+import "@babylonjs/core/Materials/imageProcessingConfiguration";
+
+import "@babylonjs/core/XR/features/WebXRDepthSensing";
+
+import "@babylonjs/core/Rendering/depthRendererSceneComponent";
+import "@babylonjs/core/Rendering/prePassRendererSceneComponent";
+
+import "@babylonjs/core/Materials/Textures/cubeTexture";
+import "@babylonjs/core/Materials/Textures/Loaders/envTextureLoader";
+
+import "@babylonjs/core/Physics";
+
+// Register every Babylon Materials Library type used by scenes authored in the editor.
+// This includes terrain, water, triplanar, and the procedural library materials.
+import "@babylonjs/materials";
+
+import { loadScene } from "babylonjs-editor-tools";
+
+/**
+ * We import the map of all scripts attached to objects in the editor.
+ * This will allow the loader from `babylonjs-editor-tools` to attach the scripts to the
+ * loaded objects (scene, meshes, transform nodes, lights, cameras, etc.).
+ */
+import { scriptsMap } from "./scripts";
+
+export class App {
+	private _canvas: HTMLCanvasElement;
+	private _engine: Engine | null = null;
+	private _scene: Scene | null = null;
+
+	public constructor() {
+		const canvasElement = document.getElementById("canvas") as HTMLCanvasElement;
+		if (!canvasElement) {
+			throw new Error("Canvas element not found");
+		}
+		this._canvas = canvasElement;
+	}
+
+	public async init(): Promise<void> {
+		this._engine = new Engine(this._canvas, true, {
+			stencil: true,
+			antialias: true,
+			audioEngine: false,
+			adaptToDeviceRatio: true,
+			disableWebGL2Support: false,
+			useHighPrecisionFloats: true,
+			powerPreference: "high-performance",
+			failIfMajorPerformanceCaveat: false,
+		});
+
+		this._scene = new Scene(this._engine);
+
+		await this._handleLoad();
+
+		// Handle window resize
+		const handleResize = () => {
+			this._engine?.resize();
+		};
+
+		window.addEventListener("resize", handleResize);
+
+		// Start render loop
+		this._engine.runRenderLoop(() => {
+			this._scene?.render();
+		});
+	}
+
+	private async _handleLoad(): Promise<void> {
+		if (!this._engine || !this._scene) {
+			return;
+		}
+
+		// Sound nodes authored in the editor play through the Audio V2 engine, which must exist before the scene loads.
+		// Browsers keep it suspended until the first click/key press; starting a run is that gesture.
+		await CreateAudioEngineAsync({ disableDefaultUI: true, resumeOnInteraction: true });
+
+		const havok = await HavokPhysics();
+		const physicsPlugin = new HavokPlugin(true, havok);
+		this._scene.enablePhysics(new Vector3(0, -981, 0), physicsPlugin);
+		// Zvibe Editor scenes are authored in centimeters (gravity -981 cm/s²). Havok's default speed limit
+		// (200 units/s) assumes meters and would cap every body at 2 m/s, so scale it to centimeters.
+		physicsPlugin.setVelocityLimits(20_000, 100);
+		// Step physics at a fixed 60 Hz (catching up on slow frames) so stacked crates stay stable on any frame rate.
+		this._scene.getPhysicsEngine()!.setSubTimeStep(1000 / 60);
+
+		SceneLoaderFlags.ForceFullSceneLoadingForIncremental = true;
+		RegisterTransformNode();
+		void InstancedMesh;
+		await loadScene("./scene/", "example.babylon", this._scene, scriptsMap, {
+			quality: "high",
+		});
+
+		if (this._scene.activeCamera) {
+			this._scene.activeCamera.attachControl();
+		}
+
+		// Opt-in handle for automated play-tests and debugging: open the game with `?debug`.
+		if (new URLSearchParams(window.location.search).has("debug")) {
+			(window as any).__orbRushScene = this._scene;
+		}
+	}
+
+	public dispose(): void {
+		this._scene?.dispose();
+		this._engine?.dispose();
+	}
+}

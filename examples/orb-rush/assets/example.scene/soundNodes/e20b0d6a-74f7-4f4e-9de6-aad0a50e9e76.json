@@ -1,0 +1,59 @@
+{
+    "isSoundNode": true,
+    "tags": null,
+    "soundRelativePath": "assets/audio/impact.wav",
+    "autoUpdateSpatial": true,
+    "volume": 0.8,
+    "isSpatial": true,
+    "maxDistance": 4000,
+    "panningModel": "equalpower",
+    "distanceModel": "inverse",
+    "position": [
+        0,
+        50,
+        0
+    ],
+    "rotation": [
+        0,
+        0,
+        0
+    ],
+    "scaling": [
+        1,
+        1,
+        1
+    ],
+    "billboardMode": 0,
+    "scalingDeterminant": 1,
+    "infiniteDistance": false,
+    "ignoreNonUniformScaling": false,
+    "reIntegrateRotationIntoRotationQuaternion": false,
+    "name": "SFX Crate",
+    "id": "e20b0d6a-74f7-4f4e-9de6-aad0a50e9e76",
+    "state": "",
+    "metadata": {},
+    "type": "SoundNode",
+    "uniqueId": 1790421029520,
+    "localMatrix": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1
+    ],
+    "isEnabled": true,
+    "animations": [],
+    "ranges": [],
+    "serializationVersion": "1.0.0"
+}

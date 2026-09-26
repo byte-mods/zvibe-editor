@@ -1,0 +1,550 @@
+{
+    "meshes": [
+        {
+            "name": "Arena Floor",
+            "id": "7d36e28d-5a33-4332-bc86-344f23d95c28",
+            "uniqueId": 1790420642642,
+            "type": "GroundMesh",
+            "position": [
+                0,
+                0,
+                0
+            ],
+            "rotationQuaternion": [
+                0,
+                0,
+                0,
+                1
+            ],
+            "scaling": [
+                1,
+                1,
+                1
+            ],
+            "localMatrix": [
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1
+            ],
+            "isEnabled": true,
+            "isVisible": true,
+            "infiniteDistance": false,
+            "pickable": true,
+            "receiveShadows": true,
+            "billboardMode": 0,
+            "visibility": 1,
+            "alwaysSelectAsActiveMesh": false,
+            "checkCollisions": false,
+            "ellipsoid": [
+                0.5,
+                1,
+                0.5
+            ],
+            "ellipsoidOffset": [
+                0,
+                0,
+                0
+            ],
+            "doNotSyncBoundingInfo": false,
+            "isBlocker": false,
+            "sideOrientation": 1,
+            "isUnIndexed": false,
+            "geometryUniqueId": 1790420642643,
+            "geometryId": "a8467a25-c1cc-4926-8011-58efb59c14ed",
+            "subMeshes": null,
+            "materialUniqueId": 1790420621726,
+            "materialId": "630f0154-b0eb-4b4a-8f6f-89d4e45dca1b",
+            "metadata": {
+                "type": "Ground",
+                "width": 4400,
+                "height": 4400,
+                "subdivisions": 1,
+                "heightMapTexturePath": null,
+                "minHeight": 0,
+                "maxHeight": 150,
+                "smoothFactor": 0,
+                "alphaFilter": 0,
+                "colorFilter": [
+                    1,
+                    1,
+                    1
+                ],
+                "babylonEditorEditableMeshSource": {
+                    "version": 1,
+                    "model": "unity-editable-source-generated-export-v1",
+                    "revision": 1,
+                    "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:fda83c9f41a70889",
+                    "exportSettingsRevision": 1,
+                    "exportSettings": {
+                        "optimize": true
+                    },
+                    "lastGenerated": {
+                        "file": "generatedGeometries/7d36e28d-5a33-4332-bc86-344f23d95c28.babylonbinarymeshdata",
+                        "binaryInfo": {
+                            "positionsAttrDesc": {
+                                "count": 12,
+                                "stride": 3,
+                                "offset": 0,
+                                "dataType": 1
+                            },
+                            "normalsAttrDesc": {
+                                "count": 12,
+                                "stride": 3,
+                                "offset": 48,
+                                "dataType": 1
+                            },
+                            "uvsAttrDesc": {
+                                "count": 8,
+                                "stride": 2,
+                                "offset": 96,
+                                "dataType": 1
+                            },
+                            "indicesAttrDesc": {
+                                "count": 6,
+                                "stride": 1,
+                                "offset": 128,
+                                "dataType": 0
+                            },
+                            "subMeshesAttrDesc": {
+                                "count": 1,
+                                "stride": 5,
+                                "offset": 152,
+                                "dataType": 0
+                            }
+                        },
+                        "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:fda83c9f41a70889",
+                        "generatedFingerprint": "mesh-editable-source-fnv32x2-v1:23819ce780ba6e51",
+                        "exportSettingsRevision": 1,
+                        "settings": {
+                            "optimize": true
+                        },
+                        "source": {
+                            "vertexCount": 4,
+                            "indexCount": 6,
+                            "faceCount": 2,
+                            "subMeshCount": 1,
+                            "streams": [
+                                {
+                                    "kind": "normal",
+                                    "stride": 3,
+                                    "valueCount": 12
+                                },
+                                {
+                                    "kind": "position",
+                                    "stride": 3,
+                                    "valueCount": 12
+                                },
+                                {
+                                    "kind": "uv",
+                                    "stride": 2,
+                                    "valueCount": 8
+                                }
+                            ]
+                        },
+                        "generated": {
+                            "vertexCount": 4,
+                            "indexCount": 6,
+                            "faceCount": 2,
+                            "subMeshCount": 1,
+                            "streams": [
+                                {
+                                    "kind": "normal",
+                                    "stride": 3,
+                                    "valueCount": 12
+                                },
+                                {
+                                    "kind": "position",
+                                    "stride": 3,
+                                    "valueCount": 12
+                                },
+                                {
+                                    "kind": "uv",
+                                    "stride": 2,
+                                    "valueCount": 8
+                                }
+                            ]
+                        },
+                        "removedUnusedOrDuplicateVertices": 0,
+                        "compilationModel": "exact-complete-record-weld-v1",
+                        "optimizationApplied": true,
+                        "optimizationBlockers": []
+                    }
+                },
+                "physicsAggregate": {
+                    "shape": {
+                        "type": 3,
+                        "density": 1000
+                    },
+                    "body": {
+                        "motionType": 0
+                    },
+                    "massProperties": {
+                        "mass": 0,
+                        "inertia": [
+                            1613333.375,
+                            3226666.75,
+                            1613333.375
+                        ],
+                        "centerOfMass": [
+                            0,
+                            0,
+                            0
+                        ],
+                        "inertiaOrientation": [
+                            0,
+                            0,
+                            0,
+                            1
+                        ]
+                    },
+                    "material": {
+                        "friction": 0.8,
+                        "restitution": 0.1,
+                        "staticFriction": 0.5,
+                        "frictionCombine": 0,
+                        "restitutionCombine": 0
+                    }
+                }
+            },
+            "instances": [],
+            "animations": [],
+            "ranges": [],
+            "layerMask": 268435455,
+            "alphaIndex": 1.7976931348623157e+308,
+            "hasVertexAlpha": false,
+            "overlayAlpha": 1,
+            "overlayColor": [
+                0,
+                0,
+                0
+            ],
+            "applyFog": true,
+            "subdivisionsX": 32,
+            "subdivisionsY": 32,
+            "minX": -512,
+            "maxX": 512,
+            "minZ": -512,
+            "maxZ": 512,
+            "width": 1024,
+            "height": 1024,
+            "delayLoadingFile": "assets/example.scene/geometries/a8467a25-c1cc-4926-8011-58efb59c14ed.babylonbinarymeshdata",
+            "boundingBoxMaximum": [
+                2200,
+                0,
+                2200
+            ],
+            "boundingBoxMinimum": [
+                -2200,
+                0,
+                -2200
+            ],
+            "_binaryInfo": {
+                "positionsAttrDesc": {
+                    "count": 12,
+                    "stride": 3,
+                    "offset": 0,
+                    "dataType": 1
+                },
+                "normalsAttrDesc": {
+                    "count": 12,
+                    "stride": 3,
+                    "offset": 48,
+                    "dataType": 1
+                },
+                "uvsAttrDesc": {
+                    "count": 8,
+                    "stride": 2,
+                    "offset": 96,
+                    "dataType": 1
+                },
+                "indicesAttrDesc": {
+                    "count": 6,
+                    "stride": 1,
+                    "offset": 128,
+                    "dataType": 0
+                },
+                "subMeshesAttrDesc": {
+                    "count": 1,
+                    "stride": 5,
+                    "offset": 152,
+                    "dataType": 0
+                }
+            },
+            "positions": null,
+            "normals": null,
+            "uvs": null,
+            "hasUVs": true,
+            "indices": null
+        }
+    ],
+    "transformNodes": [],
+    "cameras": [],
+    "lights": [],
+    "materials": [
+        {
+            "tags": null,
+            "mainColor": [
+                0.05,
+                0.07,
+                0.16
+            ],
+            "lineColor": [
+                0.25,
+                0.65,
+                1
+            ],
+            "gridRatio": 100,
+            "gridOffset": [
+                0,
+                0,
+                0
+            ],
+            "majorUnitFrequency": 5,
+            "minorUnitVisibility": 0.35,
+            "opacity": 1,
+            "antialias": true,
+            "useMultiScale": false,
+            "minGridSpacing": 0.001,
+            "gridOctaves": 4,
+            "useHorizonFade": false,
+            "useOriginMarker": false,
+            "linesOnly": false,
+            "gridThicknessModifier": 1,
+            "preMultiplyAlpha": false,
+            "useMaxLine": false,
+            "id": "630f0154-b0eb-4b4a-8f6f-89d4e45dca1b",
+            "name": "Arena Grid",
+            "checkReadyOnEveryCall": false,
+            "checkReadyOnlyOnce": false,
+            "state": "",
+            "alpha": 1,
+            "backFaceCulling": true,
+            "textureRepetitionMode": 0,
+            "textureRepetitionHexTilingParams": [
+                1,
+                0.6,
+                7,
+                0.5
+            ],
+            "cullBackFaces": true,
+            "_alphaMode": [
+                2
+            ],
+            "_needDepthPrePass": false,
+            "disableDepthWrite": false,
+            "disableColorWrite": false,
+            "forceDepthWrite": false,
+            "depthFunction": 0,
+            "separateCullingPass": false,
+            "fogEnabled": true,
+            "pointSize": 1,
+            "zOffset": 0,
+            "zOffsetUnits": 0,
+            "pointsCloud": false,
+            "fillMode": 0,
+            "_isVertexOutputInvariant": false,
+            "stencil": {
+                "tags": null,
+                "func": 519,
+                "backFunc": 519,
+                "funcRef": 1,
+                "funcMask": 255,
+                "opStencilFail": 7680,
+                "opDepthFail": 7680,
+                "opStencilDepthPass": 7681,
+                "backOpStencilFail": 7680,
+                "backOpDepthFail": 7680,
+                "backOpStencilDepthPass": 7681,
+                "mask": 255,
+                "enabled": false
+            },
+            "uniqueId": 1790420621726,
+            "plugins": {},
+            "customType": "BABYLON.GridMaterial"
+        }
+    ],
+    "metadata": {
+        "type": "Ground",
+        "width": 4400,
+        "height": 4400,
+        "subdivisions": 1,
+        "heightMapTexturePath": null,
+        "minHeight": 0,
+        "maxHeight": 150,
+        "smoothFactor": 0,
+        "alphaFilter": 0,
+        "colorFilter": [
+            1,
+            1,
+            1
+        ],
+        "babylonEditorEditableMeshSource": {
+            "version": 1,
+            "model": "unity-editable-source-generated-export-v1",
+            "revision": 1,
+            "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:fda83c9f41a70889",
+            "exportSettingsRevision": 1,
+            "exportSettings": {
+                "optimize": true
+            },
+            "lastGenerated": {
+                "file": "generatedGeometries/7d36e28d-5a33-4332-bc86-344f23d95c28.babylonbinarymeshdata",
+                "binaryInfo": {
+                    "positionsAttrDesc": {
+                        "count": 12,
+                        "stride": 3,
+                        "offset": 0,
+                        "dataType": 1
+                    },
+                    "normalsAttrDesc": {
+                        "count": 12,
+                        "stride": 3,
+                        "offset": 48,
+                        "dataType": 1
+                    },
+                    "uvsAttrDesc": {
+                        "count": 8,
+                        "stride": 2,
+                        "offset": 96,
+                        "dataType": 1
+                    },
+                    "indicesAttrDesc": {
+                        "count": 6,
+                        "stride": 1,
+                        "offset": 128,
+                        "dataType": 0
+                    },
+                    "subMeshesAttrDesc": {
+                        "count": 1,
+                        "stride": 5,
+                        "offset": 152,
+                        "dataType": 0
+                    }
+                },
+                "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:fda83c9f41a70889",
+                "generatedFingerprint": "mesh-editable-source-fnv32x2-v1:23819ce780ba6e51",
+                "exportSettingsRevision": 1,
+                "settings": {
+                    "optimize": true
+                },
+                "source": {
+                    "vertexCount": 4,
+                    "indexCount": 6,
+                    "faceCount": 2,
+                    "subMeshCount": 1,
+                    "streams": [
+                        {
+                            "kind": "normal",
+                            "stride": 3,
+                            "valueCount": 12
+                        },
+                        {
+                            "kind": "position",
+                            "stride": 3,
+                            "valueCount": 12
+                        },
+                        {
+                            "kind": "uv",
+                            "stride": 2,
+                            "valueCount": 8
+                        }
+                    ]
+                },
+                "generated": {
+                    "vertexCount": 4,
+                    "indexCount": 6,
+                    "faceCount": 2,
+                    "subMeshCount": 1,
+                    "streams": [
+                        {
+                            "kind": "normal",
+                            "stride": 3,
+                            "valueCount": 12
+                        },
+                        {
+                            "kind": "position",
+                            "stride": 3,
+                            "valueCount": 12
+                        },
+                        {
+                            "kind": "uv",
+                            "stride": 2,
+                            "valueCount": 8
+                        }
+                    ]
+                },
+                "removedUnusedOrDuplicateVertices": 0,
+                "compilationModel": "exact-complete-record-weld-v1",
+                "optimizationApplied": true,
+                "optimizationBlockers": []
+            }
+        },
+        "physicsAggregate": {
+            "shape": {
+                "type": 3,
+                "density": 1000
+            },
+            "body": {
+                "motionType": 0
+            },
+            "massProperties": {
+                "mass": 0,
+                "inertia": [
+                    1613333.375,
+                    3226666.75,
+                    1613333.375
+                ],
+                "centerOfMass": [
+                    0,
+                    0,
+                    0
+                ],
+                "inertiaOrientation": [
+                    0,
+                    0,
+                    0,
+                    1
+                ]
+            },
+            "material": {
+                "friction": 0.8,
+                "restitution": 0.1,
+                "staticFriction": 0.5,
+                "frictionCombine": 0,
+                "restitutionCombine": 0
+            }
+        }
+    },
+    "basePoseMatrix": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1
+    ],
+    "serializationVersion": "1.0.0"
+}

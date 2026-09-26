@@ -1,0 +1,59 @@
+{
+    "isSoundNode": true,
+    "tags": null,
+    "soundRelativePath": "assets/audio/pickup.wav",
+    "autoUpdateSpatial": true,
+    "volume": 0.8,
+    "isSpatial": false,
+    "maxDistance": 1000,
+    "panningModel": "equalpower",
+    "distanceModel": "linear",
+    "position": [
+        0,
+        0,
+        0
+    ],
+    "rotation": [
+        0,
+        0,
+        0
+    ],
+    "scaling": [
+        1,
+        1,
+        1
+    ],
+    "billboardMode": 0,
+    "scalingDeterminant": 1,
+    "infiniteDistance": false,
+    "ignoreNonUniformScaling": false,
+    "reIntegrateRotationIntoRotationQuaternion": false,
+    "name": "SFX Pickup",
+    "id": "03c1a7dd-d40b-4b9d-a302-0f2a4a1351b6",
+    "state": "",
+    "metadata": {},
+    "type": "SoundNode",
+    "uniqueId": 1790421004511,
+    "localMatrix": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1
+    ],
+    "isEnabled": true,
+    "animations": [],
+    "ranges": [],
+    "serializationVersion": "1.0.0"
+}

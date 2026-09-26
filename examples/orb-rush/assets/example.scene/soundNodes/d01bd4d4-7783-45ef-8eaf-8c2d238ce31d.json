@@ -1,0 +1,59 @@
+{
+    "isSoundNode": true,
+    "tags": null,
+    "soundRelativePath": "assets/audio/music.wav",
+    "autoUpdateSpatial": true,
+    "volume": 0.35,
+    "isSpatial": false,
+    "maxDistance": 1000,
+    "panningModel": "equalpower",
+    "distanceModel": "linear",
+    "position": [
+        0,
+        0,
+        0
+    ],
+    "rotation": [
+        0,
+        0,
+        0
+    ],
+    "scaling": [
+        1,
+        1,
+        1
+    ],
+    "billboardMode": 0,
+    "scalingDeterminant": 1,
+    "infiniteDistance": false,
+    "ignoreNonUniformScaling": false,
+    "reIntegrateRotationIntoRotationQuaternion": false,
+    "name": "Music",
+    "id": "d01bd4d4-7783-45ef-8eaf-8c2d238ce31d",
+    "state": "",
+    "metadata": {},
+    "type": "SoundNode",
+    "uniqueId": 1790421000766,
+    "localMatrix": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1
+    ],
+    "isEnabled": true,
+    "animations": [],
+    "ranges": [],
+    "serializationVersion": "1.0.0"
+}

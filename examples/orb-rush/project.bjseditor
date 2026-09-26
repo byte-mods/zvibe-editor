@@ -1,0 +1,117 @@
+{
+    "plugins": [],
+    "editorExtensions": [],
+    "version": "1.0.0",
+    "packageManager": "yarn",
+    "lastOpenedScene": "/assets/example.scene",
+    "sceneBuildSettings": {
+        "version": 1,
+        "scenes": [
+            {
+                "path": "assets/example.scene",
+                "enabled": true
+            }
+        ]
+    },
+    "sceneWorkspace": {
+        "version": 1,
+        "loadedScenes": [
+            "assets/example.scene"
+        ],
+        "activeScene": "assets/example.scene",
+        "lightingScene": "assets/example.scene"
+    },
+    "prefabStage": {
+        "version": 1,
+        "mode": "isolation",
+        "contextAppearance": "gray",
+        "showOverrides": true,
+        "autoSave": false,
+        "environment": "neutral",
+        "backgroundColor": [
+            0.025,
+            0.03,
+            0.04,
+            1
+        ],
+        "lightIntensity": 1.2
+    },
+    "compressedTextureSoftware": "PVRTexTool",
+    "compressedTexturesEnabled": false,
+    "compressedTexturesEnabledInPreview": false,
+    "compressedEtc2Enabled": false,
+    "compressedPvrtcEnabled": false,
+    "compressedTextureQuality": "very-fast",
+    "externalEditorCommand": "code",
+    "projectSettings": {
+        "version": 2,
+        "revision": 6,
+        "identity": {
+            "companyName": "Default Company",
+            "productName": "project",
+            "version": "1.0.0",
+            "applicationId": "com.default.zvibegame"
+        },
+        "display": {
+            "defaultWidth": 1920,
+            "defaultHeight": 1080,
+            "fullscreenMode": "windowed",
+            "resizableWindow": true,
+            "runInBackground": true,
+            "allowHighDpi": true
+        },
+        "rendering": {
+            "colorSpace": "linear",
+            "renderingBackend": "auto",
+            "powerPreference": "high-performance",
+            "targetFrameRate": 60,
+            "maximumDevicePixelRatio": 2,
+            "preserveDrawingBuffer": false
+        },
+        "runtime": {
+            "showBabylonLoadingScreen": true,
+            "disableContextMenu": true,
+            "dataCaching": true,
+            "deterministicLockstep": false,
+            "lockstepMaxSteps": 4
+        },
+        "assetPipeline": {
+            "autoRefresh": true,
+            "autoRefreshOnFocus": true,
+            "directoryMonitoring": true,
+            "importWorkerCount": 4,
+            "serializationMode": "forceText",
+            "reduceVersionControlNoise": true,
+            "accelerator": {
+                "enabled": false,
+                "endpoint": "http://127.0.0.1:10080",
+                "namespacePrefix": "default",
+                "downloadEnabled": true,
+                "uploadEnabled": true,
+                "authenticationEnvironmentVariable": "",
+                "contentValidation": "enabled",
+                "downloadBatchSize": 8,
+                "requestTimeoutMilliseconds": 30000,
+                "maximumResultSizeBytes": 536870912
+            }
+        },
+        "playMode": {
+            "reloadScene": true,
+            "reloadScripts": true,
+            "muteAudio": false,
+            "maximizeOnPlay": false
+        },
+        "defaultBehaviorMode": "3d",
+        "platformOverrides": {}
+    },
+    "scriptExecutionOrders": {},
+    "gizmoSnap": {
+        "translationEnabled": false,
+        "translationStep": 1,
+        "rotationEnabled": false,
+        "rotationStepDegrees": 15,
+        "scaleEnabled": false,
+        "scaleStep": 0.25
+    },
+    "serializationVersion": "1.0.0"
+}

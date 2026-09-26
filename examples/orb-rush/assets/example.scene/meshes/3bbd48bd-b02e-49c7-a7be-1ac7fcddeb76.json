@@ -1,0 +1,1968 @@
+{
+    "meshes": [
+        {
+            "name": "Crate",
+            "id": "3bbd48bd-b02e-49c7-a7be-1ac7fcddeb76",
+            "uniqueId": 1790420740559,
+            "type": "Mesh",
+            "position": [
+                1147,
+                50.5,
+                -1000
+            ],
+            "rotationQuaternion": [
+                0,
+                0,
+                0,
+                1
+            ],
+            "scaling": [
+                1,
+                1,
+                1
+            ],
+            "localMatrix": [
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1
+            ],
+            "isEnabled": true,
+            "isVisible": true,
+            "infiniteDistance": false,
+            "pickable": true,
+            "receiveShadows": true,
+            "billboardMode": 0,
+            "visibility": 1,
+            "alwaysSelectAsActiveMesh": false,
+            "checkCollisions": false,
+            "ellipsoid": [
+                0.5,
+                1,
+                0.5
+            ],
+            "ellipsoidOffset": [
+                0,
+                0,
+                0
+            ],
+            "doNotSyncBoundingInfo": false,
+            "isBlocker": false,
+            "sideOrientation": 1,
+            "isUnIndexed": false,
+            "geometryUniqueId": 1790420740560,
+            "geometryId": "df7d4f83-2847-42d6-86e5-32e8e754fce8",
+            "subMeshes": null,
+            "materialUniqueId": 1790420629835,
+            "materialId": "2c97e4a5-a26c-4437-9fce-769b07eb83e4",
+            "metadata": {
+                "type": "Box",
+                "width": 100,
+                "depth": 100,
+                "height": 100,
+                "sideOrientation": 0,
+                "size": 100,
+                "babylonEditorEditableMeshSource": {
+                    "version": 1,
+                    "model": "unity-editable-source-generated-export-v1",
+                    "revision": 1,
+                    "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:8410d59bf6358a01",
+                    "exportSettingsRevision": 1,
+                    "exportSettings": {
+                        "optimize": true
+                    },
+                    "lastGenerated": {
+                        "file": "generatedGeometries/3bbd48bd-b02e-49c7-a7be-1ac7fcddeb76.babylonbinarymeshdata",
+                        "binaryInfo": {
+                            "positionsAttrDesc": {
+                                "count": 72,
+                                "stride": 3,
+                                "offset": 0,
+                                "dataType": 1
+                            },
+                            "normalsAttrDesc": {
+                                "count": 72,
+                                "stride": 3,
+                                "offset": 288,
+                                "dataType": 1
+                            },
+                            "uvsAttrDesc": {
+                                "count": 48,
+                                "stride": 2,
+                                "offset": 576,
+                                "dataType": 1
+                            },
+                            "indicesAttrDesc": {
+                                "count": 36,
+                                "stride": 1,
+                                "offset": 768,
+                                "dataType": 0
+                            },
+                            "subMeshesAttrDesc": {
+                                "count": 1,
+                                "stride": 5,
+                                "offset": 912,
+                                "dataType": 0
+                            }
+                        },
+                        "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:8410d59bf6358a01",
+                        "generatedFingerprint": "mesh-editable-source-fnv32x2-v1:8410d59bf6358a01",
+                        "exportSettingsRevision": 1,
+                        "settings": {
+                            "optimize": true
+                        },
+                        "source": {
+                            "vertexCount": 24,
+                            "indexCount": 36,
+                            "faceCount": 12,
+                            "subMeshCount": 1,
+                            "streams": [
+                                {
+                                    "kind": "normal",
+                                    "stride": 3,
+                                    "valueCount": 72
+                                },
+                                {
+                                    "kind": "position",
+                                    "stride": 3,
+                                    "valueCount": 72
+                                },
+                                {
+                                    "kind": "uv",
+                                    "stride": 2,
+                                    "valueCount": 48
+                                }
+                            ]
+                        },
+                        "generated": {
+                            "vertexCount": 24,
+                            "indexCount": 36,
+                            "faceCount": 12,
+                            "subMeshCount": 1,
+                            "streams": [
+                                {
+                                    "kind": "normal",
+                                    "stride": 3,
+                                    "valueCount": 72
+                                },
+                                {
+                                    "kind": "position",
+                                    "stride": 3,
+                                    "valueCount": 72
+                                },
+                                {
+                                    "kind": "uv",
+                                    "stride": 2,
+                                    "valueCount": 48
+                                }
+                            ]
+                        },
+                        "removedUnusedOrDuplicateVertices": 0,
+                        "compilationModel": "exact-complete-record-weld-v1",
+                        "optimizationApplied": true,
+                        "optimizationBlockers": []
+                    }
+                },
+                "physicsAggregate": {
+                    "shape": {
+                        "type": 3,
+                        "density": 1000
+                    },
+                    "body": {
+                        "motionType": 2
+                    },
+                    "massProperties": {
+                        "mass": 0.6000000238418579,
+                        "inertia": [
+                            1666.6666259765625,
+                            1666.6666259765625,
+                            1666.6666259765625
+                        ],
+                        "centerOfMass": [
+                            0,
+                            0,
+                            0
+                        ],
+                        "inertiaOrientation": [
+                            0,
+                            0,
+                            0,
+                            1
+                        ]
+                    },
+                    "material": {
+                        "friction": 0.6,
+                        "restitution": 0.15,
+                        "staticFriction": 0.5,
+                        "frictionCombine": 0,
+                        "restitutionCombine": 0
+                    }
+                }
+            },
+            "instances": [
+                {
+                    "name": "Crate 0",
+                    "id": "19601bc0-ed90-4ddb-844a-74d4bd473686",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1249,
+                        50.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754296
+                },
+                {
+                    "name": "Crate 1",
+                    "id": "2312a6ce-9e26-426f-8a3a-e15b6ee6a557",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1351,
+                        50.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754297
+                },
+                {
+                    "name": "Crate 2",
+                    "id": "06e03447-f86a-41af-adc4-0460ebfc07b3",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1453,
+                        50.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754298
+                },
+                {
+                    "name": "Crate 3",
+                    "id": "ada9e0de-f9e1-4bf7-9c87-a1faf38ad4cb",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1198,
+                        151.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754299
+                },
+                {
+                    "name": "Crate 4",
+                    "id": "b9db263e-d256-4834-95bd-d6308de166bd",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1300,
+                        151.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754300
+                },
+                {
+                    "name": "Crate 5",
+                    "id": "2c8b7144-4cac-4128-a067-91c772660700",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1402,
+                        151.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754301
+                },
+                {
+                    "name": "Crate 6",
+                    "id": "18352387-082e-439d-b329-ad0085755fa5",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1249,
+                        252.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754302
+                },
+                {
+                    "name": "Crate 7",
+                    "id": "0c8eb66e-03c7-43d4-ac6a-ad8743351c30",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1351,
+                        252.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754303
+                },
+                {
+                    "name": "Crate 8",
+                    "id": "91be27f1-2212-4de2-841d-f2a5179d8453",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1300,
+                        353.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754304
+                },
+                {
+                    "name": "Crate 9",
+                    "id": "255e7edd-c40e-40c2-b2d3-42f04d1d2ad5",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1453,
+                        50.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754305
+                },
+                {
+                    "name": "Crate 10",
+                    "id": "a5a6a80c-f9fc-4483-9265-ba7653f34075",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1351,
+                        50.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754306
+                },
+                {
+                    "name": "Crate 11",
+                    "id": "49f99989-6951-460d-8ba4-c699bfc1fd63",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1249,
+                        50.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754307
+                },
+                {
+                    "name": "Crate 12",
+                    "id": "d7442c97-52a8-4ad1-ba54-602731871a39",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1147,
+                        50.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754308
+                },
+                {
+                    "name": "Crate 13",
+                    "id": "4696384d-edb2-41e7-bcf9-db93c5742069",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1402,
+                        151.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754309
+                },
+                {
+                    "name": "Crate 14",
+                    "id": "1f521138-23e8-499d-864d-a7f29b086c2b",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1300,
+                        151.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754310
+                },
+                {
+                    "name": "Crate 15",
+                    "id": "2c761fcb-5c45-48da-b8d7-5c3c0398f139",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1198,
+                        151.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754311
+                },
+                {
+                    "name": "Crate 16",
+                    "id": "b28ef150-679e-461c-8483-e545d5a0d94a",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1351,
+                        252.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754312
+                },
+                {
+                    "name": "Crate 17",
+                    "id": "c447c9be-b52c-4b37-a1b8-7c54f5f49826",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1249,
+                        252.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754313
+                },
+                {
+                    "name": "Crate 18",
+                    "id": "84a60513-c548-431f-a66b-5d0637632cdb",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1300,
+                        353.5,
+                        -1000
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotationQuaternion": [
+                        0,
+                        0,
+                        0,
+                        1
+                    ],
+                    "metadata": {
+                        "physicsAggregate": {
+                            "shape": {
+                                "type": 3,
+                                "density": 1000
+                            },
+                            "body": {
+                                "motionType": 2
+                            },
+                            "massProperties": {
+                                "mass": 0.6000000238418579,
+                                "inertia": [
+                                    1666.6666259765625,
+                                    1666.6666259765625,
+                                    1666.6666259765625
+                                ],
+                                "centerOfMass": [
+                                    0,
+                                    0,
+                                    0
+                                ],
+                                "inertiaOrientation": [
+                                    0,
+                                    0,
+                                    0,
+                                    1
+                                ]
+                            },
+                            "material": {
+                                "friction": 0.6,
+                                "restitution": 0.15,
+                                "staticFriction": 0.5,
+                                "frictionCombine": 0,
+                                "restitutionCombine": 0
+                            }
+                        }
+                    },
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420754314
+                }
+            ],
+            "animations": [],
+            "ranges": [],
+            "layerMask": 268435455,
+            "alphaIndex": 1.7976931348623157e+308,
+            "hasVertexAlpha": false,
+            "overlayAlpha": 1,
+            "overlayColor": [
+                0,
+                0,
+                0
+            ],
+            "applyFog": true,
+            "delayLoadingFile": "assets/example.scene/geometries/df7d4f83-2847-42d6-86e5-32e8e754fce8.babylonbinarymeshdata",
+            "boundingBoxMaximum": [
+                50,
+                50,
+                50
+            ],
+            "boundingBoxMinimum": [
+                -50,
+                -50,
+                -50
+            ],
+            "_binaryInfo": {
+                "positionsAttrDesc": {
+                    "count": 72,
+                    "stride": 3,
+                    "offset": 0,
+                    "dataType": 1
+                },
+                "normalsAttrDesc": {
+                    "count": 72,
+                    "stride": 3,
+                    "offset": 288,
+                    "dataType": 1
+                },
+                "uvsAttrDesc": {
+                    "count": 48,
+                    "stride": 2,
+                    "offset": 576,
+                    "dataType": 1
+                },
+                "indicesAttrDesc": {
+                    "count": 36,
+                    "stride": 1,
+                    "offset": 768,
+                    "dataType": 0
+                },
+                "subMeshesAttrDesc": {
+                    "count": 1,
+                    "stride": 5,
+                    "offset": 912,
+                    "dataType": 0
+                }
+            },
+            "positions": null,
+            "normals": null,
+            "uvs": null,
+            "hasUVs": true,
+            "indices": null
+        }
+    ],
+    "transformNodes": [],
+    "cameras": [],
+    "lights": [],
+    "materials": [
+        {
+            "tags": null,
+            "directIntensity": 1,
+            "emissiveIntensity": 1,
+            "environmentIntensity": 1,
+            "specularIntensity": 1,
+            "disableBumpMap": false,
+            "ambientTextureStrength": 1,
+            "ambientTextureImpactOnAnalyticalLights": 0,
+            "metallic": 0,
+            "roughness": 0.65,
+            "metallicF0Factor": 1,
+            "metallicReflectanceColor": [
+                1,
+                1,
+                1
+            ],
+            "useOnlyMetallicFromMetallicReflectanceTexture": false,
+            "ambient": [
+                0,
+                0,
+                0
+            ],
+            "albedo": [
+                0.92,
+                0.48,
+                0.14
+            ],
+            "baseWeight": 1,
+            "reflectivity": [
+                1,
+                1,
+                1
+            ],
+            "reflection": [
+                1,
+                1,
+                1
+            ],
+            "emissive": [
+                0.08,
+                0.03,
+                0
+            ],
+            "microSurface": 1,
+            "useLightmapAsShadowmap": false,
+            "useAlphaFromAlbedoTexture": false,
+            "forceAlphaTest": false,
+            "alphaCutOff": 0.4,
+            "useSpecularOverAlpha": true,
+            "useMicroSurfaceFromReflectivityMapAlpha": false,
+            "useRoughnessFromMetallicTextureAlpha": true,
+            "useRoughnessFromMetallicTextureGreen": false,
+            "useMetallnessFromMetallicTextureBlue": false,
+            "useAmbientOcclusionFromMetallicTextureRed": false,
+            "useAmbientInGrayScale": false,
+            "useAutoMicroSurfaceFromReflectivityMap": false,
+            "usePhysicalLightFalloff": true,
+            "useGLTFLightFalloff": false,
+            "useRadianceOverAlpha": true,
+            "useObjectSpaceNormalMap": false,
+            "useParallax": false,
+            "useParallaxOcclusion": false,
+            "parallaxScaleBias": 0.05,
+            "disableLighting": false,
+            "forceIrradianceInFragment": false,
+            "maxSimultaneousLights": 8,
+            "invertNormalMapX": false,
+            "invertNormalMapY": false,
+            "twoSidedLighting": false,
+            "useAlphaFresnel": false,
+            "useLinearAlphaFresnel": false,
+            "forceNormalForward": false,
+            "enableSpecularAntiAliasing": false,
+            "useHorizonOcclusion": true,
+            "useRadianceOcclusion": true,
+            "unlit": false,
+            "applyDecalMapAfterDetailMap": false,
+            "_imageProcessingConfiguration": {
+                "tags": null,
+                "colorCurves": {
+                    "tags": null,
+                    "_globalHue": 30,
+                    "_globalDensity": 0,
+                    "_globalSaturation": 0,
+                    "_globalExposure": 0,
+                    "_highlightsHue": 30,
+                    "_highlightsDensity": 0,
+                    "_highlightsSaturation": 0,
+                    "_highlightsExposure": 0,
+                    "_midtonesHue": 30,
+                    "_midtonesDensity": 0,
+                    "_midtonesSaturation": 0,
+                    "_midtonesExposure": 0
+                },
+                "_colorCurvesEnabled": false,
+                "_colorGradingEnabled": false,
+                "_colorGradingWithGreenDepth": true,
+                "_colorGradingBGR": true,
+                "_exposure": 1.15,
+                "_toneMappingEnabled": true,
+                "_toneMappingType": 1,
+                "_contrast": 1.15,
+                "vignetteStretch": 0,
+                "vignetteCenterX": 0,
+                "vignetteCenterY": 0,
+                "vignetteWeight": 1.6,
+                "vignetteColor": [
+                    0,
+                    0,
+                    0,
+                    0
+                ],
+                "vignetteCameraFov": 0.5,
+                "_vignetteBlendMode": 0,
+                "_vignetteEnabled": true,
+                "_ditheringEnabled": false,
+                "_ditheringIntensity": 0.00392156862745098,
+                "_skipFinalColorClamp": false,
+                "_applyByPostProcess": true,
+                "_isEnabled": true,
+                "outputTextureWidth": 0,
+                "outputTextureHeight": 0
+            },
+            "id": "2c97e4a5-a26c-4437-9fce-769b07eb83e4",
+            "name": "Crate",
+            "checkReadyOnEveryCall": false,
+            "checkReadyOnlyOnce": false,
+            "state": "",
+            "alpha": 1,
+            "backFaceCulling": true,
+            "textureRepetitionMode": 0,
+            "textureRepetitionHexTilingParams": [
+                1,
+                0.6,
+                7,
+                0.5
+            ],
+            "cullBackFaces": true,
+            "_alphaMode": [
+                2
+            ],
+            "_needDepthPrePass": false,
+            "disableDepthWrite": false,
+            "disableColorWrite": false,
+            "forceDepthWrite": false,
+            "depthFunction": 0,
+            "separateCullingPass": false,
+            "fogEnabled": true,
+            "pointSize": 1,
+            "zOffset": 0,
+            "zOffsetUnits": 0,
+            "pointsCloud": false,
+            "fillMode": 0,
+            "_isVertexOutputInvariant": false,
+            "stencil": {
+                "tags": null,
+                "func": 519,
+                "backFunc": 519,
+                "funcRef": 1,
+                "funcMask": 255,
+                "opStencilFail": 7680,
+                "opDepthFail": 7680,
+                "opStencilDepthPass": 7681,
+                "backOpStencilFail": 7680,
+                "backOpDepthFail": 7680,
+                "backOpStencilDepthPass": 7681,
+                "mask": 255,
+                "enabled": false
+            },
+            "uniqueId": 1790420629835,
+            "plugins": {
+                "PBRBRDFConfiguration": {
+                    "tags": null,
+                    "useEnergyConservation": true,
+                    "useSmithVisibilityHeightCorrelated": true,
+                    "useSphericalHarmonics": true,
+                    "useSpecularGlossinessInputEnergyConservation": true,
+                    "mixIblRadianceWithIrradiance": true,
+                    "useLegacySpecularEnergyConservation": true,
+                    "baseDiffuseModel": 0,
+                    "dielectricSpecularModel": 0,
+                    "conductorSpecularModel": 0,
+                    "name": "PBRBRDF",
+                    "priority": 90,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                },
+                "PBRClearCoatConfiguration": {
+                    "tags": null,
+                    "isEnabled": false,
+                    "intensity": 1,
+                    "roughness": 0,
+                    "indexOfRefraction": 1.5,
+                    "useRoughnessFromMainTexture": true,
+                    "remapF0OnInterfaceChange": true,
+                    "isTintEnabled": false,
+                    "tintColor": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "tintColorAtDistance": 1,
+                    "tintThickness": 1,
+                    "name": "PBRClearCoat",
+                    "priority": 100,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                },
+                "PBRIridescenceConfiguration": {
+                    "tags": null,
+                    "isEnabled": false,
+                    "intensity": 1,
+                    "minimumThickness": 100,
+                    "maximumThickness": 400,
+                    "indexOfRefraction": 1.3,
+                    "name": "PBRIridescence",
+                    "priority": 110,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                },
+                "PBRAnisotropicConfiguration": {
+                    "tags": null,
+                    "isEnabled": false,
+                    "intensity": 1,
+                    "direction": [
+                        1,
+                        0
+                    ],
+                    "legacy": false,
+                    "name": "PBRAnisotropic",
+                    "priority": 110,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                },
+                "PBRSheenConfiguration": {
+                    "tags": null,
+                    "isEnabled": false,
+                    "linkSheenWithAlbedo": false,
+                    "intensity": 1,
+                    "color": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "useRoughnessFromMainTexture": true,
+                    "albedoScaling": false,
+                    "name": "Sheen",
+                    "priority": 120,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                },
+                "PBRSubSurfaceConfiguration": {
+                    "tags": null,
+                    "isRefractionEnabled": false,
+                    "isTranslucencyEnabled": false,
+                    "isDispersionEnabled": false,
+                    "isScatteringEnabled": false,
+                    "_scatteringDiffusionProfileIndex": 0,
+                    "refractionIntensity": 1,
+                    "translucencyIntensity": 1,
+                    "useAlbedoToTintRefraction": false,
+                    "useAlbedoToTintTranslucency": false,
+                    "indexOfRefraction": 1.5,
+                    "_volumeIndexOfRefraction": -1,
+                    "invertRefractionY": false,
+                    "linkRefractionWithTransparency": false,
+                    "minimumThickness": 0,
+                    "maximumThickness": 1,
+                    "useThicknessAsDepth": false,
+                    "tintColor": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "tintColorAtDistance": 1,
+                    "dispersion": 0,
+                    "diffusionDistance": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "useMaskFromThicknessTexture": false,
+                    "useGltfStyleTextures": true,
+                    "applyAlbedoAfterSubSurface": false,
+                    "legacyTranslucency": false,
+                    "name": "PBRSubSurface",
+                    "priority": 130,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": true
+                },
+                "DetailMapConfiguration": {
+                    "tags": null,
+                    "diffuseBlendLevel": 1,
+                    "roughnessBlendLevel": 1,
+                    "bumpLevel": 1,
+                    "normalBlendMethod": 0,
+                    "isEnabled": false,
+                    "name": "DetailMap",
+                    "priority": 140,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                }
+            },
+            "customType": "BABYLON.PBRMaterial"
+        }
+    ],
+    "metadata": {
+        "type": "Box",
+        "width": 100,
+        "depth": 100,
+        "height": 100,
+        "sideOrientation": 0,
+        "size": 100,
+        "babylonEditorEditableMeshSource": {
+            "version": 1,
+            "model": "unity-editable-source-generated-export-v1",
+            "revision": 1,
+            "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:8410d59bf6358a01",
+            "exportSettingsRevision": 1,
+            "exportSettings": {
+                "optimize": true
+            },
+            "lastGenerated": {
+                "file": "generatedGeometries/3bbd48bd-b02e-49c7-a7be-1ac7fcddeb76.babylonbinarymeshdata",
+                "binaryInfo": {
+                    "positionsAttrDesc": {
+                        "count": 72,
+                        "stride": 3,
+                        "offset": 0,
+                        "dataType": 1
+                    },
+                    "normalsAttrDesc": {
+                        "count": 72,
+                        "stride": 3,
+                        "offset": 288,
+                        "dataType": 1
+                    },
+                    "uvsAttrDesc": {
+                        "count": 48,
+                        "stride": 2,
+                        "offset": 576,
+                        "dataType": 1
+                    },
+                    "indicesAttrDesc": {
+                        "count": 36,
+                        "stride": 1,
+                        "offset": 768,
+                        "dataType": 0
+                    },
+                    "subMeshesAttrDesc": {
+                        "count": 1,
+                        "stride": 5,
+                        "offset": 912,
+                        "dataType": 0
+                    }
+                },
+                "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:8410d59bf6358a01",
+                "generatedFingerprint": "mesh-editable-source-fnv32x2-v1:8410d59bf6358a01",
+                "exportSettingsRevision": 1,
+                "settings": {
+                    "optimize": true
+                },
+                "source": {
+                    "vertexCount": 24,
+                    "indexCount": 36,
+                    "faceCount": 12,
+                    "subMeshCount": 1,
+                    "streams": [
+                        {
+                            "kind": "normal",
+                            "stride": 3,
+                            "valueCount": 72
+                        },
+                        {
+                            "kind": "position",
+                            "stride": 3,
+                            "valueCount": 72
+                        },
+                        {
+                            "kind": "uv",
+                            "stride": 2,
+                            "valueCount": 48
+                        }
+                    ]
+                },
+                "generated": {
+                    "vertexCount": 24,
+                    "indexCount": 36,
+                    "faceCount": 12,
+                    "subMeshCount": 1,
+                    "streams": [
+                        {
+                            "kind": "normal",
+                            "stride": 3,
+                            "valueCount": 72
+                        },
+                        {
+                            "kind": "position",
+                            "stride": 3,
+                            "valueCount": 72
+                        },
+                        {
+                            "kind": "uv",
+                            "stride": 2,
+                            "valueCount": 48
+                        }
+                    ]
+                },
+                "removedUnusedOrDuplicateVertices": 0,
+                "compilationModel": "exact-complete-record-weld-v1",
+                "optimizationApplied": true,
+                "optimizationBlockers": []
+            }
+        },
+        "physicsAggregate": {
+            "shape": {
+                "type": 3,
+                "density": 1000
+            },
+            "body": {
+                "motionType": 2
+            },
+            "massProperties": {
+                "mass": 0.6000000238418579,
+                "inertia": [
+                    1666.6666259765625,
+                    1666.6666259765625,
+                    1666.6666259765625
+                ],
+                "centerOfMass": [
+                    0,
+                    0,
+                    0
+                ],
+                "inertiaOrientation": [
+                    0,
+                    0,
+                    0,
+                    1
+                ]
+            },
+            "material": {
+                "friction": 0.6,
+                "restitution": 0.15,
+                "staticFriction": 0.5,
+                "frictionCombine": 0,
+                "restitutionCombine": 0
+            }
+        }
+    },
+    "basePoseMatrix": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1
+    ],
+    "serializationVersion": "1.0.0"
+}

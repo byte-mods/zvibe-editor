@@ -1,0 +1,44 @@
+{
+	"version": 1,
+	"sourceKind": "babylon-material",
+	"valid": true,
+	"result": {
+		"sourcePath": "assets/floor.material",
+		"outputPath": "assets/floor.material",
+		"sourceKind": "babylon-material",
+		"settings": {
+			"validateTextures": true,
+			"extractEmbeddedTextures": true,
+			"compileNodeMaterial": true
+		},
+		"sourceBytes": 7790,
+		"textureReferences": [
+			{
+				"value": "assets/albedo.png",
+				"kind": "project",
+				"resolvedPath": "assets/albedo.png",
+				"exists": true,
+				"locations": [
+					"albedoTexture"
+				]
+			}
+		],
+		"missingTextures": [],
+		"extractedTextures": [],
+		"compile": {
+			"requested": true,
+			"attempted": false,
+			"valid": null,
+			"errors": [],
+			"warnings": [
+				"Compilation applies only to Babylon Node Material assets."
+			],
+			"statistics": null
+		},
+		"valid": true,
+		"errors": [],
+		"warnings": [
+			"Compilation applies only to Babylon Node Material assets."
+		]
+	}
+}

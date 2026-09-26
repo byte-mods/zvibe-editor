@@ -1,0 +1,59 @@
+{
+    "isSoundNode": true,
+    "tags": null,
+    "soundRelativePath": "assets/audio/start.wav",
+    "autoUpdateSpatial": true,
+    "volume": 0.7,
+    "isSpatial": false,
+    "maxDistance": 1000,
+    "panningModel": "equalpower",
+    "distanceModel": "linear",
+    "position": [
+        0,
+        0,
+        0
+    ],
+    "rotation": [
+        0,
+        0,
+        0
+    ],
+    "scaling": [
+        1,
+        1,
+        1
+    ],
+    "billboardMode": 0,
+    "scalingDeterminant": 1,
+    "infiniteDistance": false,
+    "ignoreNonUniformScaling": false,
+    "reIntegrateRotationIntoRotationQuaternion": false,
+    "name": "SFX Start",
+    "id": "0bfb02a5-4873-4137-8399-d38942880c06",
+    "state": "",
+    "metadata": {},
+    "type": "SoundNode",
+    "uniqueId": 1790421019092,
+    "localMatrix": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1
+    ],
+    "isEnabled": true,
+    "animations": [],
+    "ranges": [],
+    "serializationVersion": "1.0.0"
+}

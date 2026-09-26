@@ -1,0 +1,59 @@
+{
+    "isSoundNode": true,
+    "tags": null,
+    "soundRelativePath": "assets/audio/win.wav",
+    "autoUpdateSpatial": true,
+    "volume": 0.9,
+    "isSpatial": false,
+    "maxDistance": 1000,
+    "panningModel": "equalpower",
+    "distanceModel": "linear",
+    "position": [
+        0,
+        0,
+        0
+    ],
+    "rotation": [
+        0,
+        0,
+        0
+    ],
+    "scaling": [
+        1,
+        1,
+        1
+    ],
+    "billboardMode": 0,
+    "scalingDeterminant": 1,
+    "infiniteDistance": false,
+    "ignoreNonUniformScaling": false,
+    "reIntegrateRotationIntoRotationQuaternion": false,
+    "name": "SFX Win",
+    "id": "53e43aab-2c96-49e3-941e-62c432d4105f",
+    "state": "",
+    "metadata": {},
+    "type": "SoundNode",
+    "uniqueId": 1790421022959,
+    "localMatrix": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1
+    ],
+    "isEnabled": true,
+    "animations": [],
+    "ranges": [],
+    "serializationVersion": "1.0.0"
+}

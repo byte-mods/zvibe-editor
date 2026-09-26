@@ -1,0 +1,35 @@
+{
+	"version": 1,
+	"loadType": "compressedInMemory",
+	"result": {
+		"sourcePath": "assets/audio/lose.wav",
+		"outputPath": "assets/audio/lose.wav",
+		"transcoded": false,
+		"settings": {
+			"loadType": "compressedInMemory",
+			"compressionFormat": "preserve",
+			"quality": 0.8,
+			"sampleRate": "preserve",
+			"forceMono": false,
+			"normalize": false
+		},
+		"source": {
+			"codec": "pcm_s16le",
+			"container": "wav",
+			"durationSeconds": 1.6,
+			"sampleRate": 44100,
+			"channels": 1,
+			"bitRate": 705600
+		},
+		"output": {
+			"codec": "pcm_s16le",
+			"container": "wav",
+			"durationSeconds": 1.6,
+			"sampleRate": 44100,
+			"channels": 1,
+			"bitRate": 705600
+		},
+		"sourceBytes": 141164,
+		"outputBytes": 141164
+	}
+}

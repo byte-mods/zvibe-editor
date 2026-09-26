@@ -1,0 +1,206 @@
+{
+	"version": 2,
+	"outputPath": "assets/amiga.jpg",
+	"textureType": "default",
+	"colorSpace": "sRGB",
+	"alphaSource": "input",
+	"generateMipmaps": true,
+	"filterMode": "trilinear",
+	"wrapModeU": "repeat",
+	"wrapModeV": "repeat",
+	"anisoLevel": 1,
+	"sprite": null,
+	"processing": {
+		"outputFormat": "jpg",
+		"maxSizeApplied": false,
+		"nonPowerOfTwoApplied": false,
+		"fullMipChain": true,
+		"alphaDerivedFromGrayscale": false,
+		"transparentColorsDilated": false,
+		"normalMapGenerated": false,
+		"mipmapCoveragePreserved": false
+	},
+	"readableBitmapPath": null,
+	"readableDescriptorPath": null,
+	"previewPath": null,
+	"cubeFaces": [],
+	"environmentPath": null,
+	"mipmaps": [
+		{
+			"path": "assets/amiga_64_64.jpg",
+			"width": 64,
+			"height": 64
+		},
+		{
+			"path": "assets/amiga_32_32.jpg",
+			"width": 32,
+			"height": 32
+		},
+		{
+			"path": "assets/amiga_16_16.jpg",
+			"width": 16,
+			"height": 16
+		},
+		{
+			"path": "assets/amiga_8_8.jpg",
+			"width": 8,
+			"height": 8
+		},
+		{
+			"path": "assets/amiga_4_4.jpg",
+			"width": 4,
+			"height": 4
+		},
+		{
+			"path": "assets/amiga_2_2.jpg",
+			"width": 2,
+			"height": 2
+		},
+		{
+			"path": "assets/amiga_1_1.jpg",
+			"width": 1,
+			"height": 1
+		}
+	],
+	"result": {
+		"sourcePath": "assets/amiga.jpg",
+		"outputPath": "assets/amiga.jpg",
+		"settings": {
+			"textureType": "default",
+			"outputFormat": "automatic",
+			"colorSpace": "sRGB",
+			"alphaSource": "input",
+			"alphaIsTransparency": false,
+			"nonPowerOfTwo": "none",
+			"generateMipmaps": true,
+			"mipmapFilter": "kaiser",
+			"mipmapPreserveCoverage": false,
+			"mipmapAlphaTestReference": 0.5,
+			"maxSize": 4096,
+			"resizeAlgorithm": "lanczos3",
+			"compression": "normal",
+			"readable": false,
+			"filterMode": "trilinear",
+			"wrapModeU": "repeat",
+			"wrapModeV": "repeat",
+			"anisoLevel": 1,
+			"normalMapSource": "color",
+			"normalMapStrength": 0.25,
+			"spritePixelsPerUnit": 100,
+			"spriteMeshType": "tight",
+			"spriteExtrude": 1,
+			"platformOverrides": {}
+		},
+		"baseSettings": {
+			"textureType": "default",
+			"outputFormat": "automatic",
+			"colorSpace": "sRGB",
+			"alphaSource": "input",
+			"alphaIsTransparency": false,
+			"nonPowerOfTwo": "none",
+			"generateMipmaps": true,
+			"mipmapFilter": "kaiser",
+			"mipmapPreserveCoverage": false,
+			"mipmapAlphaTestReference": 0.5,
+			"maxSize": 4096,
+			"resizeAlgorithm": "lanczos3",
+			"compression": "normal",
+			"readable": false,
+			"filterMode": "trilinear",
+			"wrapModeU": "repeat",
+			"wrapModeV": "repeat",
+			"anisoLevel": 1,
+			"normalMapSource": "color",
+			"normalMapStrength": 0.25,
+			"spritePixelsPerUnit": 100,
+			"spriteMeshType": "tight",
+			"spriteExtrude": 1,
+			"platformOverrides": {}
+		},
+		"platform": "web",
+		"platformOverrideApplied": false,
+		"effectiveColorSpace": "sRGB",
+		"converted": true,
+		"resized": false,
+		"alphaRemoved": false,
+		"processing": {
+			"outputFormat": "jpg",
+			"maxSizeApplied": false,
+			"nonPowerOfTwoApplied": false,
+			"fullMipChain": true,
+			"alphaDerivedFromGrayscale": false,
+			"transparentColorsDilated": false,
+			"normalMapGenerated": false,
+			"mipmapCoveragePreserved": false
+		},
+		"sprite": null,
+		"source": {
+			"format": "jpeg",
+			"width": 128,
+			"height": 128,
+			"channels": 3,
+			"hasAlpha": false,
+			"space": "srgb",
+			"bytes": 593
+		},
+		"output": {
+			"format": "jpeg",
+			"width": 128,
+			"height": 128,
+			"channels": 3,
+			"hasAlpha": false,
+			"space": "srgb",
+			"bytes": 424
+		},
+		"mipmaps": [
+			{
+				"path": "assets/amiga_64_64.jpg",
+				"width": 64,
+				"height": 64,
+				"bytes": 608
+			},
+			{
+				"path": "assets/amiga_32_32.jpg",
+				"width": 32,
+				"height": 32,
+				"bytes": 429
+			},
+			{
+				"path": "assets/amiga_16_16.jpg",
+				"width": 16,
+				"height": 16,
+				"bytes": 391
+			},
+			{
+				"path": "assets/amiga_8_8.jpg",
+				"width": 8,
+				"height": 8,
+				"bytes": 401
+			},
+			{
+				"path": "assets/amiga_4_4.jpg",
+				"width": 4,
+				"height": 4,
+				"bytes": 413
+			},
+			{
+				"path": "assets/amiga_2_2.jpg",
+				"width": 2,
+				"height": 2,
+				"bytes": 359
+			},
+			{
+				"path": "assets/amiga_1_1.jpg",
+				"width": 1,
+				"height": 1,
+				"bytes": 324
+			}
+		],
+		"readableBitmapPath": null,
+		"readableDescriptorPath": null,
+		"readablePixelFormat": null,
+		"warnings": [],
+		"previewPath": null,
+		"highDynamicRange": null
+	}
+}

@@ -1,0 +1,228 @@
+{
+	"version": 2,
+	"outputPath": "assets/albedo.png",
+	"textureType": "default",
+	"colorSpace": "sRGB",
+	"alphaSource": "input",
+	"generateMipmaps": true,
+	"filterMode": "trilinear",
+	"wrapModeU": "repeat",
+	"wrapModeV": "repeat",
+	"anisoLevel": 1,
+	"sprite": null,
+	"processing": {
+		"outputFormat": "png",
+		"maxSizeApplied": false,
+		"nonPowerOfTwoApplied": false,
+		"fullMipChain": true,
+		"alphaDerivedFromGrayscale": false,
+		"transparentColorsDilated": false,
+		"normalMapGenerated": false,
+		"mipmapCoveragePreserved": false
+	},
+	"readableBitmapPath": null,
+	"readableDescriptorPath": null,
+	"previewPath": null,
+	"cubeFaces": [],
+	"environmentPath": null,
+	"mipmaps": [
+		{
+			"path": "assets/albedo_256_256.png",
+			"width": 256,
+			"height": 256
+		},
+		{
+			"path": "assets/albedo_128_128.png",
+			"width": 128,
+			"height": 128
+		},
+		{
+			"path": "assets/albedo_64_64.png",
+			"width": 64,
+			"height": 64
+		},
+		{
+			"path": "assets/albedo_32_32.png",
+			"width": 32,
+			"height": 32
+		},
+		{
+			"path": "assets/albedo_16_16.png",
+			"width": 16,
+			"height": 16
+		},
+		{
+			"path": "assets/albedo_8_8.png",
+			"width": 8,
+			"height": 8
+		},
+		{
+			"path": "assets/albedo_4_4.png",
+			"width": 4,
+			"height": 4
+		},
+		{
+			"path": "assets/albedo_2_2.png",
+			"width": 2,
+			"height": 2
+		},
+		{
+			"path": "assets/albedo_1_1.png",
+			"width": 1,
+			"height": 1
+		}
+	],
+	"result": {
+		"sourcePath": "assets/albedo.png",
+		"outputPath": "assets/albedo.png",
+		"settings": {
+			"textureType": "default",
+			"outputFormat": "automatic",
+			"colorSpace": "sRGB",
+			"alphaSource": "input",
+			"alphaIsTransparency": false,
+			"nonPowerOfTwo": "none",
+			"generateMipmaps": true,
+			"mipmapFilter": "kaiser",
+			"mipmapPreserveCoverage": false,
+			"mipmapAlphaTestReference": 0.5,
+			"maxSize": 4096,
+			"resizeAlgorithm": "lanczos3",
+			"compression": "normal",
+			"readable": false,
+			"filterMode": "trilinear",
+			"wrapModeU": "repeat",
+			"wrapModeV": "repeat",
+			"anisoLevel": 1,
+			"normalMapSource": "color",
+			"normalMapStrength": 0.25,
+			"spritePixelsPerUnit": 100,
+			"spriteMeshType": "tight",
+			"spriteExtrude": 1,
+			"platformOverrides": {}
+		},
+		"baseSettings": {
+			"textureType": "default",
+			"outputFormat": "automatic",
+			"colorSpace": "sRGB",
+			"alphaSource": "input",
+			"alphaIsTransparency": false,
+			"nonPowerOfTwo": "none",
+			"generateMipmaps": true,
+			"mipmapFilter": "kaiser",
+			"mipmapPreserveCoverage": false,
+			"mipmapAlphaTestReference": 0.5,
+			"maxSize": 4096,
+			"resizeAlgorithm": "lanczos3",
+			"compression": "normal",
+			"readable": false,
+			"filterMode": "trilinear",
+			"wrapModeU": "repeat",
+			"wrapModeV": "repeat",
+			"anisoLevel": 1,
+			"normalMapSource": "color",
+			"normalMapStrength": 0.25,
+			"spritePixelsPerUnit": 100,
+			"spriteMeshType": "tight",
+			"spriteExtrude": 1,
+			"platformOverrides": {}
+		},
+		"platform": "web",
+		"platformOverrideApplied": false,
+		"effectiveColorSpace": "sRGB",
+		"converted": true,
+		"resized": false,
+		"alphaRemoved": false,
+		"processing": {
+			"outputFormat": "png",
+			"maxSizeApplied": false,
+			"nonPowerOfTwoApplied": false,
+			"fullMipChain": true,
+			"alphaDerivedFromGrayscale": false,
+			"transparentColorsDilated": false,
+			"normalMapGenerated": false,
+			"mipmapCoveragePreserved": false
+		},
+		"sprite": null,
+		"source": {
+			"format": "png",
+			"width": 512,
+			"height": 512,
+			"channels": 3,
+			"hasAlpha": false,
+			"space": "srgb",
+			"bytes": 392624
+		},
+		"output": {
+			"format": "png",
+			"width": 512,
+			"height": 512,
+			"channels": 3,
+			"hasAlpha": false,
+			"space": "srgb",
+			"bytes": 408046
+		},
+		"mipmaps": [
+			{
+				"path": "assets/albedo_256_256.png",
+				"width": 256,
+				"height": 256,
+				"bytes": 95567
+			},
+			{
+				"path": "assets/albedo_128_128.png",
+				"width": 128,
+				"height": 128,
+				"bytes": 20910
+			},
+			{
+				"path": "assets/albedo_64_64.png",
+				"width": 64,
+				"height": 64,
+				"bytes": 4862
+			},
+			{
+				"path": "assets/albedo_32_32.png",
+				"width": 32,
+				"height": 32,
+				"bytes": 1234
+			},
+			{
+				"path": "assets/albedo_16_16.png",
+				"width": 16,
+				"height": 16,
+				"bytes": 401
+			},
+			{
+				"path": "assets/albedo_8_8.png",
+				"width": 8,
+				"height": 8,
+				"bytes": 194
+			},
+			{
+				"path": "assets/albedo_4_4.png",
+				"width": 4,
+				"height": 4,
+				"bytes": 128
+			},
+			{
+				"path": "assets/albedo_2_2.png",
+				"width": 2,
+				"height": 2,
+				"bytes": 100
+			},
+			{
+				"path": "assets/albedo_1_1.png",
+				"width": 1,
+				"height": 1,
+				"bytes": 90
+			}
+		],
+		"readableBitmapPath": null,
+		"readableDescriptorPath": null,
+		"readablePixelFormat": null,
+		"warnings": [],
+		"previewPath": null,
+		"highDynamicRange": null
+	}
+}

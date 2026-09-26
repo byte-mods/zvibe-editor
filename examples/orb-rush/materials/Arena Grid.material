@@ -1,0 +1,82 @@
+{
+	"tags": null,
+	"mainColor": [
+		0.05,
+		0.07,
+		0.16
+	],
+	"lineColor": [
+		0.25,
+		0.65,
+		1
+	],
+	"gridRatio": 100,
+	"gridOffset": [
+		0,
+		0,
+		0
+	],
+	"majorUnitFrequency": 5,
+	"minorUnitVisibility": 0.35,
+	"opacity": 1,
+	"antialias": true,
+	"useMultiScale": false,
+	"minGridSpacing": 0.001,
+	"gridOctaves": 4,
+	"useHorizonFade": false,
+	"useOriginMarker": false,
+	"linesOnly": false,
+	"gridThicknessModifier": 1,
+	"preMultiplyAlpha": false,
+	"useMaxLine": false,
+	"id": "630f0154-b0eb-4b4a-8f6f-89d4e45dca1b",
+	"name": "Arena Grid",
+	"checkReadyOnEveryCall": false,
+	"checkReadyOnlyOnce": false,
+	"state": "",
+	"alpha": 1,
+	"backFaceCulling": true,
+	"textureRepetitionMode": 0,
+	"textureRepetitionHexTilingParams": [
+		1,
+		0.6,
+		7,
+		0.5
+	],
+	"cullBackFaces": true,
+	"_alphaMode": [
+		2
+	],
+	"_needDepthPrePass": false,
+	"disableDepthWrite": false,
+	"disableColorWrite": false,
+	"forceDepthWrite": false,
+	"depthFunction": 0,
+	"separateCullingPass": false,
+	"fogEnabled": true,
+	"pointSize": 1,
+	"zOffset": 0,
+	"zOffsetUnits": 0,
+	"pointsCloud": false,
+	"fillMode": 0,
+	"_isVertexOutputInvariant": false,
+	"stencil": {
+		"tags": null,
+		"func": 519,
+		"backFunc": 519,
+		"funcRef": 1,
+		"funcMask": 255,
+		"opStencilFail": 7680,
+		"opDepthFail": 7680,
+		"opStencilDepthPass": 7681,
+		"backOpStencilFail": 7680,
+		"backOpDepthFail": 7680,
+		"backOpStencilDepthPass": 7681,
+		"mask": 255,
+		"enabled": false
+	},
+	"uniqueId": 1790420621726,
+	"plugins": {},
+	"customType": "BABYLON.GridMaterial",
+	"serializationVersion": "1.0.0"
+}

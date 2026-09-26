@@ -1,0 +1,44 @@
+{
+	"version": 1,
+	"sourceKind": "babylon-material",
+	"valid": true,
+	"result": {
+		"sourcePath": "assets/cube.material",
+		"outputPath": "assets/cube.material",
+		"sourceKind": "babylon-material",
+		"settings": {
+			"validateTextures": true,
+			"extractEmbeddedTextures": true,
+			"compileNodeMaterial": true
+		},
+		"sourceBytes": 7781,
+		"textureReferences": [
+			{
+				"value": "assets/amiga.jpg",
+				"kind": "project",
+				"resolvedPath": "assets/amiga.jpg",
+				"exists": true,
+				"locations": [
+					"albedoTexture"
+				]
+			}
+		],
+		"missingTextures": [],
+		"extractedTextures": [],
+		"compile": {
+			"requested": true,
+			"attempted": false,
+			"valid": null,
+			"errors": [],
+			"warnings": [
+				"Compilation applies only to Babylon Node Material assets."
+			],
+			"statistics": null
+		},
+		"valid": true,
+		"errors": [],
+		"warnings": [
+			"Compilation applies only to Babylon Node Material assets."
+		]
+	}
+}

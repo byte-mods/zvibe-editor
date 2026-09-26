@@ -1,0 +1,974 @@
+{
+    "meshes": [
+        {
+            "name": "Gem",
+            "id": "2f4f37dc-3964-4438-9754-556ef6c220fd",
+            "uniqueId": 1790420759014,
+            "type": "Mesh",
+            "position": [
+                0,
+                190,
+                0
+            ],
+            "rotation": [
+                1.5707963267948966,
+                0,
+                0
+            ],
+            "scaling": [
+                1,
+                1,
+                1
+            ],
+            "localMatrix": [
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1
+            ],
+            "isEnabled": true,
+            "isVisible": true,
+            "infiniteDistance": false,
+            "pickable": true,
+            "receiveShadows": true,
+            "billboardMode": 0,
+            "visibility": 1,
+            "alwaysSelectAsActiveMesh": false,
+            "checkCollisions": false,
+            "ellipsoid": [
+                0.5,
+                1,
+                0.5
+            ],
+            "ellipsoidOffset": [
+                0,
+                0,
+                0
+            ],
+            "doNotSyncBoundingInfo": false,
+            "isBlocker": false,
+            "sideOrientation": 1,
+            "isUnIndexed": false,
+            "geometryUniqueId": 1790420759015,
+            "geometryId": "de45b802-93c6-4adf-b9ef-206604917ae1",
+            "subMeshes": null,
+            "materialUniqueId": 1790420632359,
+            "materialId": "ddb2dac2-81c9-4c73-baf3-08a8ac73e3b8",
+            "metadata": {
+                "type": "Torus",
+                "diameter": 70,
+                "thickness": 20,
+                "tessellation": 32,
+                "babylonEditorEditableMeshSource": {
+                    "version": 1,
+                    "model": "unity-editable-source-generated-export-v1",
+                    "revision": 2,
+                    "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:9b5c4614943e323c",
+                    "exportSettingsRevision": 1,
+                    "exportSettings": {
+                        "optimize": true
+                    },
+                    "lastGenerated": {
+                        "file": "generatedGeometries/2f4f37dc-3964-4438-9754-556ef6c220fd.babylonbinarymeshdata",
+                        "binaryInfo": {
+                            "positionsAttrDesc": {
+                                "count": 3267,
+                                "stride": 3,
+                                "offset": 0,
+                                "dataType": 1
+                            },
+                            "normalsAttrDesc": {
+                                "count": 3267,
+                                "stride": 3,
+                                "offset": 13068,
+                                "dataType": 1
+                            },
+                            "uvsAttrDesc": {
+                                "count": 2178,
+                                "stride": 2,
+                                "offset": 26136,
+                                "dataType": 1
+                            },
+                            "indicesAttrDesc": {
+                                "count": 6534,
+                                "stride": 1,
+                                "offset": 34848,
+                                "dataType": 0
+                            },
+                            "subMeshesAttrDesc": {
+                                "count": 1,
+                                "stride": 5,
+                                "offset": 60984,
+                                "dataType": 0
+                            }
+                        },
+                        "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:9b5c4614943e323c",
+                        "generatedFingerprint": "mesh-editable-source-fnv32x2-v1:b43472c825f2fd0c",
+                        "exportSettingsRevision": 1,
+                        "settings": {
+                            "optimize": true
+                        },
+                        "source": {
+                            "vertexCount": 1089,
+                            "indexCount": 6534,
+                            "faceCount": 2178,
+                            "subMeshCount": 1,
+                            "streams": [
+                                {
+                                    "kind": "normal",
+                                    "stride": 3,
+                                    "valueCount": 3267
+                                },
+                                {
+                                    "kind": "position",
+                                    "stride": 3,
+                                    "valueCount": 3267
+                                },
+                                {
+                                    "kind": "uv",
+                                    "stride": 2,
+                                    "valueCount": 2178
+                                }
+                            ]
+                        },
+                        "generated": {
+                            "vertexCount": 1089,
+                            "indexCount": 6534,
+                            "faceCount": 2178,
+                            "subMeshCount": 1,
+                            "streams": [
+                                {
+                                    "kind": "normal",
+                                    "stride": 3,
+                                    "valueCount": 3267
+                                },
+                                {
+                                    "kind": "position",
+                                    "stride": 3,
+                                    "valueCount": 3267
+                                },
+                                {
+                                    "kind": "uv",
+                                    "stride": 2,
+                                    "valueCount": 2178
+                                }
+                            ]
+                        },
+                        "removedUnusedOrDuplicateVertices": 0,
+                        "compilationModel": "exact-complete-record-weld-v1",
+                        "optimizationApplied": true,
+                        "optimizationBlockers": []
+                    }
+                }
+            },
+            "instances": [
+                {
+                    "name": "Gem 0",
+                    "id": "3897ce4e-6b92-4caa-a8f7-f9c6d910fcb4",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        300,
+                        190,
+                        300
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772311
+                },
+                {
+                    "name": "Gem 1",
+                    "id": "98e0ad71-0b16-48aa-9256-64c8058680a6",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -300,
+                        190,
+                        -300
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772312
+                },
+                {
+                    "name": "Gem 2",
+                    "id": "7353de3d-80e9-420c-94fc-5cb47a91480f",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        0,
+                        140,
+                        -754
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772313
+                },
+                {
+                    "name": "Gem 3",
+                    "id": "69c43d80-776c-4aa2-a297-42870fbe8af9",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        0,
+                        140,
+                        754
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772314
+                },
+                {
+                    "name": "Gem 4",
+                    "id": "897aa88e-14e4-4b97-a908-1fcbf652e6a7",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1300,
+                        60,
+                        -820
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772315
+                },
+                {
+                    "name": "Gem 5",
+                    "id": "092ea42a-067c-43d1-a930-35a7815f6754",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1300,
+                        60,
+                        -820
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772316
+                },
+                {
+                    "name": "Gem 6",
+                    "id": "4e2e1542-77a4-47b2-a5bc-12e6e57661a7",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -850,
+                        60,
+                        1300
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772317
+                },
+                {
+                    "name": "Gem 7",
+                    "id": "b0329917-f119-4e98-8d03-5997d60a4648",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1300,
+                        60,
+                        750
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772318
+                },
+                {
+                    "name": "Gem 8",
+                    "id": "e8832aa6-0179-426d-8cfd-76ebeadf36d1",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        -1750,
+                        60,
+                        1300
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772319
+                },
+                {
+                    "name": "Gem 9",
+                    "id": "e569b9c3-8a4e-44d4-8e6f-43dfddda84d5",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1700,
+                        320,
+                        1700
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772320
+                },
+                {
+                    "name": "Gem 10",
+                    "id": "cdb3af65-a0f7-465e-a092-0dea54366413",
+                    "isEnabled": true,
+                    "isVisible": true,
+                    "isPickable": true,
+                    "checkCollisions": false,
+                    "position": [
+                        1900,
+                        60,
+                        -1900
+                    ],
+                    "scaling": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "rotation": [
+                        1.5707963267948966,
+                        0,
+                        0
+                    ],
+                    "metadata": {},
+                    "animations": [],
+                    "ranges": [],
+                    "uniqueId": 1790420772321
+                }
+            ],
+            "animations": [],
+            "ranges": [],
+            "layerMask": 268435455,
+            "alphaIndex": 1.7976931348623157e+308,
+            "hasVertexAlpha": false,
+            "overlayAlpha": 1,
+            "overlayColor": [
+                0,
+                0,
+                0
+            ],
+            "applyFog": true,
+            "delayLoadingFile": "assets/example.scene/geometries/de45b802-93c6-4adf-b9ef-206604917ae1.babylonbinarymeshdata",
+            "boundingBoxMaximum": [
+                45,
+                10,
+                45
+            ],
+            "boundingBoxMinimum": [
+                -45,
+                -10,
+                -45
+            ],
+            "_binaryInfo": {
+                "positionsAttrDesc": {
+                    "count": 3267,
+                    "stride": 3,
+                    "offset": 0,
+                    "dataType": 1
+                },
+                "normalsAttrDesc": {
+                    "count": 3267,
+                    "stride": 3,
+                    "offset": 13068,
+                    "dataType": 1
+                },
+                "uvsAttrDesc": {
+                    "count": 2178,
+                    "stride": 2,
+                    "offset": 26136,
+                    "dataType": 1
+                },
+                "indicesAttrDesc": {
+                    "count": 6534,
+                    "stride": 1,
+                    "offset": 34848,
+                    "dataType": 0
+                },
+                "subMeshesAttrDesc": {
+                    "count": 1,
+                    "stride": 5,
+                    "offset": 60984,
+                    "dataType": 0
+                }
+            },
+            "positions": null,
+            "normals": null,
+            "uvs": null,
+            "hasUVs": true,
+            "indices": null
+        }
+    ],
+    "transformNodes": [],
+    "cameras": [],
+    "lights": [],
+    "materials": [
+        {
+            "tags": null,
+            "directIntensity": 1,
+            "emissiveIntensity": 1,
+            "environmentIntensity": 1,
+            "specularIntensity": 1,
+            "disableBumpMap": false,
+            "ambientTextureStrength": 1,
+            "ambientTextureImpactOnAnalyticalLights": 0,
+            "metallic": 1,
+            "roughness": 0.18,
+            "metallicF0Factor": 1,
+            "metallicReflectanceColor": [
+                1,
+                1,
+                1
+            ],
+            "useOnlyMetallicFromMetallicReflectanceTexture": false,
+            "ambient": [
+                0,
+                0,
+                0
+            ],
+            "albedo": [
+                1,
+                0.8,
+                0.2
+            ],
+            "baseWeight": 1,
+            "reflectivity": [
+                1,
+                1,
+                1
+            ],
+            "reflection": [
+                1,
+                1,
+                1
+            ],
+            "emissive": [
+                1,
+                0.62,
+                0.08
+            ],
+            "microSurface": 1,
+            "useLightmapAsShadowmap": false,
+            "useAlphaFromAlbedoTexture": false,
+            "forceAlphaTest": false,
+            "alphaCutOff": 0.4,
+            "useSpecularOverAlpha": true,
+            "useMicroSurfaceFromReflectivityMapAlpha": false,
+            "useRoughnessFromMetallicTextureAlpha": true,
+            "useRoughnessFromMetallicTextureGreen": false,
+            "useMetallnessFromMetallicTextureBlue": false,
+            "useAmbientOcclusionFromMetallicTextureRed": false,
+            "useAmbientInGrayScale": false,
+            "useAutoMicroSurfaceFromReflectivityMap": false,
+            "usePhysicalLightFalloff": true,
+            "useGLTFLightFalloff": false,
+            "useRadianceOverAlpha": true,
+            "useObjectSpaceNormalMap": false,
+            "useParallax": false,
+            "useParallaxOcclusion": false,
+            "parallaxScaleBias": 0.05,
+            "disableLighting": false,
+            "forceIrradianceInFragment": false,
+            "maxSimultaneousLights": 8,
+            "invertNormalMapX": false,
+            "invertNormalMapY": false,
+            "twoSidedLighting": false,
+            "useAlphaFresnel": false,
+            "useLinearAlphaFresnel": false,
+            "forceNormalForward": false,
+            "enableSpecularAntiAliasing": false,
+            "useHorizonOcclusion": true,
+            "useRadianceOcclusion": true,
+            "unlit": false,
+            "applyDecalMapAfterDetailMap": false,
+            "_imageProcessingConfiguration": {
+                "tags": null,
+                "colorCurves": {
+                    "tags": null,
+                    "_globalHue": 30,
+                    "_globalDensity": 0,
+                    "_globalSaturation": 0,
+                    "_globalExposure": 0,
+                    "_highlightsHue": 30,
+                    "_highlightsDensity": 0,
+                    "_highlightsSaturation": 0,
+                    "_highlightsExposure": 0,
+                    "_midtonesHue": 30,
+                    "_midtonesDensity": 0,
+                    "_midtonesSaturation": 0,
+                    "_midtonesExposure": 0
+                },
+                "_colorCurvesEnabled": false,
+                "_colorGradingEnabled": false,
+                "_colorGradingWithGreenDepth": true,
+                "_colorGradingBGR": true,
+                "_exposure": 1.15,
+                "_toneMappingEnabled": true,
+                "_toneMappingType": 1,
+                "_contrast": 1.15,
+                "vignetteStretch": 0,
+                "vignetteCenterX": 0,
+                "vignetteCenterY": 0,
+                "vignetteWeight": 1.6,
+                "vignetteColor": [
+                    0,
+                    0,
+                    0,
+                    0
+                ],
+                "vignetteCameraFov": 0.5,
+                "_vignetteBlendMode": 0,
+                "_vignetteEnabled": true,
+                "_ditheringEnabled": false,
+                "_ditheringIntensity": 0.00392156862745098,
+                "_skipFinalColorClamp": false,
+                "_applyByPostProcess": true,
+                "_isEnabled": true,
+                "outputTextureWidth": 0,
+                "outputTextureHeight": 0
+            },
+            "id": "ddb2dac2-81c9-4c73-baf3-08a8ac73e3b8",
+            "name": "Gem",
+            "checkReadyOnEveryCall": false,
+            "checkReadyOnlyOnce": false,
+            "state": "",
+            "alpha": 1,
+            "backFaceCulling": true,
+            "textureRepetitionMode": 0,
+            "textureRepetitionHexTilingParams": [
+                1,
+                0.6,
+                7,
+                0.5
+            ],
+            "cullBackFaces": true,
+            "_alphaMode": [
+                2
+            ],
+            "_needDepthPrePass": false,
+            "disableDepthWrite": false,
+            "disableColorWrite": false,
+            "forceDepthWrite": false,
+            "depthFunction": 0,
+            "separateCullingPass": false,
+            "fogEnabled": true,
+            "pointSize": 1,
+            "zOffset": 0,
+            "zOffsetUnits": 0,
+            "pointsCloud": false,
+            "fillMode": 0,
+            "_isVertexOutputInvariant": false,
+            "stencil": {
+                "tags": null,
+                "func": 519,
+                "backFunc": 519,
+                "funcRef": 1,
+                "funcMask": 255,
+                "opStencilFail": 7680,
+                "opDepthFail": 7680,
+                "opStencilDepthPass": 7681,
+                "backOpStencilFail": 7680,
+                "backOpDepthFail": 7680,
+                "backOpStencilDepthPass": 7681,
+                "mask": 255,
+                "enabled": false
+            },
+            "uniqueId": 1790420632359,
+            "plugins": {
+                "PBRBRDFConfiguration": {
+                    "tags": null,
+                    "useEnergyConservation": true,
+                    "useSmithVisibilityHeightCorrelated": true,
+                    "useSphericalHarmonics": true,
+                    "useSpecularGlossinessInputEnergyConservation": true,
+                    "mixIblRadianceWithIrradiance": true,
+                    "useLegacySpecularEnergyConservation": true,
+                    "baseDiffuseModel": 0,
+                    "dielectricSpecularModel": 0,
+                    "conductorSpecularModel": 0,
+                    "name": "PBRBRDF",
+                    "priority": 90,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                },
+                "PBRClearCoatConfiguration": {
+                    "tags": null,
+                    "isEnabled": false,
+                    "intensity": 1,
+                    "roughness": 0,
+                    "indexOfRefraction": 1.5,
+                    "useRoughnessFromMainTexture": true,
+                    "remapF0OnInterfaceChange": true,
+                    "isTintEnabled": false,
+                    "tintColor": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "tintColorAtDistance": 1,
+                    "tintThickness": 1,
+                    "name": "PBRClearCoat",
+                    "priority": 100,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                },
+                "PBRIridescenceConfiguration": {
+                    "tags": null,
+                    "isEnabled": false,
+                    "intensity": 1,
+                    "minimumThickness": 100,
+                    "maximumThickness": 400,
+                    "indexOfRefraction": 1.3,
+                    "name": "PBRIridescence",
+                    "priority": 110,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                },
+                "PBRAnisotropicConfiguration": {
+                    "tags": null,
+                    "isEnabled": false,
+                    "intensity": 1,
+                    "direction": [
+                        1,
+                        0
+                    ],
+                    "legacy": false,
+                    "name": "PBRAnisotropic",
+                    "priority": 110,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                },
+                "PBRSheenConfiguration": {
+                    "tags": null,
+                    "isEnabled": false,
+                    "linkSheenWithAlbedo": false,
+                    "intensity": 1,
+                    "color": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "useRoughnessFromMainTexture": true,
+                    "albedoScaling": false,
+                    "name": "Sheen",
+                    "priority": 120,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                },
+                "PBRSubSurfaceConfiguration": {
+                    "tags": null,
+                    "isRefractionEnabled": false,
+                    "isTranslucencyEnabled": false,
+                    "isDispersionEnabled": false,
+                    "isScatteringEnabled": false,
+                    "_scatteringDiffusionProfileIndex": 0,
+                    "refractionIntensity": 1,
+                    "translucencyIntensity": 1,
+                    "useAlbedoToTintRefraction": false,
+                    "useAlbedoToTintTranslucency": false,
+                    "indexOfRefraction": 1.5,
+                    "_volumeIndexOfRefraction": -1,
+                    "invertRefractionY": false,
+                    "linkRefractionWithTransparency": false,
+                    "minimumThickness": 0,
+                    "maximumThickness": 1,
+                    "useThicknessAsDepth": false,
+                    "tintColor": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "tintColorAtDistance": 1,
+                    "dispersion": 0,
+                    "diffusionDistance": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "useMaskFromThicknessTexture": false,
+                    "useGltfStyleTextures": true,
+                    "applyAlbedoAfterSubSurface": false,
+                    "legacyTranslucency": false,
+                    "name": "PBRSubSurface",
+                    "priority": 130,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": true
+                },
+                "DetailMapConfiguration": {
+                    "tags": null,
+                    "diffuseBlendLevel": 1,
+                    "roughnessBlendLevel": 1,
+                    "bumpLevel": 1,
+                    "normalBlendMethod": 0,
+                    "isEnabled": false,
+                    "name": "DetailMap",
+                    "priority": 140,
+                    "resolveIncludes": false,
+                    "registerForExtraEvents": false
+                }
+            },
+            "customType": "BABYLON.PBRMaterial"
+        }
+    ],
+    "metadata": {
+        "type": "Torus",
+        "diameter": 70,
+        "thickness": 20,
+        "tessellation": 32,
+        "babylonEditorEditableMeshSource": {
+            "version": 1,
+            "model": "unity-editable-source-generated-export-v1",
+            "revision": 2,
+            "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:9b5c4614943e323c",
+            "exportSettingsRevision": 1,
+            "exportSettings": {
+                "optimize": true
+            },
+            "lastGenerated": {
+                "file": "generatedGeometries/2f4f37dc-3964-4438-9754-556ef6c220fd.babylonbinarymeshdata",
+                "binaryInfo": {
+                    "positionsAttrDesc": {
+                        "count": 3267,
+                        "stride": 3,
+                        "offset": 0,
+                        "dataType": 1
+                    },
+                    "normalsAttrDesc": {
+                        "count": 3267,
+                        "stride": 3,
+                        "offset": 13068,
+                        "dataType": 1
+                    },
+                    "uvsAttrDesc": {
+                        "count": 2178,
+                        "stride": 2,
+                        "offset": 26136,
+                        "dataType": 1
+                    },
+                    "indicesAttrDesc": {
+                        "count": 6534,
+                        "stride": 1,
+                        "offset": 34848,
+                        "dataType": 0
+                    },
+                    "subMeshesAttrDesc": {
+                        "count": 1,
+                        "stride": 5,
+                        "offset": 60984,
+                        "dataType": 0
+                    }
+                },
+                "sourceFingerprint": "mesh-editable-source-fnv32x2-v1:9b5c4614943e323c",
+                "generatedFingerprint": "mesh-editable-source-fnv32x2-v1:b43472c825f2fd0c",
+                "exportSettingsRevision": 1,
+                "settings": {
+                    "optimize": true
+                },
+                "source": {
+                    "vertexCount": 1089,
+                    "indexCount": 6534,
+                    "faceCount": 2178,
+                    "subMeshCount": 1,
+                    "streams": [
+                        {
+                            "kind": "normal",
+                            "stride": 3,
+                            "valueCount": 3267
+                        },
+                        {
+                            "kind": "position",
+                            "stride": 3,
+                            "valueCount": 3267
+                        },
+                        {
+                            "kind": "uv",
+                            "stride": 2,
+                            "valueCount": 2178
+                        }
+                    ]
+                },
+                "generated": {
+                    "vertexCount": 1089,
+                    "indexCount": 6534,
+                    "faceCount": 2178,
+                    "subMeshCount": 1,
+                    "streams": [
+                        {
+                            "kind": "normal",
+                            "stride": 3,
+                            "valueCount": 3267
+                        },
+                        {
+                            "kind": "position",
+                            "stride": 3,
+                            "valueCount": 3267
+                        },
+                        {
+                            "kind": "uv",
+                            "stride": 2,
+                            "valueCount": 2178
+                        }
+                    ]
+                },
+                "removedUnusedOrDuplicateVertices": 0,
+                "compilationModel": "exact-complete-record-weld-v1",
+                "optimizationApplied": true,
+                "optimizationBlockers": []
+            }
+        }
+    },
+    "basePoseMatrix": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1
+    ],
+    "serializationVersion": "1.0.0"
+}

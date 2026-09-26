@@ -1,0 +1,557 @@
+{
+    "clearColor": [
+        0.2,
+        0.2,
+        0.3,
+        1
+    ],
+    "ambientColor": [
+        0,
+        0,
+        0
+    ],
+    "environment": {
+        "iblIntensity": 1,
+        "environmentIntensity": 1,
+        "environmentTexture": {
+            "tags": null,
+            "url": "assets/country.env",
+            "boundingBoxPosition": [
+                0,
+                0,
+                0
+            ],
+            "rotationY": 0,
+            "files": [],
+            "textureMatrix": [
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1
+            ],
+            "textureMatrixRefraction": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ],
+            "name": "assets/country.env",
+            "hasAlpha": false,
+            "getAlphaFromRGB": false,
+            "level": 1,
+            "coordinatesIndex": 0,
+            "optimizeUVAllocation": true,
+            "coordinatesMode": 3,
+            "wrapU": 0,
+            "wrapV": 0,
+            "wrapR": 1,
+            "anisotropicFilteringLevel": 1,
+            "isCube": true,
+            "is3D": false,
+            "is2DArray": false,
+            "gammaSpace": false,
+            "invertZ": false,
+            "lodLevelInAlpha": false,
+            "lodGenerationOffset": 0,
+            "lodGenerationScale": 0.8,
+            "linearSpecularLOD": false,
+            "isRenderTarget": false,
+            "animations": []
+        }
+    },
+    "fog": {
+        "fogEnabled": false,
+        "fogMode": 0,
+        "fogStart": 10,
+        "fogEnd": 1000,
+        "fogDensity": 0.001,
+        "fogColor": [
+            0.640006735140596,
+            0.640006735140596,
+            0.640006735140596
+        ]
+    },
+    "physics": {
+        "gravity": [
+            0,
+            -981,
+            0
+        ]
+    },
+    "rendering": [
+        {
+            "cameraId": "3cc9ef80-8c60-43e0-bcc4-1b55ff36010d",
+            "ssao2RenderingPipeline": null,
+            "vlsPostProcess": null,
+            "ssrRenderingPipeline": null,
+            "motionBlurPostProcess": null,
+            "defaultRenderingPipeline": null,
+            "taaRenderingPipeline": null,
+            "customColorPostProcess": null,
+            "iblShadowsRenderPipeline": null
+        },
+        {
+            "cameraId": "3ee0f345-7bea-4f59-a657-28c90a7d5e74",
+            "ssao2RenderingPipeline": null,
+            "vlsPostProcess": null,
+            "ssrRenderingPipeline": null,
+            "motionBlurPostProcess": null,
+            "defaultRenderingPipeline": {
+                "samples": 16,
+                "fxaaEnabled": true,
+                "imageProcessingEnabled": true,
+                "exposure": 1.15,
+                "contrast": 1.15,
+                "fromLinearSpace": true,
+                "toneMappingEnabled": true,
+                "toneMappingType": 1,
+                "ditheringEnabled": false,
+                "ditheringIntensity": 0.00392156862745098,
+                "bloomEnabled": true,
+                "bloomThreshold": 0.7,
+                "bloomWeight": 0.45,
+                "bloomScale": 0.5,
+                "bloomKernel": 64,
+                "sharpenEnabled": false,
+                "sharpenEdgeAmount": 0.3,
+                "sharpenColorAmount": 1,
+                "grainEnabled": false,
+                "grainIntensity": 30,
+                "grainAnimated": false,
+                "depthOfFieldEnabled": false,
+                "depthOfFieldBlurLevel": 0,
+                "lensSize": 512,
+                "fStop": 0.25,
+                "focusDistance": 55000,
+                "focalLength": 50,
+                "vignetteEnabled": true,
+                "vignetteColor": [
+                    0,
+                    0,
+                    0,
+                    0
+                ],
+                "vignetteWeight": 1.6,
+                "chromaticAberrationEnabled": false,
+                "aberrationAmount": 30,
+                "radialIntensity": 0,
+                "direction": [
+                    0.707,
+                    0.707
+                ],
+                "centerPosition": [
+                    0.5,
+                    0.5
+                ],
+                "glowLayerEnabled": false,
+                "colorGradingEnabled": false,
+                "colorGradingWithGreenDepth": true,
+                "colorCurvesEnabled": false,
+                "globalHue": 30,
+                "globalDensity": 0,
+                "globalExposure": 0,
+                "globalSaturation": 0,
+                "highlightsHue": 30,
+                "highlightsDensity": 0,
+                "highlightsExposure": 0,
+                "highlightsSaturation": 0,
+                "midtonesHue": 30,
+                "midtonesDensity": 0,
+                "midtonesExposure": 0,
+                "midtonesSaturation": 0,
+                "shadowsHue": 30,
+                "shadowsDensity": 0,
+                "shadowsExposure": 0,
+                "shadowsSaturation": 0
+            },
+            "taaRenderingPipeline": null,
+            "customColorPostProcess": null,
+            "iblShadowsRenderPipeline": null
+        }
+    ],
+    "editorCamera": {
+        "tags": null,
+        "ellipsoid": [
+            0.5,
+            1,
+            0.5
+        ],
+        "ellipsoidOffset": [
+            0,
+            0,
+            0
+        ],
+        "checkCollisions": false,
+        "applyGravity": false,
+        "updateUpVectorFromRotation": false,
+        "rotation": [
+            0.6154797086703874,
+            -2.356194490192345,
+            0
+        ],
+        "speed": 200,
+        "position": [
+            1598.0456814496888,
+            1658.0456814496888,
+            1598.0456814496888
+        ],
+        "upVector": [
+            0,
+            1,
+            0
+        ],
+        "fov": 0.8,
+        "projectionPlaneTilt": 0,
+        "minZ": 1,
+        "maxZ": 1500000,
+        "inertia": 0.5,
+        "mode": 0,
+        "layerMask": 268435455,
+        "fovMode": 0,
+        "cameraRigMode": 0,
+        "ignoreCameraMaxZ": false,
+        "name": "Editor preview",
+        "id": "3cc9ef80-8c60-43e0-bcc4-1b55ff36010d",
+        "state": "",
+        "type": "EditorCamera",
+        "inputsmgr": {
+            "FreeCameraKeyboardMoveInput": {
+                "tags": null,
+                "keysUp": [
+                    87
+                ],
+                "keysUpward": [
+                    69
+                ],
+                "keysDown": [
+                    83
+                ],
+                "keysDownward": [
+                    81
+                ],
+                "keysLeft": [
+                    65
+                ],
+                "keysRight": [
+                    68
+                ],
+                "rotationSpeed": 0.5,
+                "keysRotateLeft": [],
+                "keysRotateRight": [],
+                "keysRotateUp": [],
+                "keysRotateDown": []
+            },
+            "FreeCameraMouseInput": {
+                "tags": null,
+                "buttons": [
+                    0,
+                    1,
+                    2
+                ],
+                "angularSensibility": 500
+            },
+            "FreeCameraMouseWheelInput": {
+                "tags": null,
+                "wheelXMoveRelative": 0,
+                "wheelYMoveRelative": 2,
+                "wheelPrecisionX": 3,
+                "wheelPrecisionY": 3,
+                "wheelPrecisionZ": 3
+            },
+            "EditorFreeCameraPanInput": {
+                "tags": null
+            }
+        },
+        "animations": [],
+        "ranges": [],
+        "isEnabled": true
+    },
+    "animations": [],
+    "metadata": {
+        "babylonEditorBuildPipeline": {
+            "version": 2,
+            "revision": 1,
+            "activeProfileId": "web-release",
+            "profiles": [
+                {
+                    "id": "web-release",
+                    "name": "Web Release",
+                    "target": "web",
+                    "enabled": true,
+                    "options": {
+                        "optimize": true,
+                        "mergeDecals": false,
+                        "mergeGeometries": false,
+                        "uploadToS3": false
+                    },
+                    "settings": {
+                        "outputDirectory": "dist",
+                        "buildMode": "release",
+                        "cleanBuild": true,
+                        "incremental": true,
+                        "sourceMaps": false,
+                        "minify": true,
+                        "codeCoverage": false,
+                        "compression": "none",
+                        "defineSymbols": [],
+                        "preBuildScripts": [],
+                        "postBuildScripts": [],
+                        "signing": {
+                            "enabled": false
+                        },
+                        "web": {
+                            "basePath": "/",
+                            "mode": "browser",
+                            "clientBrowser": "system",
+                            "optimization": "balanced",
+                            "moduleStripping": true,
+                            "webAssembly2023": true,
+                            "emscriptenToolchain": "typescript-bundler",
+                            "emscriptenExecutable": "emcc"
+                        },
+                        "productName": "Orb Rush",
+                        "companyName": "Zvibe Editor Samples",
+                        "version": "1.0.0"
+                    }
+                }
+            ]
+        },
+        "babylonEditorPhysicsConstraints": [],
+        "babylonEditorIKControllers": [],
+        "babylonEditorLookAtConstraints": [],
+        "babylonEditorSpriteIKControllers": [],
+        "babylonEditorBehaviorTrees": [],
+        "babylonEditorLocalization": {
+            "version": 2,
+            "revision": 0,
+            "defaultLocale": "en",
+            "locales": [
+                {
+                    "id": "en",
+                    "name": "en",
+                    "direction": "auto",
+                    "fallbackLocales": [],
+                    "pseudo": null
+                }
+            ],
+            "tables": [],
+            "assetTables": []
+        },
+        "babylonEditorAnimationEvents": [],
+        "babylonEditorRenderingLayers": [],
+        "babylonEditorRendererLists": [],
+        "babylonEditorRenderingGroups": [],
+        "babylonEditorCameraStacks": [],
+        "babylonEditorTerrainStreamingGroups": [],
+        "babylonEditorCloths": [],
+        "babylonEditorDeviceSimulation": {
+            "version": 2,
+            "revision": 0,
+            "enabled": false,
+            "profileId": null,
+            "width": 1179,
+            "height": 2556,
+            "dpi": 460,
+            "devicePixelRatio": 3,
+            "orientation": "portrait",
+            "safeArea": [
+                141,
+                0,
+                102,
+                0
+            ],
+            "platform": "ios",
+            "operatingSystem": "iOS 18",
+            "deviceModel": "Generic iOS Phone",
+            "cpuCores": 6,
+            "memoryMB": 6144,
+            "graphicsApi": "Metal",
+            "touchPoints": 5
+        },
+        "babylonEditorDeviceSimulationProfiles": {
+            "version": 1,
+            "revision": 0,
+            "profiles": []
+        },
+        "babylonEditorTesting": {
+            "version": 2,
+            "revision": 0,
+            "settings": {
+                "defaultTimeoutMs": 30000,
+                "playPreparationTimeoutMs": 120000,
+                "maximumRetainedRuns": 20
+            },
+            "suites": [],
+            "runs": []
+        },
+        "babylonEditorSceneTests": [],
+        "babylonEditorPerformanceBudgets": [],
+        "babylonEditorAudioBuses": [],
+        "babylonEditorAudioMixerSnapshots": [],
+        "babylonEditorAudioReverbZones": [],
+        "babylonEditorVideoPlayers": [],
+        "babylonEditorVfxBudgetProfiles": [],
+        "babylonEditorBuildReports": [],
+        "babylonEditorRendererDataSelections": {
+            "version": 1,
+            "revision": 1,
+            "default": null,
+            "cameras": []
+        },
+        "babylonEditorRenderingProfiles": [],
+        "babylonEditorRenderingVolumes": [],
+        "babylonEditorCustomRenderPasses": [],
+        "babylonEditorRendererFeatureInstances": [],
+        "babylonEditorXR": {
+            "version": 2,
+            "revision": 1,
+            "enabled": false,
+            "session": {
+                "mode": "immersive-vr",
+                "referenceSpaceType": "local-floor",
+                "initializeOnStartup": true,
+                "showEnterExitUI": true,
+                "requiredFeatures": [],
+                "optionalFeatures": []
+            },
+            "origin": {
+                "originNodeId": null,
+                "cameraId": null,
+                "floorMeshIds": [],
+                "worldScale": 100
+            },
+            "interaction": {
+                "pointerSelection": true,
+                "nearInteraction": true,
+                "handTracking": true,
+                "gazeMode": false,
+                "preferredHandedness": "any",
+                "maxPointerDistance": 100,
+                "gazeSelectionTimeMs": 3000
+            },
+            "locomotion": {
+                "teleportation": true,
+                "continuousMove": false,
+                "continuousTurn": false,
+                "movementSpeed": 1,
+                "rotationSpeed": 1,
+                "rotationAngleDegrees": 22.5,
+                "snapPointsOnly": false,
+                "snapPoints": [],
+                "snapRadius": 0.8
+            },
+            "simulation": {
+                "enabled": false,
+                "environmentMeshIds": [],
+                "headset": {
+                    "position": [
+                        0,
+                        1.7,
+                        0
+                    ],
+                    "rotation": [
+                        0,
+                        0,
+                        0
+                    ]
+                },
+                "leftController": {
+                    "position": [
+                        -0.25,
+                        1.35,
+                        0.35
+                    ],
+                    "rotation": [
+                        0,
+                        0,
+                        0
+                    ],
+                    "enabled": true
+                },
+                "rightController": {
+                    "position": [
+                        0.25,
+                        1.35,
+                        0.35
+                    ],
+                    "rotation": [
+                        0,
+                        0,
+                        0
+                    ],
+                    "enabled": true
+                },
+                "maxRayDistance": 100
+            },
+            "interactables": [],
+            "maxTraceEvents": 256
+        },
+        "babylonEditorProjectCodeTesting": {
+            "version": 1,
+            "revision": 0,
+            "packageScript": "test",
+            "coverageScript": "coverage",
+            "timeoutMs": 120000,
+            "maximumOutputBytes": 1048576,
+            "runs": []
+        },
+        "babylonEditorVehicles": [],
+        "babylonEditorNavAgents": [],
+        "babylonEditorMaterialPresets": [],
+        "scripts": [
+            {
+                "_id": "1589d76c-552d-45e3-a69e-9fb66c2f3f55",
+                "enabled": true,
+                "key": "scripts/game-manager.ts",
+                "executionOrder": 0,
+                "values": {
+                    "_timeLimit": {
+                        "type": "number",
+                        "value": 100
+                    },
+                    "_fallPenalty": {
+                        "type": "number",
+                        "value": 5
+                    },
+                    "_pickupRadius": {
+                        "type": "number",
+                        "value": 115
+                    }
+                }
+            }
+        ],
+        "babylonEditorProjectScriptExecutionOrders": {}
+    },
+    "clusteredLight": {
+        "maxRange": 16383,
+        "depthSlices": 16,
+        "verticalTiles": 64,
+        "horizontalTiles": 64,
+        "lights": []
+    },
+    "serializationVersion": "1.0.0"
+}
