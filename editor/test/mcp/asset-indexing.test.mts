@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { mkdir, mkdtemp, readFile, remove, writeFile } from "fs-extra";
+import { mkdir, mkdtemp, pathExists, readFile, remove, writeFile } from "fs-extra";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -101,6 +101,27 @@ describe("background asset indexing", () => {
 		const second = refreshAssetRegistryPaths([join(directory, "assets", "d.png")]);
 		expect(await second).not.toBe(await first);
 		expect((await second).entries.map((entry: any) => entry.path)).toContain("assets/d.png");
+	});
+
+	test("replaces the registry file atomically so concurrent readers never see it missing", async () => {
+		await writeFile(join(directory, "assets", "texture.png"), "texture");
+		await rebuildAssetRegistry();
+		const registryFile = join(directory, ".bjseditor", "asset-registry.json");
+
+		let saving = true;
+		let missing = 0;
+		const watcher = (async () => {
+			while (saving) {
+				if (!(await pathExists(registryFile))) missing++;
+			}
+		})();
+		for (let index = 0; index < 10; index++) {
+			await writeFile(join(directory, "assets", `file-${index}.png`), String(index));
+			await refreshAssetRegistryPaths([join(directory, "assets", `file-${index}.png`)]);
+		}
+		saving = false;
+		await watcher;
+		expect(missing).toBe(0);
 	});
 
 	test("starts non-blocking, reports bounded progress, and atomically publishes worker analysis", async () => {

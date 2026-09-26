@@ -1508,6 +1508,8 @@ async function makeEntry(analysis: IAssetFileWorkerAnalysis): Promise<IAssetRegi
 	};
 }
 
+const REGISTRY_METADATA_CONCURRENCY = 32;
+
 async function makeEntries(files: string[], hooks: IAssetWorkerPoolOptions & { onPhase?: (phase: AssetIndexingJobPhase) => void } = {}): Promise<IAssetRegistryEntry[]> {
 	hooks.onPhase?.("analyzing");
 	const analyses = await analyzeAssetFilesWithWorkers(files, projectDirectory(), analyzeAssetFile, hooks);
@@ -1515,15 +1517,15 @@ async function makeEntries(files: string[], hooks: IAssetWorkerPoolOptions & { o
 		throw new AssetIndexingCancelledError();
 	}
 	hooks.onPhase?.("metadata");
+	// Sidecar reads are independent, so read them in bounded batches: one file at a time costs a full event-loop turn per
+	// await, which makes rebuilds of large projects take minutes while the renderer is busy drawing the preview.
 	const entries: IAssetRegistryEntry[] = [];
-	for (const analysis of analyses) {
+	for (let index = 0; index < analyses.length; index += REGISTRY_METADATA_CONCURRENCY) {
 		if (hooks.isCancelled?.()) {
 			throw new AssetIndexingCancelledError();
 		}
-		const entry = await makeEntry(analysis);
-		if (entry) {
-			entries.push(entry);
-		}
+		const batch = await Promise.all(analyses.slice(index, index + REGISTRY_METADATA_CONCURRENCY).map((analysis) => makeEntry(analysis)));
+		entries.push(...batch.filter((entry): entry is IAssetRegistryEntry => entry !== null));
 	}
 	return entries;
 }
@@ -1592,7 +1594,17 @@ async function saveRegistry(entries: IAssetRegistryEntry[]): Promise<IAssetRegis
 	const temporary = `${destination}.${randomUUID()}.tmp`;
 	await mkdir(dirname(destination), { recursive: true });
 	await writeJSON(temporary, registry, { spaces: "\t" });
-	await move(temporary, destination, { overwrite: true });
+	// rename() replaces the registry atomically. fs-extra's move({ overwrite }) removes the old file first, and a
+	// concurrent readRegistry() in that window finds no registry and starts a full, slow rebuild.
+	try {
+		await rename(temporary, destination);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code !== "EEXIST" && code !== "EPERM") {
+			throw error;
+		}
+		await move(temporary, destination, { overwrite: true });
+	}
 	return registry;
 }
 
