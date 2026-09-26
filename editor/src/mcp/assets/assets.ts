@@ -143,14 +143,22 @@ async function collectDeletedAssetArtifacts(assetPath: string, root: string): Pr
 	}
 
 	const guids = new Set<string>();
-	for (const sidecar of sidecars) {
-		try {
-			const metadata = await readJSON(sidecar);
+	// Read sidecars in bounded batches; deleting a folder of hundreds of assets one read at a time took minutes.
+	for (let index = 0; index < sidecars.length; index += 32) {
+		const batch = await Promise.all(
+			sidecars.slice(index, index + 32).map(async (sidecar) => {
+				try {
+					return await readJSON(sidecar);
+				} catch {
+					// Missing or malformed sidecars cannot own a safe importer-artifact directory.
+					return null;
+				}
+			})
+		);
+		for (const metadata of batch) {
 			if (typeof metadata?.guid === "string" && assetGuidPattern.test(metadata.guid)) {
 				guids.add(metadata.guid.toLowerCase());
 			}
-		} catch {
-			// Missing or malformed sidecars cannot own a safe importer-artifact directory.
 		}
 	}
 	return {

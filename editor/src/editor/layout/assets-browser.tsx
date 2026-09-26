@@ -203,6 +203,8 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 	private _importSourceRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
 	private _assetIndexingStatusTimeout: ReturnType<typeof setTimeout> | null = null;
 	private _pendingRegistryPaths = new Set<string>();
+	private _pendingAssetChangeCount = 0;
+	private _pendingLastAssetChange: { event: string; path: string; at: string } | null = null;
 	private _pendingImportSourcePaths = new Set<string>();
 	private _importSourceWatchSignature = "";
 	private _autoReimportWatchRefresh: Promise<void> = Promise.resolve();
@@ -446,7 +448,10 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		}
 		const registryPath = path.endsWith(".bjsmeta.json") ? path.slice(0, -".bjsmeta.json".length) : path;
 		this._pendingRegistryPaths.add(registryPath);
-		this.setState((state) => ({ assetChangeCount: state.assetChangeCount + 1, lastAssetChange: { event, path, at: new Date().toISOString() } }));
+		// Count changes here but render them once per debounced burst: a setState per event re-rendered the whole browser
+		// for every file of a large copy/delete (thousands of renders), starving the renderer and every pending asset call.
+		this._pendingAssetChangeCount++;
+		this._pendingLastAssetChange = { event, path, at: new Date().toISOString() };
 		if (this._assetWatchRefreshTimeout) {
 			clearTimeout(this._assetWatchRefreshTimeout);
 		}
@@ -454,6 +459,11 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			this._assetWatchRefreshTimeout = null;
 			const paths = [...this._pendingRegistryPaths];
 			this._pendingRegistryPaths.clear();
+			const changeCount = this._pendingAssetChangeCount;
+			const lastAssetChange = this._pendingLastAssetChange;
+			this._pendingAssetChangeCount = 0;
+			this._pendingLastAssetChange = null;
+			this.setState((state) => ({ assetChangeCount: state.assetChangeCount + changeCount, lastAssetChange }));
 			void (async () => {
 				try {
 					await refreshAssetRegistryPaths(paths);
