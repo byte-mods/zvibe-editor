@@ -399,6 +399,28 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	 */
 	public lockedCanvasSize: { width: number; height: number } | null = null;
 
+	private _suspendedCaptureViews: { enabled: boolean }[] = [];
+
+	/**
+	 * Renders at an exact resolution for captures: locks the canvas size and suspends the engine views, which otherwise
+	 * resize the rendering canvas to their on-screen size every frame. Callers render explicitly (e.g. `scene.render()`).
+	 */
+	public beginFixedSizeCapture(width: number, height: number): void {
+		this.lockedCanvasSize = { width, height };
+		this._suspendedCaptureViews = (this.engine.views ?? []).filter((view) => view.enabled);
+		this._suspendedCaptureViews.forEach((view) => (view.enabled = false));
+		this.engine.setSize(width, height);
+	}
+
+	/**
+	 * Restores the engine views and panel-driven resizing after {@link beginFixedSizeCapture}.
+	 */
+	public endFixedSizeCapture(): void {
+		this._suspendedCaptureViews.forEach((view) => (view.enabled = true));
+		this._suspendedCaptureViews = [];
+		this.lockedCanvasSize = null;
+	}
+
 	/**
 	 * Resizes the engine.
 	 */

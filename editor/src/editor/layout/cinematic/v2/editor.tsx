@@ -454,9 +454,8 @@ export function CinematicDocumentEditor(props: ICinematicDocumentEditorProps): R
 			preview.scene.useConstantAnimationDeltaTime = true;
 			preview.axis.stop();
 			preview.icons.stop();
-			// Keep the capture resolution even if a panel resize fires while frames are being recorded.
-			preview.lockedCanvasSize = { width: selectedProfile.width, height: selectedProfile.height };
-			preview.engine.setSize(selectedProfile.width, selectedProfile.height);
+			// Render at the profile resolution; engine views and panel resizes must not refit the canvas mid-capture.
+			preview.beginFixedSizeCapture(selectedProfile.width, selectedProfile.height);
 			const recorder = new CinematicDocumentRecorder(document, preview.scene as unknown as CoreScene);
 			const sink = new CinematicFileCaptureSink({
 				canvas,
@@ -476,7 +475,7 @@ export function CinematicDocumentEditor(props: ICinematicDocumentEditorProps): R
 		} catch (exception) {
 			setError(exception instanceof Error ? exception.message : String(exception));
 		} finally {
-			preview.lockedCanvasSize = null;
+			preview.endFixedSizeCapture();
 			preview.engine.setSize(previous.width, previous.height);
 			preview.engine.renderEvenInBackground = previous.renderEvenInBackground;
 			preview.scene.useConstantAnimationDeltaTime = previous.constantDelta;
