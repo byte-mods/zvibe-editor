@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Positive real-editor MCP verification for project CRDT, collaboration, discovery, relay, gateway, locks, merge data, changelists, preferences, and external-editor dispatch. */
 import { spawn } from "node:child_process";
+import { rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,7 +82,9 @@ function assert(condition, message, evidence) {
 
 const suffix = `${Date.now()}-${process.pid}`;
 const collectionName = `ZvibeLive${suffix}`;
-const textPath = "README.md";
+// A scenario-owned document keeps the text lifecycle independent of whatever the project root contains.
+const textPath = `zvibe-collaboration-live-${suffix}.md`;
+let textFixture = null;
 const marker = `\n<!-- zvibe-mcp-live-${suffix} -->\n`;
 let admin;
 let secondary;
@@ -115,6 +118,8 @@ try {
 
 	const status = await call("get_editor_status");
 	assert(status.ready && status.projectPath, "A ready editor project is required", status);
+	textFixture = join(dirname(status.projectPath), textPath);
+	await writeFile(textFixture, `# Zvibe collaboration live fixture\n\nCreated by the MCP live scenario ${suffix}.\n`, { flag: "wx" });
 	await call("delete_asset", { path: "certs", confirm: true }).catch(() => undefined);
 
 	const initialCollection = await call("get_collaborative_ordered_collection", { name: collectionName });
@@ -375,6 +380,7 @@ try {
 	} catch (cleanupError) {
 		stderr += `\nCleanup error: ${cleanupError?.stack ?? cleanupError}`;
 	}
+	if (textFixture) await rm(textFixture, { force: true });
 	child.kill();
 	if (process.exitCode && stderr.trim()) console.error(stderr.trim());
 }
