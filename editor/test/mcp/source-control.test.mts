@@ -149,7 +149,7 @@ describe("mcp/project/source-control", () => {
 
 		const bare = await mkdtemp(join(tmpdir(), "babylon-editor-source-control-remote-"));
 		temporaryDirectories.push(bare);
-		await git(bare, "init", "--bare");
+		await git(bare, "init", "--bare", "-b", "main");
 		await git(root, "remote", "add", "origin", bare);
 		await expect(pushProjectSourceControl({} as any, { remote: "origin", confirm: false }, options)).rejects.toThrow("confirm must be true");
 
@@ -204,7 +204,7 @@ describe("mcp/project/source-control", () => {
 
 		const bare = await mkdtemp(join(tmpdir(), "babylon-editor-source-control-auth-local-"));
 		temporaryDirectories.push(bare);
-		await git(bare, "init", "--bare");
+		await git(bare, "init", "--bare", "-b", "main");
 		await git(root, "remote", "set-url", "origin", bare);
 		const local = await inspectProjectSourceControlAuthentication({} as any, { remote: "origin" }, options);
 		expect(local).toMatchObject({ status: "ready", fetch: { transports: ["local"] }, push: { transports: ["local"] }, issues: [] });
@@ -256,7 +256,7 @@ describe("mcp/project/source-control", () => {
 		const { root, projectRoot, options } = await createRepository();
 		const bare = await mkdtemp(join(tmpdir(), "babylon-editor-source-control-fetch-remote-"));
 		temporaryDirectories.push(bare);
-		await git(bare, "init", "--bare");
+		await git(bare, "init", "--bare", "-b", "main");
 		await git(root, "remote", "add", "origin", bare);
 		await git(root, "push", "--set-upstream", "origin", "main");
 
@@ -436,7 +436,7 @@ describe("mcp/project/source-control", () => {
 		const { root, projectRoot, options } = await createRepository();
 		const bare = await mkdtemp(join(tmpdir(), "babylon-editor-source-control-remote-branch-"));
 		temporaryDirectories.push(bare);
-		await git(bare, "init", "--bare");
+		await git(bare, "init", "--bare", "-b", "main");
 		await git(bare, "symbolic-ref", "HEAD", "refs/heads/main");
 		await git(root, "remote", "add", "origin", bare);
 		await git(root, "push", "--set-upstream", "origin", "main");
@@ -483,7 +483,7 @@ describe("mcp/project/source-control", () => {
 		const { root, options } = await createRepository();
 		const bare = await mkdtemp(join(tmpdir(), "babylon-editor-source-control-remote-tag-"));
 		temporaryDirectories.push(bare);
-		await git(bare, "init", "--bare");
+		await git(bare, "init", "--bare", "-b", "main");
 		await git(bare, "symbolic-ref", "HEAD", "refs/heads/main");
 		await git(root, "remote", "add", "origin", bare);
 		await git(root, "push", "--set-upstream", "origin", "main");

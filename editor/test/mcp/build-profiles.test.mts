@@ -103,6 +103,23 @@ describe("mcp/build profiles", () => {
 		await remove(directory);
 	});
 
+	test("keeps an explicit Electron target platform instead of replacing it with the host platform", () => {
+		const hostPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+		Object.defineProperty(process, "platform", { ...hostPlatform, value: "linux" });
+		try {
+			createBuildProfile(scene, { expectedRevision: 0, id: "mac", name: "Mac", target: "electron", settings: { electronPlatform: "darwin" } });
+			createBuildProfile(scene, { expectedRevision: 1, id: "windows", name: "Windows", target: "electron", settings: { electronPlatform: "win32" } });
+			createBuildProfile(scene, { expectedRevision: 2, id: "host", name: "Host", target: "electron" });
+			expect(listBuildProfiles(scene).profiles.map((profile: any) => [profile.id, profile.settings.electronPlatform])).toEqual([
+				["mac", "darwin"],
+				["windows", "win32"],
+				["host", "linux"],
+			]);
+		} finally {
+			Object.defineProperty(process, "platform", hostPlatform);
+		}
+	});
+
 	test("migrates legacy profiles and enforces exact revisions, stable ids, active selection, duplicate, rename, and delete", () => {
 		(scene.metadata ??= {}).babylonEditorBuildProfiles = [{ name: "Legacy Web", target: "web", settings: { outputDirectory: "dist/legacy" } }];
 		const migrated = listBuildProfiles(scene);

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Scene } from "babylonjs";
 
 import { waitUntil } from "../../tools/tools";
+import { pickMarketplaceDownloadOption } from "../../tools/marketplaces/download-options";
 
 import { EditorMarketplaceBrowser } from "../../editor/layout/marketplace";
 import { ImportProgress } from "../../editor/layout/marketplace/import-progress";
@@ -102,16 +103,12 @@ export async function downloadMarketplaceAsset(_scene: Scene, data: any, options
 		throw new Error(`Could not resolve marketplace asset details for: ${data.assetId}`);
 	}
 
-	const downloadOptions = asset.downloadOptions ?? {};
-	const qualities = Object.keys(downloadOptions);
-	const quality = data.resolution && qualities.includes(data.resolution) ? data.resolution : qualities[0];
-
-	if (!quality) {
+	const selection = pickMarketplaceDownloadOption(asset.downloadOptions ?? {}, data.resolution);
+	if (!selection) {
 		throw new Error(`No downloadable options available for asset: ${data.assetId}`);
 	}
 
-	const types = Object.keys(downloadOptions[quality] ?? {});
-	const type = types[0];
+	const { quality, type, importAs } = selection;
 
 	// Show the same bottom-right progress toast the editor UI uses, so the user sees the download
 	// progress (and can cancel it) when the agent triggers a marketplace import.
@@ -123,7 +120,7 @@ export async function downloadMarketplaceAsset(_scene: Scene, data: any, options
 
 	try {
 		// downloadAndImport runs the same path as the UI: shows progress and refreshes the assets browser.
-		await provider.downloadAndImport(asset, options.editor, quality, type, type);
+		await provider.downloadAndImport(asset, options.editor, quality, type, importAs);
 		toast.success(`Successfully imported ${asset.name}`, { id: asset.id, duration: 3000 });
 	} catch (e) {
 		if (e instanceof Error && e.message === "Download aborted by user.") {

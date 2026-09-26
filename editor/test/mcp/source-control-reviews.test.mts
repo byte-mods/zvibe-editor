@@ -4,7 +4,7 @@ import { AddressInfo } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
 	createProjectSourceControlReview,
@@ -23,7 +23,6 @@ import { configureProjectCollaboration, createProjectCollaborationMember, joinPr
 
 const temporaryDirectories: string[] = [];
 const servers: Server[] = [];
-const environmentVariables: string[] = [];
 
 async function createProject(): Promise<{ root: string; options: any }> {
 	const root = await mkdtemp(join(tmpdir(), "babylon-editor-source-control-reviews-"));
@@ -59,14 +58,18 @@ async function startProvider(handler: (request: IncomingMessage, response: Serve
 }
 
 function setToken(name: string, value: string): void {
-	process.env[name] = value;
-	environmentVariables.push(name);
+	vi.stubEnv(name, value);
 }
 
-afterEach(async () => {
-	for (const name of environmentVariables.splice(0)) {
-		delete process.env[name];
+beforeEach(() => {
+	// Keep assertions about unconfigured providers independent of tokens exported by the host shell or CI.
+	for (const name of ["GITHUB_TOKEN", "GITLAB_TOKEN", "BITBUCKET_TOKEN", "AZURE_DEVOPS_PAT"]) {
+		vi.stubEnv(name, undefined);
 	}
+});
+
+afterEach(async () => {
+	vi.unstubAllEnvs();
 	await Promise.all(
 		servers.splice(0).map(
 			(server) =>

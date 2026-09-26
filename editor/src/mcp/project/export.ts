@@ -367,7 +367,11 @@ function normalizeSettings(value: unknown, target: BuildTarget): IBuildProfileSe
 		headless: target === "headless" ? normalizeHeadlessBuildSettings(source.headless, defaults.headless) : undefined,
 		pwa: source.pwa && typeof source.pwa === "object" ? structuredClone(source.pwa as Record<string, unknown>) : undefined,
 		electronPlatform:
-			source.electronPlatform === "win32" || source.electronPlatform === "linux" ? source.electronPlatform : target === "electron" ? defaults.electronPlatform : undefined,
+			source.electronPlatform === "darwin" || source.electronPlatform === "win32" || source.electronPlatform === "linux"
+				? source.electronPlatform
+				: target === "electron"
+					? defaults.electronPlatform
+					: undefined,
 		electronArch: target === "electron" ? (source.electronArch === "arm64" || source.electronArch === "x64" ? source.electronArch : defaults.electronArch) : undefined,
 		electronAsar: target === "electron" ? source.electronAsar !== false : undefined,
 		electronIcon: typeof source.electronIcon === "string" && source.electronIcon.trim() ? safeRelativePath(source.electronIcon, "", "Electron icon") : undefined,

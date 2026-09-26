@@ -1,5 +1,6 @@
 import { ipcRenderer } from "electron";
-import { dirname, join, isAbsolute, extname } from "path/posix";
+import { createHash } from "crypto";
+import { dirname, join, isAbsolute, extname, normalize } from "path/posix";
 import { ensureDir, readdir, remove, writeFile, writeJSON } from "fs-extra";
 
 import axios from "axios";
@@ -25,6 +26,39 @@ import {
 	IMarketplaceSettings,
 	IMarketplaceDownloadItem,
 } from "./types";
+
+/**
+ * Returns a file-name-safe version of the given marketplace-provided name.
+ * Asset names come from remote APIs and are used to build file names, so path separators,
+ * reserved characters and dot-only names must never reach the file system.
+ */
+export function getSafeMarketplaceFileName(name: string): string {
+	const safe = Array.from(name, (character) => (character.charCodeAt(0) < 32 ? "_" : character))
+		.join("")
+		.replace(/[\\/:*?"<>|]/g, "_")
+		.replace(/\.{2,}/g, "_")
+		.trim();
+	return safe && safe !== "." ? safe : "asset";
+}
+
+/**
+ * Resolves a remote-provided relative file path inside the given directory.
+ * Throws when the path is absolute or escapes the directory (e.g. "../../evil.js").
+ */
+export function resolveMarketplaceFilePath(directory: string, relativePath: string): string {
+	const normalizedRelativePath = relativePath.replace(/\\/g, "/");
+	if (!normalizedRelativePath || isAbsolute(normalizedRelativePath) || /^[a-zA-Z]:/.test(normalizedRelativePath)) {
+		throw new Error(`Refusing to write marketplace file with an absolute path: ${relativePath}`);
+	}
+
+	const root = normalize(directory.replace(/\\/g, "/")).replace(/\/+$/, "");
+	const resolved = normalize(join(root, normalizedRelativePath));
+	if (!resolved.startsWith(`${root}/`)) {
+		throw new Error(`Refusing to write marketplace file outside of the asset directory: ${relativePath}`);
+	}
+
+	return resolved;
+}
 
 export abstract class MarketplaceProvider {
 	private static _registry: MarketplaceProvider[] = [];
@@ -126,7 +160,8 @@ export abstract class MarketplaceProvider {
 		const projectDir = dirname(projectPath);
 		const downloadPathKey = projectPath ? `marketplace-download-${projectPath}` : "marketplace-download-path";
 		const downloadPath = localStorage.getItem(downloadPathKey) || "assets";
-		return isAbsolute(downloadPath) ? join(downloadPath, this.id, assetId) : join(projectDir, downloadPath, this.id, assetId);
+		const safeAssetId = getSafeMarketplaceFileName(assetId);
+		return isAbsolute(downloadPath) ? join(downloadPath, this.id, safeAssetId) : join(projectDir, downloadPath, this.id, safeAssetId);
 	}
 
 	public async downloadAndImport(asset: IMarketplaceAsset, editor: Editor, selectedQuality: string, selectedType: string, type?: string): Promise<void> {
@@ -179,7 +214,7 @@ export abstract class MarketplaceProvider {
 					throw new Error("Download aborted by user.");
 				}
 
-				const filePath = join(assetDir, file.path);
+				const filePath = resolveMarketplaceFilePath(assetDir, file.path);
 				const fileDirPath = dirname(filePath);
 				await ensureDir(fileDirPath);
 
@@ -212,6 +247,13 @@ export abstract class MarketplaceProvider {
 				});
 
 				const buffer = Buffer.from(response.data);
+				if (file.md5) {
+					const md5 = createHash("md5").update(buffer).digest("hex");
+					if (md5.toLowerCase() !== file.md5.toLowerCase()) {
+						throw new Error(`Downloaded file '${file.path}' is corrupted (expected MD5 ${file.md5}, got ${md5}).`);
+					}
+				}
+
 				await writeFile(filePath, buffer);
 
 				if (file.extract) {
@@ -255,7 +297,7 @@ export abstract class MarketplaceProvider {
 					})
 				);
 				for (const item of files) {
-					await this._convertFileToEnv(join(assetDir, item.path), editor);
+					await this._convertFileToEnv(resolveMarketplaceFilePath(assetDir, item.path), editor);
 				}
 			} else {
 				await this._convertToMaterial(assetDir, asset, editor);
@@ -362,7 +404,7 @@ export abstract class MarketplaceProvider {
 
 		const displacementBuffer = await sharp(join(assetDir, displacementFile)).resize(width, height).grayscale().toBuffer();
 
-		const parallaxFileName = `${assetName}_NormalParallax.png`;
+		const parallaxFileName = `${getSafeMarketplaceFileName(assetName)}_NormalParallax.png`;
 		const parallaxPath = join(assetDir, parallaxFileName);
 
 		await sharp(normalPath).resize(width, height).joinChannel([displacementBuffer]).png().toFile(parallaxPath);
@@ -392,7 +434,7 @@ export abstract class MarketplaceProvider {
 			getSingleChannelBuffer(textures.metallic, 0),
 		]);
 
-		const ormFileName = `${assetName}_ORM.png`;
+		const ormFileName = `${getSafeMarketplaceFileName(assetName)}_ORM.png`;
 		const ormPath = join(assetDir, ormFileName).replace(/\\/g, "/");
 
 		await sharp(rBuffer).joinChannel([gBuffer, bBuffer]).png().toFile(ormPath);
@@ -485,7 +527,7 @@ export abstract class MarketplaceProvider {
 				}
 
 				const data = material.serialize();
-				const materialPath = join(assetDir, `${asset.name}.material`);
+				const materialPath = join(assetDir, `${getSafeMarketplaceFileName(asset.name)}.material`);
 				await writeJSON(materialPath, data, { spaces: "\t", encoding: "utf-8" });
 
 				material.dispose();

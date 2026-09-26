@@ -1,5 +1,13 @@
 import { IMarketplaceAsset, IMarketplaceSearchResult, IMarketplaceFilterDefinition, IMarketplaceSearchFilters, IFileToDownload } from "./types";
-import { MarketplaceProvider } from "./provider";
+import { MarketplaceProvider, getSafeMarketplaceFileName } from "./provider";
+
+async function readPolyHavenJson(url: string): Promise<any> {
+	const response = await fetch(url);
+	if (!response.ok) {
+		throw new Error(`Poly Haven request failed (${response.status} ${response.statusText}): ${url}`);
+	}
+	return response.json();
+}
 
 export class PolyHavenProvider extends MarketplaceProvider {
 	public id = "polyhaven";
@@ -25,8 +33,7 @@ export class PolyHavenProvider extends MarketplaceProvider {
 
 	public async search(query: string, pageToken?: string, filters?: IMarketplaceSearchFilters): Promise<IMarketplaceSearchResult> {
 		const assetType = typeof filters?.assetType === "string" && filters.assetType ? filters.assetType : "models";
-		const response = await fetch(`${this._apiUrl}/assets?t=${encodeURIComponent(assetType)}`);
-		const data = await response.json();
+		const data = await readPolyHavenJson(`${this._apiUrl}/assets?t=${encodeURIComponent(assetType)}`);
 
 		const assets: IMarketplaceSearchResult["assets"] = [];
 		const lowerQuery = query.toLowerCase();
@@ -63,10 +70,8 @@ export class PolyHavenProvider extends MarketplaceProvider {
 	}
 
 	public async getAssetDetails(id: string): Promise<IMarketplaceAsset> {
-		const [infoResponse, filesResponse] = await Promise.all([fetch(`${this._apiUrl}/info/${id}`), fetch(`${this._apiUrl}/files/${id}`)]);
-
-		const info = await infoResponse.json();
-		const files = await filesResponse.json();
+		const encodedId = encodeURIComponent(id);
+		const [info, files] = await Promise.all([readPolyHavenJson(`${this._apiUrl}/info/${encodedId}`), readPolyHavenJson(`${this._apiUrl}/files/${encodedId}`)]);
 
 		const allowedTypes = new Set(["gltf", "fbx", "blend", "hdri"]);
 		const qualityOptions = ["1k", "2k", "4k", "8k"];
@@ -157,7 +162,7 @@ export class PolyHavenProvider extends MarketplaceProvider {
 					url: data.url,
 					md5: data.md5,
 					size: data.size,
-					path: `${asset.name}_${type}.${ext}`,
+					path: `${getSafeMarketplaceFileName(asset.name)}_${type}.${ext}`,
 				};
 			});
 		}
@@ -167,7 +172,7 @@ export class PolyHavenProvider extends MarketplaceProvider {
 				url: downloadData.url,
 				md5: downloadData.md5,
 				size: downloadData.size,
-				path: `${asset.id}.${selectedType}`,
+				path: `${getSafeMarketplaceFileName(asset.id)}.${selectedType}`,
 			},
 			...Object.entries(downloadData.include || {}).map(([path, data]) => ({
 				url: data.url,

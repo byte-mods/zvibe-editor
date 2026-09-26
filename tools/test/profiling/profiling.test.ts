@@ -190,6 +190,7 @@ describe("portable profiling", () => {
 		expect(() => parsePortableProfilerCapture(serializePortableProfilerCapture(completed))).not.toThrow();
 	});
 
+	// Serializes 30,000 entries with ~30 KB names on purpose; allow for CPU contention with parallel workers.
 	test("streams and byte-bounds a large Resource Timing buffer", () => {
 		const target = scene();
 		const base = performance.now();
@@ -217,7 +218,7 @@ describe("portable profiling", () => {
 		} finally {
 			resources.mockRestore();
 		}
-	});
+	}, 30_000);
 
 	test("visits an append-only Resource Timing row only once across sampled frames", () => {
 		const target = scene();

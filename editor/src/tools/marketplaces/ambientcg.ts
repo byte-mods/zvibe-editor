@@ -1,6 +1,6 @@
 import axios from "axios";
 import { IMarketplaceAsset, IMarketplaceSearchResult, IFileToDownload, IMarketplaceSearchFilters, IMarketplaceFilterDefinition } from "./types";
-import { MarketplaceProvider } from "./provider";
+import { MarketplaceProvider, getSafeMarketplaceFileName } from "./provider";
 
 export class AmbientCGProvider extends MarketplaceProvider {
 	public id = "ambientcg";
@@ -147,7 +147,7 @@ export class AmbientCGProvider extends MarketplaceProvider {
 		return [
 			{
 				url: option.url,
-				path: `${asset.id}_${selectedQuality}_${selectedType}${extension}`,
+				path: getSafeMarketplaceFileName(`${asset.id}_${selectedQuality}_${selectedType}${extension}`),
 				size: option.size,
 				extract: isZip,
 			},
