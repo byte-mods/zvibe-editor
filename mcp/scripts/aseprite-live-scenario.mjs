@@ -391,9 +391,15 @@ try {
 
 	await call("open_asset_inspector", { path: assetPath });
 	assetUi = await connectEditorUi("[data-aseprite-inspector]");
-	if (!(await assetUi.evaluate("document.querySelector('[data-aseprite-inspector]')?.textContent?.includes('pingpong')"))) {
+	// The inspector receives the imported artifact asynchronously, so wait for it instead of reading the first render.
+	await waitForUi(
+		() => assetUi.evaluate("document.querySelector('[data-aseprite-inspector]')?.textContent?.includes('pingpong') ?? false"),
+		Boolean,
+		"Aseprite File Inspector tag-direction evidence",
+		20_000
+	).catch(() => {
 		throw new Error("The Aseprite File Inspector did not render tag-direction evidence.");
-	}
+	});
 	await assetUi.setValue("[data-aseprite-speed]", 2.5);
 	await assetUi.click("[data-aseprite-play-on-awake]");
 	await assetUi.click("[data-aseprite-instantiate-composite]");
