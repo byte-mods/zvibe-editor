@@ -1508,6 +1508,7 @@ async function makeEntry(analysis: IAssetFileWorkerAnalysis): Promise<IAssetRegi
 	};
 }
 
+/** Bounded concurrency for independent per-file registry I/O (path scans and sidecar reads). */
 const REGISTRY_METADATA_CONCURRENCY = 32;
 
 async function makeEntries(files: string[], hooks: IAssetWorkerPoolOptions & { onPhase?: (phase: AssetIndexingJobPhase) => void } = {}): Promise<IAssetRegistryEntry[]> {
@@ -1869,9 +1870,11 @@ async function refreshAssetRegistryPathsWithHooks(paths: string[], executionHook
 		const normalizedPaths = paths.map(resolveProjectPath);
 		const relativePrefixes = normalizedPaths.map((path) => relative(projectDirectory(), path).replace(/\\/g, "/"));
 		const retained = current.entries.filter((entry) => !relativePrefixes.some((prefix) => entry.path === prefix || entry.path.startsWith(`${prefix}/`)));
+		// Watcher bursts can coalesce hundreds of paths into one refresh; scan them in bounded batches, not one by one.
 		const files: string[] = [];
-		for (const path of normalizedPaths) {
-			files.push(...(await scanFiles(path)));
+		for (let index = 0; index < normalizedPaths.length; index += REGISTRY_METADATA_CONCURRENCY) {
+			const scanned = await Promise.all(normalizedPaths.slice(index, index + REGISTRY_METADATA_CONCURRENCY).map((path) => scanFiles(path)));
+			scanned.forEach((paths) => files.push(...paths));
 		}
 		const uniqueFiles = [...new Set(files)].sort();
 		hooks.onDiscovered?.(uniqueFiles.length);
