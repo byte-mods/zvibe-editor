@@ -6,7 +6,7 @@ vi.mock("../../src/tools/node-pty", () => ({ execNodePty }));
 vi.mock("../../src/project/export/export", () => ({ exportProject }));
 
 import { NullEngine, Observable, Scene } from "babylonjs";
-import { chmod, ensureDir, mkdtemp, readFile, readJSON, remove, writeFile, writeJSON } from "fs-extra";
+import { chmod, ensureDir, mkdtemp, readFile, readJSON, remove, symlink, writeFile, writeJSON } from "fs-extra";
 import { tmpdir } from "os";
 import { dirname, join } from "path/posix";
 
@@ -310,6 +310,41 @@ describe("mcp/build profiles", () => {
 		expect(await validateBuildProfile(scene, { id: "web-plan" }, options)).toMatchObject({ valid: true });
 		const externalBuild = await buildBuildProfile(scene, { id: "web-plan", expectedRevision: updated.configuration.revision }, options);
 		expect(externalBuild.webBuildEvidence.toolchain).toMatchObject({ requestedVersion: "4.0.19", detectedVersion: "4.0.19", verified: true });
+	});
+
+	test("retains modules reached by the editor runtime scene loader instead of planning to strip them", async () => {
+		// The runtime lives outside the project and is linked in, as with workspace or `yarn link` installs.
+		const runtime = await mkdtemp(join(tmpdir(), "zvibe-editor-runtime-"));
+		try {
+			await ensureDir(join(runtime, "build/src/loading"));
+			await writeFile(
+				join(runtime, "build/src/loading/loader.js"),
+				'import { AnimationGroup } from "@babylonjs/core/Animations/animationGroup";\nimport { CreateSoundAsync } from "@babylonjs/core/AudioV2";\n'
+			);
+			await ensureDir(join(directory, "node_modules"));
+			await symlink(runtime, join(directory, "node_modules/babylonjs-editor-tools"));
+			await writeJSON(join(directory, "package.json"), { scripts: { "build:test": "build-test" }, dependencies: { "babylonjs-editor-tools": "latest" } });
+
+			const created = createBuildProfile(scene, { expectedRevision: 0, id: "web-runtime", name: "Web Runtime", target: "web", settings: { buildScripts: ["build:test"] } });
+			const plan = await inspectWebBuildPlan(scene, { id: "web-runtime", expectedRevision: created.configuration.revision }, options);
+			const runtimeEvidence = {
+				decision: "retain",
+				evidencePaths: ["node_modules/babylonjs-editor-tools/build/src/loading/loader.js"],
+				reason: expect.stringContaining("scene loader"),
+			};
+			expect(plan.modules.find((entry: any) => entry.id === "animation")).toMatchObject(runtimeEvidence);
+			expect(plan.modules.find((entry: any) => entry.id === "audio")).toMatchObject(runtimeEvidence);
+			expect(plan.modules.find((entry: any) => entry.id === "physics")).toMatchObject({ decision: "strip", evidencePaths: [] });
+			expect(plan.runtime).toMatchObject({ package: "babylonjs-editor-tools", fileCount: 1 });
+
+			// Projects that do not depend on the runtime keep planning from their own sources only.
+			await writeJSON(join(directory, "package.json"), { scripts: { "build:test": "build-test" } });
+			const standalone = await inspectWebBuildPlan(scene, { id: "web-runtime", expectedRevision: created.configuration.revision }, options);
+			expect(standalone.runtime).toBeUndefined();
+			expect(standalone.modules.find((entry: any) => entry.id === "animation")).toMatchObject({ decision: "strip" });
+		} finally {
+			await remove(runtime);
+		}
 	});
 
 	test("rejects native PNG or JPEG codec evidence even when it is embedded in a valid WebAssembly artifact", async () => {

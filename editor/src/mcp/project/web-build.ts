@@ -1,7 +1,7 @@
 import { execFile } from "child_process";
 import { createHash } from "crypto";
 import { createReadStream } from "fs";
-import { lstat, pathExists, readFile, readdir, writeJSON } from "fs-extra";
+import { lstat, pathExists, readFile, readdir, realpath, writeJSON } from "fs-extra";
 import { join, relative } from "path/posix";
 import { promisify } from "util";
 
@@ -40,6 +40,8 @@ export interface IWebBuildPlan {
 	planFingerprint: string;
 	settings: IWebBuildEvidenceSettings;
 	source: { fingerprint: string; fileCount: number; totalBytes: number; complete: true };
+	/** The editor runtime package the project imports to load scenes, when present. Its reachable code constrains module stripping. */
+	runtime?: { package: string; fingerprint: string; fileCount: number; totalBytes: number };
 	modules: IWebBuildModuleDecision[];
 	images: {
 		png: { files: number; bytes: number; paths: string[] };
@@ -228,28 +230,64 @@ export async function probeWebBuildToolchain(settings: IWebBuildEvidenceSettings
 	}
 }
 
+/**
+ * The runtime library exported projects import to load editor scenes (`loadScene`). Its scene loader statically reaches
+ * animation, audio, sprites, navigation and more, so those modules stay in the bundle even when project sources never mention them.
+ */
+const editorRuntimePackage = "babylonjs-editor-tools";
+
+/** Scans the installed editor runtime's ESM sources when the project depends on it; returns project-relative evidence paths. */
+async function scanEditorRuntime(projectDirectory: string): Promise<{ files: IScannedFile[]; totalBytes: number } | null> {
+	let manifest: any;
+	try {
+		manifest = JSON.parse(await readFile(join(projectDirectory, "package.json"), "utf-8"));
+	} catch {
+		return null;
+	}
+	if (!manifest?.dependencies?.[editorRuntimePackage]) {
+		return null;
+	}
+
+	const packageDirectory = join(projectDirectory, "node_modules", editorRuntimePackage);
+	if (!(await pathExists(packageDirectory))) {
+		return null;
+	}
+
+	// Linked or workspace installs resolve to the real package directory; evidence paths stay project-relative.
+	const root = (await realpath(packageDirectory)).replaceAll("\\", "/");
+	const scan = await scanFiles(root, [join(root, "build/src")]);
+	return {
+		files: scan.files.map((file) => ({ ...file, path: `node_modules/${editorRuntimePackage}/${file.path}` })),
+		totalBytes: scan.totalBytes,
+	};
+}
+
 export async function createWebBuildPlan(projectDirectory: string, profile: IWebBuildProfileDescriptor, configurationRevision: number): Promise<IWebBuildPlan> {
 	if (!profile.settings.web) {
 		throw new Error("A Web build plan requires normalized Web profile settings.");
 	}
 	const roots = [join(projectDirectory, "package.json"), join(projectDirectory, "src"), join(projectDirectory, "assets"), join(projectDirectory, "public")];
 	const scan = await scanFiles(projectDirectory, roots);
+	const runtimeScan = await scanEditorRuntime(projectDirectory);
 	const searchable = scan.files.filter((file) => textExtensions.has(extension(file.path)));
+	const runtimeSearchable = (runtimeScan?.files ?? []).filter((file) => textExtensions.has(extension(file.path)));
 	const decisions: IWebBuildModuleDecision[] = modules.map((module) => {
-		const evidencePaths = searchable
-			.filter((file) => module.markers.some((marker) => file.markers.includes(marker)))
-			.slice(0, maximumEvidencePaths)
-			.map((file) => file.path);
+		const hasMarker = (file: IScannedFile): boolean => module.markers.some((marker) => file.markers.includes(marker));
+		const projectEvidence = searchable.filter(hasMarker);
+		const runtimeEvidence = projectEvidence.length ? [] : runtimeSearchable.filter(hasMarker);
+		const evidencePaths = [...projectEvidence, ...runtimeEvidence].slice(0, maximumEvidencePaths).map((file) => file.path);
 		const decision = evidencePaths.length ? "retain" : profile.settings.web!.moduleStripping ? "strip" : "preserve";
 		return {
 			id: module.id,
 			label: module.label,
 			decision,
-			reason: evidencePaths.length
+			reason: projectEvidence.length
 				? "Project source or package metadata contains a bounded module marker, so the ESM dependency remains reachable."
-				: decision === "strip"
-					? "No project marker was found; production ESM tree-shaking may omit the unreachable module and output verification must prove marker absence."
-					: "Module stripping is disabled, so no absence claim is made for this unreferenced module.",
+				: runtimeEvidence.length
+					? `The ${editorRuntimePackage} scene loader the project imports references this module, so the ESM dependency remains reachable.`
+					: decision === "strip"
+						? "No project marker was found; production ESM tree-shaking may omit the unreachable module and output verification must prove marker absence."
+						: "Module stripping is disabled, so no absence claim is made for this unreferenced module.",
 			evidencePaths,
 			markers: [...module.markers],
 		};
@@ -267,6 +305,16 @@ export async function createWebBuildPlan(projectDirectory: string, profile: IWeb
 		profileId: profile.id,
 		settings,
 		source,
+		...(runtimeScan
+			? {
+					runtime: {
+						package: editorRuntimePackage,
+						fingerprint: fileFingerprint(runtimeScan.files),
+						fileCount: runtimeScan.files.length,
+						totalBytes: runtimeScan.totalBytes,
+					},
+				}
+			: {}),
 		modules: decisions,
 		images: { png, jpeg, decoderBoundary: "browser-native-no-bundled-libpng-or-libjpeg" as const },
 		wasm: { ...wasm, webAssembly2023: settings.webAssembly2023 },
