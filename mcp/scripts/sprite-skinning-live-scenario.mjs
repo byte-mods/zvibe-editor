@@ -28,6 +28,18 @@ child.stdout.on("data", (chunk) => {
 });
 child.stderr.on("data", (chunk) => (stderr += chunk.toString()));
 
+/** ImageMagick 7 (`magick`) or 6 (`convert`) from PATH; set MAGICK to an explicit binary to override. */
+function imageMagickCommand() {
+	for (const candidate of [process.env.MAGICK, "magick", "convert"].filter(Boolean)) {
+		try {
+			execFileSync(candidate, ["-version"], { stdio: "pipe" });
+			return candidate;
+		} catch {
+			// Try the next candidate.
+		}
+	}
+	throw new Error("ImageMagick is required to author the PSD fixture: install it (magick or convert on PATH) or set MAGICK.");
+}
 function rpc(method, params, timeoutMs = 90_000) {
 	const id = nextId++;
 	return new Promise((resolve, reject) => {
@@ -100,7 +112,7 @@ try {
 	const status = await call("get_editor_status");
 	if (!status.ready || !status.projectPath) throw new Error("A ready disposable project editor is required for the Sprite Skin live scenario.");
 	initialMaterialIds = new Set((await call("list_materials")).materials.map((material) => material.id));
-	execFileSync("/opt/homebrew/bin/magick", ["-size", "64x64", "xc:#ef4444", psdSourcePath], { stdio: "pipe" });
+	execFileSync(imageMagickCommand(), ["-size", "64x64", "xc:#ef4444", psdSourcePath], { stdio: "pipe" });
 	await call("import_asset", { sourcePath: psdSourcePath, destinationPath: psdAssetPath });
 	const psdPlan = await call("inspect_psd_sprite_skin_rig", { sourcePath: psdAssetPath, pixelsPerUnit: 100, columns: 2, rows: 2 });
 	if (!/^[a-f0-9]{64}$/.test(psdPlan.fingerprint) || !psdPlan.bones?.length) throw new Error(`PSD sprite-rig inspection evidence is incomplete: ${JSON.stringify(psdPlan)}`);
