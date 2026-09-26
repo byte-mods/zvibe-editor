@@ -75,6 +75,34 @@ describe("background asset indexing", () => {
 		expect((await getAssetIndexingStatus()).registryQueue).toEqual([]);
 	});
 
+	test("coalesces refreshes queued behind another registry operation into one pending refresh", async () => {
+		await writeFile(join(directory, "assets", "texture.png"), "texture");
+		await rebuildAssetRegistry();
+		const names = ["a.png", "b.png", "c.png"];
+		await Promise.all(names.map((name) => writeFile(join(directory, "assets", name), name)));
+
+		const rebuild = rebuildAssetRegistry();
+		const refreshes = names.map((name) => refreshAssetRegistryPaths([join(directory, "assets", name)]));
+		const queue = (await getAssetIndexingStatus()).registryQueue;
+		expect(queue.map((operation) => operation.kind)).toEqual(["rebuild", "refresh"]);
+		expect(queue[1].paths).toEqual(names.map((name) => join(directory, "assets", name)));
+
+		const results = await Promise.all(refreshes);
+		await rebuild;
+		expect(new Set(results).size).toBe(1);
+		expect(results[0].entries.map((entry: any) => entry.path)).toEqual(["assets/a.png", "assets/b.png", "assets/c.png", "assets/texture.png"]);
+
+		// Once a refresh has started, a new call queues a fresh refresh instead of joining it.
+		const first = refreshAssetRegistryPaths([join(directory, "assets", "a.png")]);
+		while ((await getAssetIndexingStatus()).registryQueue.some((operation) => operation.phase === "queued" || operation.phase === "starting")) {
+			await new Promise((resolve) => setTimeout(resolve, 1));
+		}
+		await writeFile(join(directory, "assets", "d.png"), "d");
+		const second = refreshAssetRegistryPaths([join(directory, "assets", "d.png")]);
+		expect(await second).not.toBe(await first);
+		expect((await second).entries.map((entry: any) => entry.path)).toContain("assets/d.png");
+	});
+
 	test("starts non-blocking, reports bounded progress, and atomically publishes worker analysis", async () => {
 		await writeFile(join(directory, "assets", "texture.png"), "texture");
 		await writeFile(join(directory, "assets", "scene.json"), JSON.stringify({ texture: "assets/texture.png" }));

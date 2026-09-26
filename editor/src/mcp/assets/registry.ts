@@ -1645,7 +1645,7 @@ function serialized<T>(
 	paths: string[],
 	operation: (hooks: { onPhase: (phase: AssetIndexingJobPhase) => void }) => Promise<T>
 ): Promise<T> {
-	const tracked: IAssetRegistryQueueOperation = { kind, paths: paths.slice(0, 20), queuedAt: new Date().toISOString(), startedAt: null, phase: "queued" };
+	const tracked: IAssetRegistryQueueOperation = { kind, paths, queuedAt: new Date().toISOString(), startedAt: null, phase: "queued" };
 	registryQueueOperations.push(tracked);
 	const run = async (): Promise<T> => {
 		tracked.startedAt = new Date().toISOString();
@@ -1811,8 +1811,34 @@ export async function getUnityAssetGuidIndex(): Promise<IUnityAssetGuidIndex> {
 	return { entries, duplicates, malformed, fingerprint };
 }
 
+let pendingRegistryRefresh: { paths: string[]; result: Promise<IAssetRegistry> } | null = null;
+
+/**
+ * Refreshes the registry entries under the given paths. Every import, delete and watcher event refreshes the registry and
+ * each refresh rewrites the whole registry, so calls made while another refresh is still waiting for the queue join that
+ * refresh instead of queuing one more full rewrite; otherwise bursts of asset changes build a backlog that stalls every
+ * later asset call. A refresh that has already started is never joined, so no change can be missed.
+ */
 export async function refreshAssetRegistryPaths(paths: string[]): Promise<IAssetRegistry> {
-	return refreshAssetRegistryPathsWithHooks(paths, {});
+	// Reject paths outside the project for this caller alone rather than failing the whole shared refresh.
+	paths.forEach((path) => resolveProjectPath(path));
+	if (pendingRegistryRefresh) {
+		pendingRegistryRefresh.paths.push(...paths.filter((path) => !pendingRegistryRefresh!.paths.includes(path)));
+		return pendingRegistryRefresh.result;
+	}
+
+	const batch = { paths: [...new Set(paths)] } as { paths: string[]; result: Promise<IAssetRegistry> };
+	batch.result = refreshAssetRegistryPathsWithHooks(batch.paths, {
+		onPhase: (phase) => {
+			if (phase === "discovering" && pendingRegistryRefresh === batch) {
+				pendingRegistryRefresh = null;
+			}
+		},
+	});
+	pendingRegistryRefresh = batch;
+	// Also release the batch if it fails before reaching discovery (e.g. no project is open).
+	void batch.result.catch(() => undefined).finally(() => pendingRegistryRefresh === batch && (pendingRegistryRefresh = null));
+	return batch.result;
 }
 
 async function refreshAssetRegistryPathsWithHooks(paths: string[], executionHooks: IAssetRegistryExecutionHooks): Promise<IAssetRegistry> {
@@ -1954,7 +1980,7 @@ export async function getAssetIndexingStatus(): Promise<{
 		defaultWorkerCount: defaultAssetIndexingWorkerCount(),
 		activeJob: activeAssetIndexingJob ? publicAssetIndexingJob(activeAssetIndexingJob) : null,
 		recentJobs: assetIndexingJobs.map(publicAssetIndexingJob),
-		registryQueue: structuredClone(registryQueueOperations),
+		registryQueue: registryQueueOperations.map((operation) => ({ ...operation, paths: operation.paths.slice(0, 20) })),
 	};
 }
 
