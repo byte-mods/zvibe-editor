@@ -414,7 +414,12 @@ try {
 	}
 	await call("delete_aseprite_instance", { id: uiInstance.id, confirm: true });
 	await call("open_asset_inspector", { path: assetPath });
-	await waitForUi(() => assetUi.evaluate("Boolean(document.querySelector('[data-aseprite-inspector]'))"), Boolean, "reopened Aseprite File Inspector");
+	// The reopened inspector loads the importer artifact asynchronously; the layer button stays disabled until it is current.
+	await waitForUi(
+		() => assetUi.evaluate("document.querySelector('[data-aseprite-instantiate-layers]')?.disabled === false"),
+		Boolean,
+		"reopened Aseprite File Inspector with an enabled layer-hierarchy action"
+	);
 	await assetUi.click("[data-aseprite-instantiate-layers]");
 	uiInstances = await waitFor(
 		() => call("list_aseprite_instances", { offset: 0, limit: 10 }),
