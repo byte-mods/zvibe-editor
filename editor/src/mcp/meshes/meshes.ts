@@ -125,6 +125,38 @@ function rebuildMeshGeometry(mesh: Mesh): void {
 }
 
 /**
+ * Applies MeshBuilder-style creation options to an editor primitive by updating its editable geometry metadata,
+ * so the result stays editable in the inspector exactly like a primitive resized there.
+ * Shorthands are expanded to the keys the editor stores: `size` for boxes and `diameter` for cylinders.
+ */
+function applyPrimitiveOptions(mesh: Mesh, primitiveOptions: Record<string, unknown>): void {
+	const parameters: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(primitiveOptions)) {
+		if (key === "type" || key === "heightMapTexturePath") {
+			throw new Error(`Primitive option "${key}" cannot be set at creation; use set_ground_heightmap for heightmaps.`);
+		}
+		const values = Array.isArray(value) ? value : [value];
+		if (!values.every((entry) => typeof entry === "boolean" || (typeof entry === "number" && Number.isFinite(entry)))) {
+			throw new Error(`Primitive option "${key}" must be a finite number, a boolean, or an array of numbers.`);
+		}
+		parameters[key] = value;
+	}
+
+	if (mesh.metadata.type === "Box" && typeof parameters.size === "number") {
+		parameters.width ??= parameters.size;
+		parameters.height ??= parameters.size;
+		parameters.depth ??= parameters.size;
+	}
+	if (mesh.metadata.type === "Cylinder" && typeof parameters.diameter === "number") {
+		parameters.diameterTop ??= parameters.diameter;
+		parameters.diameterBottom ??= parameters.diameter;
+	}
+
+	Object.assign(mesh.metadata, parameters);
+	rebuildMeshGeometry(mesh);
+}
+
+/**
  * Creates a primitive mesh in the scene reusing the editor's "add" functions.
  */
 export function createPrimitiveMesh(scene: Scene, data: any, options: IMCPActionOptions): any {
@@ -169,6 +201,19 @@ export function createPrimitiveMesh(scene: Scene, data: any, options: IMCPAction
 
 	if (data.name) {
 		mesh.name = data.name;
+	}
+
+	if (data.options && Object.keys(data.options).length) {
+		if (!isMesh(mesh) || !mesh.metadata?.type) {
+			mesh.dispose();
+			throw new Error(`Primitive type "${data.type}" does not accept geometry options.`);
+		}
+		try {
+			applyPrimitiveOptions(mesh, data.options);
+		} catch (error) {
+			mesh.dispose();
+			throw error;
+		}
 	}
 
 	if (data.position && isAbstractMesh(mesh)) {
