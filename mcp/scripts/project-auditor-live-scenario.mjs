@@ -132,7 +132,8 @@ async function waitForAudit(id) {
 		() => call("get_project_audit", { id }),
 		(value) => ["completed", "cancelled", "failed"].includes(value?.job?.status),
 		`project audit ${id}`,
-		90_000
+		// The scenario audits ~500 generated sources for its cancellation check; slow CI or software-rendered machines need minutes.
+		300_000
 	);
 }
 
