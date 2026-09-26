@@ -11,7 +11,6 @@ import {
 	CubeTexture,
 	Ragdoll,
 	GroundMesh,
-	HavokPlugin,
 	DirectionalLight,
 	MeshBuilder,
 	CascadedShadowGenerator,
@@ -27,6 +26,7 @@ import { getProjectAssetsRootUrl } from "../../../project/configuration";
 import { Editor } from "../../main";
 
 import { RagdollEditor } from "./editor";
+import { enableEditorPhysics } from "../../../tools/physics/init";
 
 export interface IRagdollEditorPreviewProps {
 	editor: Editor;
@@ -71,8 +71,7 @@ export class RagdollEditorPreview extends Component<IRagdollEditorPreviewProps, 
 		this.camera = new ArcRotateCamera("camera", Math.PI * 0.25, Math.PI * 0.25, 10, Vector3.Zero(), this.scene, true);
 		this.camera.attachControl();
 
-		const hk = new HavokPlugin();
-		this.scene.enablePhysics(new Vector3(0, -981, 0), hk);
+		enableEditorPhysics(this.scene);
 
 		this._light = new DirectionalLight("light", new Vector3(-1, -2, -1), this.scene);
 

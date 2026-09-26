@@ -10,6 +10,7 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { SceneLoaderFlags } from "@babylonjs/core/Loading/sceneLoaderFlags";
 import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
+import { CreateAudioEngineAsync } from "@babylonjs/core/AudioV2/webAudio/webAudioEngine";
 
 import HavokPhysics from "@babylonjs/havok";
 
@@ -89,9 +90,15 @@ const App: Component = () => {
 
 	async function handleLoad(engine: Engine, scene: Scene) {
 		const havok = await HavokPhysics();
-		const gravityVector = new Vector3(0, -9.81, 0);
+		// Zvibe Editor scenes are authored in centimeters, so gravity is -981 cm/s².
+		const gravityVector = new Vector3(0, -981, 0);
 		const physicsPlugin = new HavokPlugin(true, havok);
 		scene.enablePhysics(gravityVector, physicsPlugin);
+		// Havok's default speed limit (200 units/s) assumes meters and would cap every body at 2 m/s, so scale it to centimeters.
+		physicsPlugin.setVelocityLimits(20_000, 100);
+
+		// Sound nodes authored in the editor play through the Audio V2 engine, which must exist before the scene loads.
+		await CreateAudioEngineAsync();
 
 		SceneLoaderFlags.ForceFullSceneLoadingForIncremental = true;
 		RegisterTransformNode();

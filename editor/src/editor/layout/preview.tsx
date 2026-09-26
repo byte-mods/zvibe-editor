@@ -26,7 +26,6 @@ import {
 	Vector2,
 	Vector3,
 	WebGPUEngine,
-	HavokPlugin,
 	PickingInfo,
 	SceneLoaderFlags,
 	EngineView,
@@ -65,7 +64,7 @@ import { toNormalizedTouchPosition } from "../../tools/input/touch";
 import { isDomTextInputFocused } from "../../tools/dom";
 import { isNodeLocked, setNodeSerializable, setNodeVisibleInGraph } from "../../tools/node/metadata";
 import { registerUndoRedo } from "../../tools/undoredo";
-import { initializeHavok } from "../../tools/physics/init";
+import { enableEditorPhysics, initializeHavok } from "../../tools/physics/init";
 import { initializeRecast } from "../../tools/recast/init";
 import { isAnyParticleSystem } from "../../tools/guards/particles";
 import { saveSceneScreenshot } from "../../tools/scene/screenshot";
@@ -716,7 +715,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			mode: EasingFunction.EASINGMODE_EASEINOUT,
 		};
 
-		this.scene.enablePhysics(new Vector3(0, -981, 0), new HavokPlugin());
+		enableEditorPhysics(this.scene);
 
 		this.statistics = new Stats(this.props.editor);
 		this.statistics.onValuesChangedObservable.add((values) => {

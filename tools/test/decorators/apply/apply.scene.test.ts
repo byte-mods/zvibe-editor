@@ -88,4 +88,18 @@ describe("decorators/apply", () => {
 		expect(instance.damage).toEqual([1, 2, 3]);
 		expect(instance.tags).toEqual(["boss", "fire"]);
 	});
+	test("keeps field defaults when an attachment has no stored inspector values", () => {
+		class Temp extends Node {
+			@visibleAsArray("number")
+			public damage: number[] = [4];
+
+			@visibleAsList("string")
+			public tags: string[] = ["default"];
+		}
+		const instance = new Temp("Temp", scene);
+		// MCP attach_script and hand-written metadata create attachments without a `values` block.
+		expect(() => applyDecorators(scene, transformNode, { key: "temp.ts" }, instance, "")).not.toThrow();
+		expect(instance.damage).toEqual([4]);
+		expect(instance.tags).toEqual(["default"]);
+	});
 });

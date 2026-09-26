@@ -10,7 +10,7 @@ import { Grid } from "react-loader-spinner";
 
 import { IoPlay, IoStop, IoRefresh } from "react-icons/io5";
 
-import { AbstractEngine, Scene, Vector3, HavokPlugin } from "babylonjs";
+import { AbstractEngine, Scene } from "babylonjs";
 import type {
 	IClothSimulationControl,
 	IEditorNetworkingConfiguration,
@@ -39,6 +39,7 @@ import { projectConfiguration } from "../../../project/configuration";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../ui/shadcn/ui/tooltip";
 
 import { Editor } from "../../main";
+import { enableEditorPhysics } from "../../../tools/physics/init";
 
 export interface IEditorPreviewPlayComponentProps {
 	/**
@@ -334,7 +335,7 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 			throw new Error("Compiled Play must be ready before creating an isolated multiplayer player.");
 		}
 		const scene = new Scene(engine);
-		scene.enablePhysics(new Vector3(0, -981, 0), new HavokPlugin());
+		enableEditorPhysics(scene);
 		scene.audioEnabled = false;
 		const projectDir = dirname(projectConfiguration.path!);
 		const rootUrl = join(projectDir, "public", "scene", "/");
@@ -576,7 +577,7 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 		this._requireCompiledScripts();
 
 		const scene = new Scene(this.props.editor.layout.preview.engine);
-		scene.enablePhysics(new Vector3(0, -981, 0), new HavokPlugin());
+		enableEditorPhysics(scene);
 		scene.audioEnabled = !this.props.editor.state.projectSettings.playMode.muteAudio;
 
 		this.scene = scene;

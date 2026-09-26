@@ -202,8 +202,10 @@ export function applyDecorators(scene: Scene, object: any, script: any, instance
 		const propertyKey = params.propertyKey.toString();
 		const attachedScripts = script.values;
 
+		// Attachments that were never shown in the inspector (e.g. added through MCP or by hand) have no stored values:
+		// keep the script's own field defaults instead of failing the whole scene load.
 		if (!attachedScripts) {
-			throw new Error(`No values found for script with key "${script.key}".`);
+			return;
 		}
 
 		if (attachedScripts.hasOwnProperty(propertyKey) && attachedScripts[propertyKey].hasOwnProperty("value")) {
