@@ -5449,7 +5449,7 @@
 			"name": "set_project_script_execution_order",
 			"description": "Set or clear a persisted Unity-style project-wide execution order for a TypeScript script. Lower values execute first across exported scenes; a scene-specific order overrides it."
 		},
-		{ "name": "detach_script", "description": "Remove an attached script from a node." },
+		{ "name": "detach_script", "description": "Remove an attached script from a node or from the scene." },
 		{
 			"name": "get_editor_api",
 			"description": "Return a reference describing the `editor` mediator object that agent automation scripts receive. ALWAYS call this before writing or running an agent script (`write_agent_script`/`run_agent_script`) so you know what `editor` exposes (the live Babylon scene at `editor.layout.preview.scene`, the scene graph, inspector, assets browser, console, etc.) and the required `export function main(editor) { ... }` skeleton."

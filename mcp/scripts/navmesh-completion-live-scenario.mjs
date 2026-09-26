@@ -122,7 +122,8 @@ try {
 	await call("create_navmesh", {
 		path,
 		configuration: {
-			navMeshParameters: { cs: 10, ch: 2, walkableHeight: 90, walkableClimb: 20, walkableRadius: 20, tileSize: 32, maxObstacles: 8, expectedLayersPerTile: 1 },
+			// Recast agent sizes are voxel counts: 90 cm height and 20 cm climb at ch 2, 20 cm radius at cs 10.
+			navMeshParameters: { cs: 10, ch: 2, walkableHeight: 45, walkableClimb: 10, walkableRadius: 2, tileSize: 32, maxObstacles: 8, expectedLayersPerTile: 1 },
 			staticMeshes: [
 				{ id: ground.id, enabled: true, area: 0 },
 				{ id: mudGround.id, enabled: true, area: 0 },
@@ -145,7 +146,8 @@ try {
 	await call("set_navmesh_configuration", {
 		path,
 		configuration: {
-			navMeshParameters: { cs: 10, ch: 2, walkableHeight: 90, walkableClimb: 20, walkableRadius: 20, tileSize: 32, maxObstacles: 8, expectedLayersPerTile: 1 },
+			// Recast agent sizes are voxel counts: 90 cm height and 20 cm climb at ch 2, 20 cm radius at cs 10.
+			navMeshParameters: { cs: 10, ch: 2, walkableHeight: 45, walkableClimb: 10, walkableRadius: 2, tileSize: 32, maxObstacles: 8, expectedLayersPerTile: 1 },
 			staticMeshes: [
 				{ id: ground.id, enabled: true, area: 0 },
 				{ id: mudGround.id, enabled: true, area: 0 },

@@ -387,7 +387,8 @@ export function registerNavMeshTools(server: McpServer): void {
 		"create_navmesh",
 		{
 			title: "Create NavMesh",
-			description: "Create an editable .navmesh asset. Configuration contains native `navMeshParameters`, `staticMeshes`, and `obstacleMeshes` fields.",
+			description:
+				"Create an editable .navmesh asset. Configuration contains native `navMeshParameters`, `staticMeshes`, and `obstacleMeshes` fields. Recast `navMeshParameters` are native Recast values: `cs` (cell size) is in scene units (centimeters) and `ch` is the cell height, while `walkableRadius` and `walkableClimb`/`walkableHeight` are voxel counts (multiples of `cs` and `ch`), e.g. a 40 cm agent radius with cs 10 is walkableRadius 4.",
 			inputSchema: z.object({ path: z.string(), configuration: z.record(z.string(), z.any()).optional() }),
 		},
 		async (args): Promise<CallToolResult> => callTextTool("create_navmesh", args)
@@ -397,7 +398,7 @@ export function registerNavMeshTools(server: McpServer): void {
 		{
 			title: "Set NavMesh configuration",
 			description:
-				"Update NavMesh build parameters, enabled static mesh IDs, and box/cylinder obstacle configuration. Rebuild afterwards to generate navmesh.bin/tilecache.bin.",
+				"Update NavMesh build parameters, enabled static mesh IDs, and box/cylinder obstacle configuration. Rebuild afterwards to generate navmesh.bin/tilecache.bin. Recast `navMeshParameters` are native Recast values: `cs` (cell size) is in scene units (centimeters) and `ch` is the cell height, while `walkableRadius` and `walkableClimb`/`walkableHeight` are voxel counts (multiples of `cs` and `ch`), e.g. a 40 cm agent radius with cs 10 is walkableRadius 4.",
 			inputSchema: z.object({ path: z.string(), configuration: z.record(z.string(), z.any()) }),
 			annotations: { idempotentHint: true },
 		},
