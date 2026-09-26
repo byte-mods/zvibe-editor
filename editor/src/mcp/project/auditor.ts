@@ -83,6 +83,7 @@ interface ISourceSnapshot {
 const categories: ProjectAuditCategory[] = ["serialization", "obsolete-api", "particle-texture-readability", "atlas-waste"];
 const maximumSourceFiles = 2_000;
 const maximumSourceFileBytes = 2 * 1024 * 1024;
+const sourceReadConcurrency = 32;
 const maximumSourceAggregateBytes = 64 * 1024 * 1024;
 const maximumJsonFileBytes = 2 * 1024 * 1024;
 const maximumParticleDocuments = 1_024;
@@ -272,17 +273,27 @@ async function collectSources(): Promise<ISourceSnapshot[]> {
 	}
 	const result: ISourceSnapshot[] = [];
 	let aggregateBytes = 0;
-	for (const absolutePath of files) {
-		await assertContainedRegularFile(absolutePath);
-		const details = await stat(absolutePath);
-		if (details.size > maximumSourceFileBytes) {
-			throw new Error(`Project source ${relative(root, absolutePath)} exceeds the 2 MiB analysis limit.`);
-		}
-		aggregateBytes += details.size;
-		if (aggregateBytes > maximumSourceAggregateBytes) {
-			throw new Error("Project TypeScript exceeds the 64 MiB aggregate analysis limit.");
-		}
-		result.push({ path: relative(root, absolutePath).replace(/\\/g, "/"), absolutePath, content: await readFile(absolutePath, "utf-8") });
+	// Check and read sources in bounded batches: one file at a time costs several event-loop turns per file, which makes
+	// discovery take minutes for projects with hundreds of scripts while the renderer is busy drawing the preview.
+	for (let index = 0; index < files.length; index += sourceReadConcurrency) {
+		const batch = files.slice(index, index + sourceReadConcurrency);
+		const sizes = await Promise.all(
+			batch.map(async (absolutePath) => {
+				await assertContainedRegularFile(absolutePath);
+				return (await stat(absolutePath)).size;
+			})
+		);
+		sizes.forEach((size, batchIndex) => {
+			if (size > maximumSourceFileBytes) {
+				throw new Error(`Project source ${relative(root, batch[batchIndex])} exceeds the 2 MiB analysis limit.`);
+			}
+			aggregateBytes += size;
+			if (aggregateBytes > maximumSourceAggregateBytes) {
+				throw new Error("Project TypeScript exceeds the 64 MiB aggregate analysis limit.");
+			}
+		});
+		const contents = await Promise.all(batch.map((absolutePath) => readFile(absolutePath, "utf-8")));
+		batch.forEach((absolutePath, batchIndex) => result.push({ path: relative(root, absolutePath).replace(/\\/g, "/"), absolutePath, content: contents[batchIndex] }));
 	}
 	return result;
 }
