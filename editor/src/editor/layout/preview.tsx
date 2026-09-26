@@ -395,9 +395,19 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	/**
+	 * When set (e.g. while capturing a cinematic at a profile resolution), panel resizes keep the canvas at exactly this size.
+	 */
+	public lockedCanvasSize: { width: number; height: number } | null = null;
+
+	/**
 	 * Resizes the engine.
 	 */
 	public resize(): void {
+		if (this.lockedCanvasSize) {
+			this.engine?.setSize(this.lockedCanvasSize.width, this.lockedCanvasSize.height);
+			return;
+		}
+
 		if (this.state.fixedDimensions === "fit") {
 			this.engine?.resize();
 		}
