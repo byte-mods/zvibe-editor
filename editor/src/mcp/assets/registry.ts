@@ -1983,10 +1983,24 @@ export async function getAssetRegistryStatus(): Promise<any> {
 	};
 }
 
+/**
+ * Finds a registry entry, indexing the file on demand when it exists on disk but the debounced project watcher
+ * has not refreshed the registry yet (e.g. a tool call right after the file was written).
+ */
+async function findIndexedAssetEntry(path: string): Promise<{ registry: IAssetRegistry; projectPath: string; entry: IAssetRegistryEntry | undefined }> {
+	let registry = await ensureAssetRegistry();
+	const absolutePath = resolveProjectPath(path);
+	const projectPath = relative(projectDirectory(), absolutePath).replace(/\\/g, "/");
+	let entry = registry.entries.find((candidate) => candidate.path === projectPath);
+	if (!entry && !isAssetMetadataPath(absolutePath) && (await pathExists(absolutePath))) {
+		registry = await refreshAssetRegistryPaths([absolutePath]);
+		entry = registry.entries.find((candidate) => candidate.path === projectPath);
+	}
+	return { registry, projectPath, entry };
+}
+
 export async function getIndexedAssetRecord(path: string): Promise<IAssetRegistryEntry> {
-	const registry = await ensureAssetRegistry();
-	const projectPath = relative(projectDirectory(), resolveProjectPath(path)).replace(/\\/g, "/");
-	const entry = registry.entries.find((candidate) => candidate.path === projectPath);
+	const { projectPath, entry } = await findIndexedAssetEntry(path);
 	if (!entry) {
 		throw new Error(`Asset is not indexed: ${projectPath}. Refresh or rebuild the asset registry first.`);
 	}
@@ -1994,9 +2008,7 @@ export async function getIndexedAssetRecord(path: string): Promise<IAssetRegistr
 }
 
 export async function getIndexedAssetDependencies(path: string): Promise<any> {
-	const registry = await ensureAssetRegistry();
-	const projectPath = relative(projectDirectory(), resolveProjectPath(path)).replace(/\\/g, "/");
-	const entry = registry.entries.find((candidate) => candidate.path === projectPath);
+	const { registry, projectPath, entry } = await findIndexedAssetEntry(path);
 	if (!entry) {
 		throw new Error(`Asset is not indexed: ${projectPath}. Refresh or rebuild the asset registry first.`);
 	}

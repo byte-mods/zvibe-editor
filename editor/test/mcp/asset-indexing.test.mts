@@ -3,7 +3,15 @@ import { mkdir, mkdtemp, readFile, remove, writeFile } from "fs-extra";
 import { tmpdir } from "os";
 import { join } from "path";
 
-import { cancelAssetIndexingJob, getAssetIndexingStatus, queryAssetRegistry, rebuildAssetRegistry, startAssetIndexingJob } from "../../src/mcp/assets/registry";
+import {
+	cancelAssetIndexingJob,
+	getAssetIndexingStatus,
+	getIndexedAssetDependencies,
+	getIndexedAssetRecord,
+	queryAssetRegistry,
+	rebuildAssetRegistry,
+	startAssetIndexingJob,
+} from "../../src/mcp/assets/registry";
 import { projectConfiguration } from "../../src/project/configuration";
 import { analyzeAssetFilesWithWorkers, IAssetFileWorkerAnalysis } from "../../src/mcp/assets/registry-worker-client";
 
@@ -39,6 +47,17 @@ describe("background asset indexing", () => {
 		}
 		projectConfiguration.path = previousProjectPath;
 		await remove(directory);
+	});
+
+	test("indexes a file written after the last registry refresh instead of reporting it as not indexed", async () => {
+		await writeFile(join(directory, "assets", "texture.png"), "texture");
+		await rebuildAssetRegistry();
+
+		// Written after the rebuild, before the debounced project watcher would refresh the registry.
+		await writeFile(join(directory, "assets", "scene.json"), JSON.stringify({ texture: "assets/texture.png" }));
+		expect(await getIndexedAssetRecord("assets/scene.json")).toMatchObject({ path: "assets/scene.json" });
+		expect(await getIndexedAssetDependencies("assets/scene.json")).toMatchObject({ path: "assets/scene.json" });
+		await expect(getIndexedAssetRecord("assets/missing.png")).rejects.toThrow("Asset is not indexed: assets/missing.png");
 	});
 
 	test("starts non-blocking, reports bounded progress, and atomically publishes worker analysis", async () => {
