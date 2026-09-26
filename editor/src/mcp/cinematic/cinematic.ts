@@ -741,8 +741,8 @@ export async function startCinematicCapture(scene: Scene, data: unknown, options
 				renderScene: preview.renderScene,
 				renderEvenInBackground: preview.engine.renderEvenInBackground,
 				constantDelta: preview.scene.useConstantAnimationDeltaTime,
-				width: canvas.width,
-				height: canvas.height,
+				width: (preview.engine.getRenderingCanvas() ?? canvas).width,
+				height: (preview.engine.getRenderingCanvas() ?? canvas).height,
 				axis: preview.axis.enabled,
 				icons: preview.icons.enabled,
 			};
@@ -753,10 +753,10 @@ export async function startCinematicCapture(scene: Scene, data: unknown, options
 				preview.axis.stop();
 				preview.icons.stop();
 				// Render at the profile resolution; engine views and panel resizes must not refit the canvas mid-capture.
-				preview.beginFixedSizeCapture(profile.width, profile.height);
+				const captureCanvas = preview.beginFixedSizeCapture(profile.width, profile.height);
 				const recorder = new CinematicDocumentRecorder(current.loaded.document, scene as unknown as CoreScene);
 				const sink = new CinematicFileCaptureSink({
-					canvas,
+					canvas: captureCanvas,
 					destination: ensureCinematicCaptureExtension(destination, profile.format),
 					transcodeToMp4: createEditorMp4Transcoder(options.editor),
 					renderAudio: (plan) => renderCinematicOfflineAudio(current.loaded.document, scene as unknown as CoreScene, plan),

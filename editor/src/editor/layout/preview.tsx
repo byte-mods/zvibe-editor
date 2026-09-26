@@ -404,12 +404,16 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	/**
 	 * Renders at an exact resolution for captures: locks the canvas size and suspends the engine views, which otherwise
 	 * resize the rendering canvas to their on-screen size every frame. Callers render explicitly (e.g. `scene.render()`).
+	 * Returns the canvas the engine renders into, which is the one to read frames from: with views, the engine draws
+	 * into an off-screen working canvas and only copies it to the on-screen preview canvas, which keeps the panel size.
 	 */
-	public beginFixedSizeCapture(width: number, height: number): void {
+	public beginFixedSizeCapture(width: number, height: number): HTMLCanvasElement {
 		this.lockedCanvasSize = { width, height };
 		this._suspendedCaptureViews = (this.engine.views ?? []).filter((view) => view.enabled);
 		this._suspendedCaptureViews.forEach((view) => (view.enabled = false));
 		this.engine.setSize(width, height);
+
+		return (this.engine.getRenderingCanvas() as HTMLCanvasElement | null) ?? this.canvas!;
 	}
 
 	/**
