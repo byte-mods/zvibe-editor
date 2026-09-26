@@ -1,6 +1,7 @@
 import { execFile } from "child_process";
 import { createHash } from "crypto";
 import { createReadStream } from "fs";
+import { readdir as readDirectory } from "fs/promises";
 import { lstat, pathExists, readFile, readdir, realpath, writeJSON } from "fs-extra";
 import { join, relative } from "path/posix";
 import { promisify } from "util";
@@ -235,6 +236,8 @@ export async function probeWebBuildToolchain(settings: IWebBuildEvidenceSettings
  * animation, audio, sprites, navigation and more, so those modules stay in the bundle even when project sources never mention them.
  */
 const editorRuntimePackage = "babylonjs-editor-tools";
+const runtimeScriptExtensions = new Set([".cjs", ".js", ".mjs"]);
+const runtimeReadBatchSize = 64;
 
 /** Scans the installed editor runtime's ESM sources when the project depends on it; returns project-relative evidence paths. */
 async function scanEditorRuntime(projectDirectory: string): Promise<{ files: IScannedFile[]; totalBytes: number } | null> {
@@ -255,11 +258,43 @@ async function scanEditorRuntime(projectDirectory: string): Promise<{ files: ISc
 
 	// Linked or workspace installs resolve to the real package directory; evidence paths stay project-relative.
 	const root = (await realpath(packageDirectory)).replaceAll("\\", "/");
-	const scan = await scanFiles(root, [join(root, "build/src")]);
-	return {
-		files: scan.files.map((file) => ({ ...file, path: `node_modules/${editorRuntimePackage}/${file.path}` })),
-		totalBytes: scan.totalBytes,
-	};
+	const sourceDirectory = join(root, "build/src");
+	if (!(await pathExists(sourceDirectory))) {
+		return null;
+	}
+
+	// Only emitted JavaScript can reach the bundle. List it in one call and read files in parallel batches: the runtime
+	// has hundreds of modules and sequential streamed reads are slow in the editor's renderer process.
+	const entries = await readDirectory(sourceDirectory, { recursive: true, withFileTypes: true });
+	const paths = entries
+		.filter((entry) => entry.isFile() && runtimeScriptExtensions.has(extension(entry.name)))
+		.map((entry) => join(entry.parentPath.replaceAll("\\", "/"), entry.name))
+		.sort();
+	if (paths.length > maximumFiles) {
+		throw new Error(`The ${editorRuntimePackage} runtime exceeds ${maximumFiles} files.`);
+	}
+
+	const files: IScannedFile[] = [];
+	let totalBytes = 0;
+	for (let index = 0; index < paths.length; index += runtimeReadBatchSize) {
+		const batch = await Promise.all(paths.slice(index, index + runtimeReadBatchSize).map(async (path) => ({ path, bytes: await readFile(path) })));
+		for (const { path, bytes } of batch) {
+			totalBytes += bytes.length;
+			if (totalBytes > maximumBytes) {
+				throw new Error(`The ${editorRuntimePackage} runtime exceeds 2 GiB.`);
+			}
+			const searchable = bytes.toString("latin1").toLowerCase();
+			files.push({
+				path: `node_modules/${editorRuntimePackage}/${relative(root, path)}`,
+				size: bytes.length,
+				sha256: createHash("sha256").update(bytes).digest("hex"),
+				markers: markerCatalog.filter((marker) => searchable.includes(marker)).sort(),
+				wasmBytes: null,
+			});
+		}
+	}
+
+	return { files, totalBytes };
 }
 
 export async function createWebBuildPlan(projectDirectory: string, profile: IWebBuildProfileDescriptor, configurationRevision: number): Promise<IWebBuildPlan> {
