@@ -1629,8 +1629,34 @@ async function scanFiles(path: string): Promise<string[]> {
 		.filter((entry) => entry !== projectConfiguration.path && !isIgnoredProjectPath(relative(projectDirectory(), entry)));
 }
 
-function serialized<T>(operation: () => Promise<T>): Promise<T> {
-	const result = registryOperation.then(operation, operation);
+/** A registry operation waiting for, or holding, the serialized registry queue; reported for diagnosing stalled asset calls. */
+export interface IAssetRegistryQueueOperation {
+	kind: "refresh" | "rebuild";
+	paths: string[];
+	queuedAt: string;
+	startedAt: string | null;
+	phase: AssetIndexingJobPhase | "queued" | "starting";
+}
+
+const registryQueueOperations: IAssetRegistryQueueOperation[] = [];
+
+function serialized<T>(
+	kind: IAssetRegistryQueueOperation["kind"],
+	paths: string[],
+	operation: (hooks: { onPhase: (phase: AssetIndexingJobPhase) => void }) => Promise<T>
+): Promise<T> {
+	const tracked: IAssetRegistryQueueOperation = { kind, paths: paths.slice(0, 20), queuedAt: new Date().toISOString(), startedAt: null, phase: "queued" };
+	registryQueueOperations.push(tracked);
+	const run = async (): Promise<T> => {
+		tracked.startedAt = new Date().toISOString();
+		tracked.phase = "starting";
+		try {
+			return await operation({ onPhase: (phase) => (tracked.phase = phase) });
+		} finally {
+			registryQueueOperations.splice(registryQueueOperations.indexOf(tracked), 1);
+		}
+	};
+	const result = registryOperation.then(run, run);
 	registryOperation = result.then(
 		() => undefined,
 		() => undefined
@@ -1643,8 +1669,19 @@ interface IAssetRegistryExecutionHooks extends IAssetWorkerPoolOptions {
 	onDiscovered?: (totalFiles: number) => void;
 }
 
-async function rebuildAssetRegistryWithHooks(options: { repairDuplicateGuids?: boolean }, hooks: IAssetRegistryExecutionHooks): Promise<IAssetRegistry> {
-	return serialized(async () => {
+function trackRegistryPhases(hooks: IAssetRegistryExecutionHooks, queue: { onPhase: (phase: AssetIndexingJobPhase) => void }): IAssetRegistryExecutionHooks {
+	return {
+		...hooks,
+		onPhase: (phase) => {
+			queue.onPhase(phase);
+			hooks.onPhase?.(phase);
+		},
+	};
+}
+
+async function rebuildAssetRegistryWithHooks(options: { repairDuplicateGuids?: boolean }, executionHooks: IAssetRegistryExecutionHooks): Promise<IAssetRegistry> {
+	return serialized("rebuild", [], async (queue) => {
+		const hooks = trackRegistryPhases(executionHooks, queue);
 		hooks.onPhase?.("discovering");
 		const files = (await Promise.all(INDEX_ROOTS.map((root) => scanFiles(join(projectDirectory(), root))))).flat();
 		hooks.onDiscovered?.(files.length);
@@ -1778,8 +1815,9 @@ export async function refreshAssetRegistryPaths(paths: string[]): Promise<IAsset
 	return refreshAssetRegistryPathsWithHooks(paths, {});
 }
 
-async function refreshAssetRegistryPathsWithHooks(paths: string[], hooks: IAssetRegistryExecutionHooks): Promise<IAssetRegistry> {
-	return serialized(async () => {
+async function refreshAssetRegistryPathsWithHooks(paths: string[], executionHooks: IAssetRegistryExecutionHooks): Promise<IAssetRegistry> {
+	return serialized("refresh", paths, async (queue) => {
+		const hooks = trackRegistryPhases(executionHooks, queue);
 		const current = await readRegistry();
 		if (!current) {
 			hooks.onPhase?.("discovering");
@@ -1908,6 +1946,7 @@ export async function getAssetIndexingStatus(): Promise<{
 	defaultWorkerCount: number;
 	activeJob: IAssetIndexingJob | null;
 	recentJobs: IAssetIndexingJob[];
+	registryQueue: IAssetRegistryQueueOperation[];
 }> {
 	return {
 		workerRuntime: assetIndexingWorkerRuntime(),
@@ -1915,6 +1954,7 @@ export async function getAssetIndexingStatus(): Promise<{
 		defaultWorkerCount: defaultAssetIndexingWorkerCount(),
 		activeJob: activeAssetIndexingJob ? publicAssetIndexingJob(activeAssetIndexingJob) : null,
 		recentJobs: assetIndexingJobs.map(publicAssetIndexingJob),
+		registryQueue: structuredClone(registryQueueOperations),
 	};
 }
 

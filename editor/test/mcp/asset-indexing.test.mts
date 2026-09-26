@@ -10,6 +10,7 @@ import {
 	getIndexedAssetRecord,
 	queryAssetRegistry,
 	rebuildAssetRegistry,
+	refreshAssetRegistryPaths,
 	startAssetIndexingJob,
 } from "../../src/mcp/assets/registry";
 import { projectConfiguration } from "../../src/project/configuration";
@@ -58,6 +59,20 @@ describe("background asset indexing", () => {
 		expect(await getIndexedAssetRecord("assets/scene.json")).toMatchObject({ path: "assets/scene.json" });
 		expect(await getIndexedAssetDependencies("assets/scene.json")).toMatchObject({ path: "assets/scene.json" });
 		await expect(getIndexedAssetRecord("assets/missing.png")).rejects.toThrow("Asset is not indexed: assets/missing.png");
+	});
+
+	test("reports queued and running registry operations so a stalled asset call can be traced", async () => {
+		await writeFile(join(directory, "assets", "texture.png"), "texture");
+		expect((await getAssetIndexingStatus()).registryQueue).toEqual([]);
+
+		const rebuild = rebuildAssetRegistry();
+		const refresh = refreshAssetRegistryPaths([join(directory, "assets", "texture.png")]);
+		const queue = (await getAssetIndexingStatus()).registryQueue;
+		expect(queue.map((operation) => operation.kind)).toEqual(["rebuild", "refresh"]);
+		expect(queue[1]).toMatchObject({ paths: [join(directory, "assets", "texture.png")], startedAt: null, phase: "queued" });
+
+		await Promise.all([rebuild, refresh]);
+		expect((await getAssetIndexingStatus()).registryQueue).toEqual([]);
 	});
 
 	test("starts non-blocking, reports bounded progress, and atomically publishes worker analysis", async () => {

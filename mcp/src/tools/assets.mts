@@ -1374,7 +1374,7 @@ export function registerAssetTools(server: McpServer): void {
 		{
 			title: "Get background asset indexing status",
 			description:
-				"Read isolated-worker availability/runtime, default concurrency, the active background rebuild/refresh phase and file progress, plus up to 20 recent completed, cancelled, or failed jobs. This never starts a scan.",
+				"Read isolated-worker availability/runtime, default concurrency, the active background rebuild/refresh phase and file progress, up to 20 recent completed, cancelled, or failed jobs, and the serialized registry queue (each queued or running refresh/rebuild with its paths, queue/start times and phase, which identifies an operation that is holding up asset imports and deletes). This never starts a scan.",
 			inputSchema: z.object({}),
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
