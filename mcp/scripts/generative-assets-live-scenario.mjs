@@ -370,7 +370,8 @@ await writeFile(join(outputPath, "result.json"), JSON.stringify({ version: 1, ca
 	await cdp.click("[data-generative-inspect-publication]");
 	await waitFor(() => cdp.evaluate("Boolean(document.querySelector('[data-generative-publication-plan]'))"), Boolean, "UI publication plan");
 	await cdp.click("[data-generative-publish]");
-	await waitFor(() => cdp.evaluate("Boolean(document.querySelector('[data-generative-publication-history]'))"), Boolean, "UI publication history");
+	// Publishing writes the files and runs them through the registry and importer pipeline, so allow more than a UI round-trip.
+	await waitFor(() => cdp.evaluate("Boolean(document.querySelector('[data-generative-publication-history]'))"), Boolean, "UI publication history", 180_000);
 	const publishedJob = await call("get_generative_asset_job", { jobId: executableJob.id });
 	if (publishedJob.publications.length !== 1 || publishedJob.publications[0].files.length !== 1 || publishedJob.publications[0].files[0].importer.kind !== "texture") {
 		throw new Error(`UI publication evidence is incomplete: ${JSON.stringify(publishedJob.publications)}`);
