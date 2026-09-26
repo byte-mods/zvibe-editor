@@ -115,4 +115,30 @@ describe("mcp/testing", () => {
 		expect(result).toMatchObject({ status: "passed", exitCode: 0, packageScript: "test" });
 		expect(result.output).toContain("code-tests-ok");
 	});
+
+	test.skipIf(process.platform === "win32")("a timed-out code-test run also ends the processes its package script started", async () => {
+		const pidFile = join(projectDirectory, "grandchild.pid");
+		// The package manager runs node, which never exits on its own and keeps the output pipe open.
+		const hang = `node -e "require('fs').writeFileSync('${pidFile}', String(process.pid)); setInterval(() => {}, 1000)"`;
+		await writeFile(join(projectDirectory, "package.json"), JSON.stringify({ scripts: { test: hang } }), "utf8");
+		const configured = await setProjectCodeTests(scene, { expectedRevision: 0, timeoutMs: 1_000 }, options);
+
+		const result = await runProjectCodeTests(scene, { expectedRevision: configured.revision, confirm: true }, options);
+		expect(result.status).toBe("timed-out");
+
+		const grandchild = Number(await readFile(pidFile, "utf8"));
+		const alive = (): boolean => {
+			try {
+				process.kill(grandchild, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+		for (let attempt = 0; attempt < 50 && alive(); attempt++) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+		expect(alive()).toBe(false);
+		expect((await getProjectCodeTests(scene)).active).toBeNull();
+	}, 30_000);
 });

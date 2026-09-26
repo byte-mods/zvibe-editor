@@ -41,6 +41,7 @@ interface IActiveCodeTestRun {
 	outputTruncated: boolean;
 	canceled: boolean;
 	timedOut: boolean;
+	closed: boolean;
 	forceKill: ReturnType<typeof setTimeout> | null;
 }
 
@@ -191,13 +192,33 @@ function stripAnsiColors(value: string): string {
 	return result;
 }
 
-function terminateCodeTest(run: IActiveCodeTestRun): void {
-	if (run.child.exitCode !== null || run.child.signalCode !== null) {
+/**
+ * Signals the package-manager process and everything it started. Killing only `yarn`/`npm` leaves the actual test
+ * process running with the output pipe open, so the run would never finish and every later run would be refused.
+ */
+function signalCodeTestTree(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+	if (child.pid === undefined) {
 		return;
 	}
-	run.child.kill("SIGTERM");
+	if (process.platform === "win32") {
+		spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on("error", () => child.kill(signal));
+		return;
+	}
+	try {
+		// The child leads its own process group (spawned detached), so a negative pid reaches its descendants too.
+		process.kill(-child.pid, signal);
+	} catch {
+		child.kill(signal);
+	}
+}
+
+function terminateCodeTest(run: IActiveCodeTestRun): void {
+	if (run.closed) {
+		return;
+	}
+	signalCodeTestTree(run.child, "SIGTERM");
 	if (!run.forceKill) {
-		run.forceKill = setTimeout(() => run.child.kill("SIGKILL"), 5_000);
+		run.forceKill = setTimeout(() => signalCodeTestTree(run.child, "SIGKILL"), 5_000);
 		run.forceKill.unref?.();
 	}
 }
@@ -305,6 +326,8 @@ export async function runProjectCodeTests(scene: Scene, data: any, options: IMCP
 		shell: false,
 		windowsHide: true,
 		stdio: "pipe",
+		// Own process group on POSIX so timeouts and cancellation can terminate the whole script tree.
+		detached: process.platform !== "win32",
 	});
 	const started = Date.now();
 	const active: IActiveCodeTestRun = {
@@ -318,6 +341,7 @@ export async function runProjectCodeTests(scene: Scene, data: any, options: IMCP
 		outputTruncated: false,
 		canceled: false,
 		timedOut: false,
+		closed: false,
 		forceKill: null,
 	};
 	activeCodeRuns.set(scene, active);
@@ -328,6 +352,7 @@ export async function runProjectCodeTests(scene: Scene, data: any, options: IMCP
 		terminateCodeTest(active);
 	}, value.timeoutMs);
 	child.once("close", () => {
+		active.closed = true;
 		if (active.forceKill) {
 			clearTimeout(active.forceKill);
 		}
