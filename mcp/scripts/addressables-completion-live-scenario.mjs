@@ -110,6 +110,7 @@ let reportIndexBaseline;
 let receiptBaseline = {};
 let configuration;
 let baselineActiveProfileId;
+let baselineRemoteCatalog;
 let fixtureInstalled = false;
 
 async function cleanupFiles() {
@@ -201,6 +202,7 @@ export async function main(editor) {
 
 	configuration = await call("list_addressable_groups");
 	baselineActiveProfileId = configuration.activeProfileId;
+	baselineRemoteCatalog = configuration.settings.remoteCatalog;
 	configuration = await call("create_addressable_profile", {
 		expectedRevision: configuration.revision,
 		id: profileId,
@@ -210,10 +212,8 @@ export async function main(editor) {
 		remoteBuildPath: `${buildFolder}/remote`,
 		remoteLoadPath: publicBaseUrl,
 	});
-	configuration = await call("set_addressable_settings", { expectedRevision: configuration.revision, activeProfileId: profileId, remoteCatalog: true });
-	for (const existingGroup of configuration.groups.filter((candidate) => candidate.delivery === "remote" && candidate.assets.length)) {
-		configuration = await call("set_addressable_group", { expectedRevision: configuration.revision, id: existingGroup.id, loadPath: publicBaseUrl });
-	}
+	configuration = await call("set_addressable_settings", { expectedRevision: configuration.revision, activeProfileId: profileId });
+	// A remote catalog requires a remote group, so create it before enabling the catalog; fresh projects have none.
 	configuration = await call("create_addressable_group", {
 		expectedRevision: configuration.revision,
 		id: groupId,
@@ -224,6 +224,10 @@ export async function main(editor) {
 		buildPath: `${buildFolder}/group`,
 		loadPath: publicBaseUrl,
 	});
+	configuration = await call("set_addressable_settings", { expectedRevision: configuration.revision, remoteCatalog: true });
+	for (const existingGroup of configuration.groups.filter((candidate) => candidate.id !== groupId && candidate.delivery === "remote" && candidate.assets.length)) {
+		configuration = await call("set_addressable_group", { expectedRevision: configuration.revision, id: existingGroup.id, loadPath: publicBaseUrl });
+	}
 	configuration = await call("assign_addressable_asset", {
 		expectedRevision: configuration.revision,
 		id: groupId,
@@ -282,8 +286,13 @@ export async function main(editor) {
 
 	configuration = await call("delete_addressable_deployment_target", { expectedRevision: configuration.revision, id: targetId });
 	configuration = await call("remove_addressable_asset", { expectedRevision: configuration.revision, id: groupId, assetPathOrAddress: assetPath });
+	// Restore the baseline catalog mode first: the remote catalog cannot outlive the last remote group.
+	configuration = await call("set_addressable_settings", {
+		expectedRevision: configuration.revision,
+		activeProfileId: baselineActiveProfileId,
+		remoteCatalog: baselineRemoteCatalog,
+	});
 	configuration = await call("delete_addressable_group", { expectedRevision: configuration.revision, id: groupId });
-	configuration = await call("set_addressable_settings", { expectedRevision: configuration.revision, activeProfileId: baselineActiveProfileId });
 	configuration = await call("delete_addressable_profile", { expectedRevision: configuration.revision, id: profileId });
 	await cleanupFiles();
 	console.log(

@@ -3,7 +3,7 @@ import { dirname, join, isAbsolute, basename, relative } from "path/posix";
 import { ensureDir, lstat, move, pathExists, readFile, remove, writeFile } from "fs-extra";
 import ts from "typescript";
 
-import { Tools, Scene } from "babylonjs";
+import { Tools, Scene, Node } from "babylonjs";
 import { scriptsDictionary } from "babylonjs-editor-tools";
 
 import { normalizedGlob } from "../../tools/fs";
@@ -15,6 +15,7 @@ import { saveProjectConfiguration } from "../../project/save/save";
 
 import { IMCPActionOptions } from "../action";
 import { resolveNode, toNodeSummary } from "../tools/resolve";
+import { isScene } from "../../tools/guards/scene";
 
 /**
  * Returns the absolute path of the project directory.
@@ -523,10 +524,30 @@ export async function writeScript(_scene: Scene, data: any): Promise<any> {
 }
 
 /**
- * Attaches a script file to a node, writing the node script metadata as the inspector does.
+ * Resolves the object owning script attachments: the node identified by `nodeId`/`nodeName`,
+ * or the scene itself when neither is provided (scene scripts run once per scene, e.g. game managers).
+ */
+function resolveScriptOwner(scene: Scene, data: any): Node | Scene {
+	if (!data.nodeId && !data.nodeName) {
+		return scene;
+	}
+
+	return resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
+}
+
+function getScriptOwnerLabel(owner: Node | Scene): string {
+	return isScene(owner) ? "the scene" : `node "${owner.name}"`;
+}
+
+function toScriptOwnerSummary(owner: Node | Scene): any {
+	return isScene(owner) ? { id: null, name: "Scene", className: "Scene", isEnabled: true, parentId: null } : toNodeSummary(owner);
+}
+
+/**
+ * Attaches a script file to a node (or to the scene when no node is given), writing the script metadata as the inspector does.
  */
 export function attachScript(scene: Scene, data: any, options: IMCPActionOptions): any {
-	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
+	const node = resolveScriptOwner(scene, data);
 	const absolutePath = resolveScriptPath(data.path);
 	const key = getScriptKey(absolutePath);
 
@@ -546,14 +567,14 @@ export function attachScript(scene: Scene, data: any, options: IMCPActionOptions
 	options.editor.layout.inspector.setEditedObject(node);
 	options.editor.layout.inspector.forceUpdate();
 
-	return toNodeSummary(node);
+	return toScriptOwnerSummary(node);
 }
 
 /**
  * Lists the scripts attached to a node and their exported values.
  */
 export function listAttachedScripts(scene: Scene, data: any): any {
-	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
+	const node = resolveScriptOwner(scene, data);
 
 	const scripts = (node.metadata?.scripts ?? []).map((script: any) => ({
 		path: join("src", script.key),
@@ -567,7 +588,7 @@ export function listAttachedScripts(scene: Scene, data: any): any {
 
 /** Sets a deterministic, Unity-style execution order for one script attachment on a node. */
 export function setAttachedScriptExecutionOrder(scene: Scene, data: any, options: IMCPActionOptions): any {
-	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
+	const node = resolveScriptOwner(scene, data);
 	const key = getScriptKey(resolveScriptPath(data.path));
 	const executionOrder = data.executionOrder;
 	if (!Number.isInteger(executionOrder) || executionOrder < -32000 || executionOrder > 32000) {
@@ -576,13 +597,13 @@ export function setAttachedScriptExecutionOrder(scene: Scene, data: any, options
 
 	const script = node.metadata?.scripts?.find((candidate: any) => candidate.key === key);
 	if (!script) {
-		throw new Error(`Script "${data.path}" is not attached to node "${node.name}".`);
+		throw new Error(`Script "${data.path}" is not attached to ${getScriptOwnerLabel(node)}.`);
 	}
 	script.executionOrder = executionOrder;
 
 	options.editor.layout.inspector.setEditedObject(node);
 	options.editor.layout.inspector.forceUpdate();
-	return { ...toNodeSummary(node), path: join("src", key), executionOrder };
+	return { ...toScriptOwnerSummary(node), path: join("src", key), executionOrder };
 }
 
 /** Lists scene-wide execution orders keyed by script path. These override per-attachment order in exported games. */
@@ -656,13 +677,13 @@ export function getScriptRuntimeDiagnostics(scene: Scene, data: any, options?: I
  * Sets an exported/inspector value of an attached script on a node.
  */
 export function setScriptExportedValue(scene: Scene, data: any, options: IMCPActionOptions): any {
-	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
+	const node = resolveScriptOwner(scene, data);
 	const absolutePath = resolveScriptPath(data.path);
 	const key = getScriptKey(absolutePath);
 
 	const script = node.metadata?.scripts?.find((s: any) => s.key === key);
 	if (!script) {
-		throw new Error(`Script "${data.path}" is not attached to node "${node.name}".`);
+		throw new Error(`Script "${data.path}" is not attached to ${getScriptOwnerLabel(node)}.`);
 	}
 
 	script.values ??= {};
@@ -676,14 +697,14 @@ export function setScriptExportedValue(scene: Scene, data: any, options: IMCPAct
 	options.editor.layout.inspector.setEditedObject(node);
 	options.editor.layout.inspector.forceUpdate();
 
-	return toNodeSummary(node);
+	return toScriptOwnerSummary(node);
 }
 
 /**
  * Removes an attached script from a node.
  */
 export function detachScript(scene: Scene, data: any, options: IMCPActionOptions): any {
-	const node = resolveNode({ scene, nodeId: data.nodeId, nodeName: data.nodeName });
+	const node = resolveScriptOwner(scene, data);
 	const absolutePath = resolveScriptPath(data.path);
 	const key = getScriptKey(absolutePath);
 
@@ -697,7 +718,7 @@ export function detachScript(scene: Scene, data: any, options: IMCPActionOptions
 	options.editor.layout.inspector.setEditedObject(node);
 	options.editor.layout.inspector.forceUpdate();
 
-	return toNodeSummary(node);
+	return toScriptOwnerSummary(node);
 }
 
 export async function renameScript(_scene: Scene, data: any): Promise<any> {

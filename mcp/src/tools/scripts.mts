@@ -15,9 +15,15 @@ const sourcePath = z
 	.min(6)
 	.max(1_024)
 	.regex(/^src\/(?!.*\.\.\/).+\.(?:ts|tsx)$/);
-const sceneNodeIdentity = {
-	nodeId: z.string().min(1).max(256).optional().describe("Id of the target node (preferred)."),
-	nodeName: z.string().min(1).max(256).optional().describe("Name of the target node."),
+/** Script attachments can live on a node or on the scene itself (omit both identifiers for the scene). */
+const scriptOwnerIdentity = {
+	nodeId: z
+		.string()
+		.min(1)
+		.max(256)
+		.optional()
+		.describe("Id of the target node (preferred). Omit both nodeId and nodeName to target the scene itself (e.g. a game manager script)."),
+	nodeName: z.string().min(1).max(256).optional().describe("Name of the target node. Omit both nodeId and nodeName to target the scene itself."),
 };
 const exportedFieldKey = z
 	.string()
@@ -363,8 +369,7 @@ export function registerScriptTools(server: McpServer): void {
 			description:
 				"Attach a script file to a node (the scene itself can also have scripts). This writes the node's script metadata exactly as the inspector's Scripts section does, so the attachment is visible to the user.",
 			inputSchema: z.object({
-				nodeId: z.string().optional().describe("Id of the target node (preferred)."),
-				nodeName: z.string().optional().describe("Name of the target node."),
+				...scriptOwnerIdentity,
 				path: z.string().describe("Project path of the script under `src/` to attach."),
 			}),
 			annotations: { idempotentHint: true },
@@ -379,8 +384,7 @@ export function registerScriptTools(server: McpServer): void {
 			description:
 				"List the scripts attached to a node along with their exported inspector values. Use this to discover which exported values you can tune with `set_script_exported_value`.",
 			inputSchema: z.object({
-				nodeId: z.string().optional().describe("Id of the target node (preferred)."),
-				nodeName: z.string().optional().describe("Name of the target node."),
+				...scriptOwnerIdentity,
 			}),
 			annotations: { readOnlyHint: true },
 		},
@@ -395,7 +399,7 @@ export function registerScriptTools(server: McpServer): void {
 				"Set an exported/inspector value of a script attached to a node. This lets you configure the same reusable script differently per object (e.g. open distance, speed).",
 			inputSchema: z
 				.object({
-					...sceneNodeIdentity,
+					...scriptOwnerIdentity,
 					path: sourcePath.describe("Project path of the attached script."),
 					key: exportedFieldKey.describe("Name of the exported value to set."),
 					value: jsonValueSchema.describe("The new bounded JSON value, including typed list/array contents."),
@@ -413,8 +417,7 @@ export function registerScriptTools(server: McpServer): void {
 			description:
 				"Set a deterministic execution order for one script attached to a node. Lower values initialize and update before higher values on that same object; equal values retain attachment order.",
 			inputSchema: z.object({
-				nodeId: z.string().optional().describe("Id of the target node (preferred)."),
-				nodeName: z.string().optional().describe("Name of the target node."),
+				...scriptOwnerIdentity,
 				path: z.string().describe("Project path of the attached script under src/."),
 				executionOrder: z.number().int().min(-32000).max(32000).describe("Integer order from -32000 to 32000; lower executes first."),
 			}),
@@ -473,10 +476,9 @@ export function registerScriptTools(server: McpServer): void {
 		"detach_script",
 		{
 			title: "Detach script",
-			description: "Remove an attached script from a node.",
+			description: "Remove an attached script from a node or from the scene.",
 			inputSchema: z.object({
-				nodeId: z.string().optional().describe("Id of the target node (preferred)."),
-				nodeName: z.string().optional().describe("Name of the target node."),
+				...scriptOwnerIdentity,
 				path: z.string().describe("Project path of the attached script to remove."),
 			}),
 			annotations: { destructiveHint: true, idempotentHint: true },
