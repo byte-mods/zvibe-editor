@@ -52,7 +52,7 @@ export async function processExportedAudio(sourcePath: string, outputPath: strin
 	const sourceDetails = await fs.stat(sourcePath);
 	try {
 		if (audioImportRequiresTranscode(settings)) {
-			await run(resolveMediaExecutable("ffmpeg"), createAudioTranscodeArguments(sourcePath, temporary, settings));
+			await run(resolveMediaExecutable("ffmpeg"), createAudioTranscodeArguments(sourcePath, temporary, settings, source));
 		} else {
 			await fs.copyFile(sourcePath, temporary);
 		}

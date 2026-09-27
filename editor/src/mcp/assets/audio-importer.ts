@@ -119,7 +119,7 @@ async function applyAudioImporterArtifactLocally(path: string, expectedFingerpri
 	try {
 		if (audioImportRequiresTranscode(settings)) {
 			const executable = await resolveMediaExecutable(editor, "ffmpeg");
-			await runMediaProcess(executable, createAudioTranscodeArguments(path, temporary, settings));
+			await runMediaProcess(executable, createAudioTranscodeArguments(path, temporary, settings, source));
 		} else {
 			await copyFile(path, temporary);
 		}
@@ -152,7 +152,7 @@ export async function processAudioImporterOutput(sourcePath: string, outputPath:
 	try {
 		if (audioImportRequiresTranscode(settings)) {
 			const executable = await resolveMediaExecutable(editor, "ffmpeg");
-			await runMediaProcess(executable, createAudioTranscodeArguments(sourcePath, temporary, settings));
+			await runMediaProcess(executable, createAudioTranscodeArguments(sourcePath, temporary, settings, source));
 		} else {
 			await copyFile(sourcePath, temporary);
 		}

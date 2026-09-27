@@ -55,8 +55,12 @@ export function audioImportRequiresTranscode(settings: IAudioImporterSettings): 
 	return settings.compressionFormat === "browser" || settings.sampleRate !== "preserve" || settings.forceMono || settings.normalize;
 }
 
-/** Builds a shell-free FFmpeg argument vector for one validated audio importer configuration. */
-export function createAudioTranscodeArguments(sourcePath: string, outputPath: string, settings: IAudioImporterSettings): string[] {
+/**
+ * Builds a shell-free FFmpeg argument vector for one validated audio importer configuration.
+ * @param source defines the probe of the source file. With `normalize` and a "preserve" sample rate its rate is written
+ * explicitly, because FFmpeg's loudnorm filter otherwise outputs 192 kHz audio (about 4× the size of a 44.1/48 kHz file).
+ */
+export function createAudioTranscodeArguments(sourcePath: string, outputPath: string, settings: IAudioImporterSettings, source?: Pick<IAudioImportProbe, "sampleRate">): string[] {
 	const extension = outputPath.match(/(\.[^./\\]+)$/)?.[1].toLowerCase() ?? "";
 	const codec = browserCodecByExtension[extension];
 	if (!codec) {
@@ -68,6 +72,8 @@ export function createAudioTranscodeArguments(sourcePath: string, outputPath: st
 	}
 	if (settings.sampleRate !== "preserve") {
 		args.push("-ar", settings.sampleRate);
+	} else if (settings.normalize) {
+		args.push("-ar", source?.sampleRate ? String(Math.round(source.sampleRate)) : "48000");
 	}
 	if (settings.normalize) {
 		args.push("-af", "loudnorm=I=-16:TP=-1.5:LRA=11");

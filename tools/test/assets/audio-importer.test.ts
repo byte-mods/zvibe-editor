@@ -46,6 +46,28 @@ describe("audio importer", () => {
 		expect(() => createAudioTranscodeArguments("source.wav", "output.bin", settings)).toThrow("does not support");
 	});
 
+	test("keeps the source sample rate when normalizing with a preserved sample rate instead of loudnorm's 192 kHz", () => {
+		const settings = normalizeAudioImporterSettings({
+			loadType: "compressedInMemory",
+			compressionFormat: "preserve",
+			quality: 0.8,
+			sampleRate: "preserve",
+			forceMono: false,
+			normalize: true,
+		});
+		const sampleRateArgument = (args: string[]): string | null => (args.includes("-ar") ? args[args.indexOf("-ar") + 1] : null);
+
+		expect(sampleRateArgument(createAudioTranscodeArguments("source.flac", "output.flac", settings, { sampleRate: 44100 }))).toBe("44100");
+		// Without probe evidence, fall back to a standard rate rather than letting loudnorm upsample.
+		expect(sampleRateArgument(createAudioTranscodeArguments("source.flac", "output.flac", settings))).toBe("48000");
+		expect(sampleRateArgument(createAudioTranscodeArguments("source.flac", "output.flac", settings, { sampleRate: null }))).toBe("48000");
+		// An explicit sample rate still wins, and without normalization a preserved rate adds no resampling.
+		expect(sampleRateArgument(createAudioTranscodeArguments("source.flac", "output.flac", { ...settings, sampleRate: "22050" }, { sampleRate: 44100 }))).toBe("22050");
+		expect(
+			sampleRateArgument(createAudioTranscodeArguments("source.flac", "output.flac", { ...settings, normalize: false, forceMono: true }, { sampleRate: 44100 }))
+		).toBeNull();
+	});
+
 	test("preserves audio when no processing field requires transcoding and parses probe evidence", () => {
 		const settings = normalizeAudioImporterSettings({
 			loadType: "compressedInMemory",
