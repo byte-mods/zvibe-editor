@@ -7,7 +7,7 @@ import { dirname, join } from "path";
 import { MeshBuilder, NullEngine, PhysicsAggregate, PhysicsShapeType, Scene } from "babylonjs";
 import HavokPhysics from "@babylonjs/havok";
 
-import { EditorPhysicsMaxLinearVelocity, enableEditorPhysics } from "../../../src/tools/physics/init";
+import { EditorPhysicsMaxLinearVelocity, EditorPhysicsSubTimeStep, enableEditorPhysics } from "../../../src/tools/physics/init";
 
 describe("tools/physics/enableEditorPhysics", () => {
 	let engine: NullEngine;
@@ -31,6 +31,7 @@ describe("tools/physics/enableEditorPhysics", () => {
 
 		expect(scene.getPhysicsEngine()!.gravity.y).toBe(-981);
 		expect(plugin.getMaxLinearVelocity()).toBe(EditorPhysicsMaxLinearVelocity);
+		expect(scene.getPhysicsEngine()!.getSubTimeStep()).toBe(EditorPhysicsSubTimeStep);
 
 		const box = MeshBuilder.CreateBox("falling", { size: 100 }, scene);
 		box.position.y = 10_000;

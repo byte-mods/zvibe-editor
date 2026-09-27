@@ -96,6 +96,9 @@ const App: Component = () => {
 		scene.enablePhysics(gravityVector, physicsPlugin);
 		// Havok's default speed limit (200 units/s) assumes meters and would cap every body at 2 m/s, so scale it to centimeters.
 		physicsPlugin.setVelocityLimits(20_000, 100);
+		// Step physics at a fixed 60 Hz (catching up on slow frames, at most one second per frame) so stacked bodies stay
+		// stable at any frame rate. Apply forces from scripts in `scene.onBeforePhysicsObservable`, once per physics step.
+		scene.getPhysicsEngine()?.setSubTimeStep(1000 / 60);
 
 		// Sound nodes authored in the editor play through the Audio V2 engine, which must exist before the scene loads.
 		await CreateAudioEngineAsync();

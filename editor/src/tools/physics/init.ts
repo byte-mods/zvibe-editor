@@ -36,14 +36,17 @@ export async function initializeHavok(appPath: string) {
 export const EditorPhysicsGravity = -981;
 export const EditorPhysicsMaxLinearVelocity = 20_000;
 export const EditorPhysicsMaxAngularVelocity = 100;
+/** Fixed physics step in milliseconds, matching the project templates so Play mode behaves like the exported game. */
+export const EditorPhysicsSubTimeStep = 1000 / 60;
 
 /**
- * Enables Havok physics on the given scene with the editor's centimeter gravity and speed limits.
+ * Enables Havok physics on the given scene with the editor's centimeter gravity, speed limits and fixed 60 Hz step.
  * @param scene defines the scene to enable physics on.
  */
 export function enableEditorPhysics(scene: Scene): HavokPlugin {
 	const plugin = new HavokPlugin();
 	scene.enablePhysics(new Vector3(0, EditorPhysicsGravity, 0), plugin);
 	plugin.setVelocityLimits(EditorPhysicsMaxLinearVelocity, EditorPhysicsMaxAngularVelocity);
+	scene.getPhysicsEngine()?.setSubTimeStep(EditorPhysicsSubTimeStep);
 	return plugin;
 }
