@@ -136,6 +136,7 @@ node_modules
 editor/build
 editor/declaration
 editor/templates
+editor/packages
 editor/electron-packages
 editor/coverage
 

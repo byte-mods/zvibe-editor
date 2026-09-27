@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { openSingleFolderDialog } from "../tools/dialog";
 import { isPackageManagerAvailable } from "../tools/process";
 import { tryAddProjectToLocalStorage } from "../tools/local-storage";
+import { getEditorRuntimePackagesDirectory, readEditorRuntimePackages, useVendoredEditorRuntimePackages, vendorEditorRuntimePackages } from "../project/runtime-packages";
 
 import { EditorProjectPackageManager, IEditorProject, EditorProjectTemplate } from "../project/typings";
 
@@ -87,6 +88,14 @@ export function DashboardCreateProjectDialog(props: IDashboardCreateProjectDialo
 			spaces: "\t",
 			encoding: "utf-8",
 		});
+
+		// Install this editor's own runtime and CLI builds rather than the upstream npm packages of the same names.
+		const packagesDirectory = getEditorRuntimePackagesDirectory(window.location.href);
+		const runtimePackages = await readEditorRuntimePackages(packagesDirectory);
+		if (runtimePackages) {
+			await vendorEditorRuntimePackages(destination, packagesDirectory, runtimePackages);
+			await useVendoredEditorRuntimePackages(destination, runtimePackages);
+		}
 
 		// Generate public/scene.
 		await pack(destination, {

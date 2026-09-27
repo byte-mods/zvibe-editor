@@ -61,6 +61,8 @@ function isIgnoredProjectPath(path: string): boolean {
 			(segment) => ["node_modules", ".git", ".bjseditor", "build", "declaration", "dist", "out", ".next"].includes(segment) || segment.startsWith("editor-generated_")
 		) ||
 		normalizedPath.startsWith("public/scene/") ||
+		// The editor's vendored runtime/CLI tarballs (see project/runtime-packages.ts) are dependencies, not assets.
+		normalizedPath.startsWith(".zvibe/packages/") ||
 		isAssetMetadataPath(normalizedPath)
 	);
 }

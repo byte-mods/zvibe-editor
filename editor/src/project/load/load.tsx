@@ -22,6 +22,13 @@ import { readSerializedJSON } from "../serialization-session";
 import { loadSceneWorkspace } from "./workspace";
 import { LoadScenePrepareComponent } from "./prepare";
 import { installBabylonJSEditorCLI, installBabylonJSEditorTools, installDependencies } from "./install";
+import {
+	getEditorRuntimePackagesDirectory,
+	getRuntimePackageSpecifier,
+	isEditorRuntimePackageInstalled,
+	readEditorRuntimePackages,
+	vendorEditorRuntimePackages,
+} from "../runtime-packages";
 
 const runtimeDependenciesVersion = packageJson.runtimeDependenciesVersion;
 
@@ -131,56 +138,90 @@ export async function checkDependencies(
 			toast.warning(`Package manager "${packageManager}" is not available on your system. Dependencies will not be updated.`);
 		}
 
-		const cliPackageJsonPath = "node_modules/babylonjs-editor-cli/package.json";
-		const toolsPackageJsonPath = "node_modules/babylonjs-editor-tools/package.json";
-
-		let matchesCliVersion = false;
-		let matchesToolsVersion = false;
-
-		// Recursively search for the "babylonjs-editor-tools" package in parent directories, to handle monorepos where the package might be hoisted to the root "node_modules" folder.
-		const toolsPathSplit = directory.split("/");
-		do {
-			try {
-				const path = join(toolsPathSplit.join("/"), toolsPackageJsonPath);
-				const toolsPackageJson = await readJSON(path, "utf-8");
-
-				matchesToolsVersion = toolsPackageJson.version === runtimeDependenciesVersion;
-				break;
-			} catch (e) {
-				// Catch silently
-			}
-
-			toolsPathSplit.pop();
-		} while (toolsPathSplit.length > 0);
-
-		const cliPathSplit = directory.split("/");
-		do {
-			try {
-				const path = join(cliPathSplit.join("/"), cliPackageJsonPath);
-				const cliPackageJson = await readJSON(path, "utf-8");
-
-				matchesCliVersion = cliPackageJson.version === runtimeDependenciesVersion;
-				break;
-			} catch (e) {
-				// Catch silently
-			}
-
-			cliPathSplit.pop();
-		} while (cliPathSplit.length > 0);
-
 		let toolsCode = 0;
-		if (!matchesToolsVersion) {
-			toolsCode = await installBabylonJSEditorTools(packageManager, directory, runtimeDependenciesVersion);
-			if (toolsCode !== 0) {
-				toast.warning(`Package manager "${packageManager}" is not available on your system. Can't install "babylonjs-editor-tools" package dependency.`);
-			}
-		}
-
 		let cliCode = 0;
-		if (!matchesCliVersion) {
-			cliCode = await installBabylonJSEditorCLI(packageManager, directory, runtimeDependenciesVersion);
-			if (cliCode !== 0) {
-				toast.warning(`Package manager "${packageManager}" is not available on your system. Can't install "babylonjs-editor-cli" package dependency.`);
+
+		const packagesDirectory = getEditorRuntimePackagesDirectory(window.location.href);
+		const runtimePackages = await readEditorRuntimePackages(packagesDirectory).catch((error) => {
+			console.error(error);
+			return null;
+		});
+
+		if (runtimePackages) {
+			// This editor ships its own builds of the runtime and CLI. Registry packages with the same names and versions are
+			// the upstream ones, so install the vendored tarballs unless exactly these builds are already installed.
+			const [toolsInstalled, cliInstalled] = await Promise.all([
+				isEditorRuntimePackageInstalled(directory, runtimePackages.tools),
+				isEditorRuntimePackageInstalled(directory, runtimePackages.cli),
+			]);
+
+			if (!toolsInstalled || !cliInstalled) {
+				await vendorEditorRuntimePackages(directory, packagesDirectory, runtimePackages);
+			}
+
+			if (!toolsInstalled) {
+				toolsCode = await installBabylonJSEditorTools(packageManager, directory, getRuntimePackageSpecifier(runtimePackages.tools));
+				if (toolsCode !== 0) {
+					toast.warning(`Package manager "${packageManager}" is not available on your system. Can't install "babylonjs-editor-tools" package dependency.`);
+				}
+			}
+
+			if (!cliInstalled) {
+				cliCode = await installBabylonJSEditorCLI(packageManager, directory, getRuntimePackageSpecifier(runtimePackages.cli));
+				if (cliCode !== 0) {
+					toast.warning(`Package manager "${packageManager}" is not available on your system. Can't install "babylonjs-editor-cli" package dependency.`);
+				}
+			}
+		} else {
+			const cliPackageJsonPath = "node_modules/babylonjs-editor-cli/package.json";
+			const toolsPackageJsonPath = "node_modules/babylonjs-editor-tools/package.json";
+
+			let matchesCliVersion = false;
+			let matchesToolsVersion = false;
+
+			// Recursively search for the "babylonjs-editor-tools" package in parent directories, to handle monorepos where the package might be hoisted to the root "node_modules" folder.
+			const toolsPathSplit = directory.split("/");
+			do {
+				try {
+					const path = join(toolsPathSplit.join("/"), toolsPackageJsonPath);
+					const toolsPackageJson = await readJSON(path, "utf-8");
+
+					matchesToolsVersion = toolsPackageJson.version === runtimeDependenciesVersion;
+					break;
+				} catch (e) {
+					// Catch silently
+				}
+
+				toolsPathSplit.pop();
+			} while (toolsPathSplit.length > 0);
+
+			const cliPathSplit = directory.split("/");
+			do {
+				try {
+					const path = join(cliPathSplit.join("/"), cliPackageJsonPath);
+					const cliPackageJson = await readJSON(path, "utf-8");
+
+					matchesCliVersion = cliPackageJson.version === runtimeDependenciesVersion;
+					break;
+				} catch (e) {
+					// Catch silently
+				}
+
+				cliPathSplit.pop();
+			} while (cliPathSplit.length > 0);
+
+			if (!matchesToolsVersion) {
+				toolsCode = await installBabylonJSEditorTools(packageManager, directory, runtimeDependenciesVersion);
+				if (toolsCode !== 0) {
+					toast.warning(`Package manager "${packageManager}" is not available on your system. Can't install "babylonjs-editor-tools" package dependency.`);
+				}
+			}
+
+			if (!matchesCliVersion) {
+				cliCode = await installBabylonJSEditorCLI(packageManager, directory, runtimeDependenciesVersion);
+				if (cliCode !== 0) {
+					toast.warning(`Package manager "${packageManager}" is not available on your system. Can't install "babylonjs-editor-cli" package dependency.`);
+				}
 			}
 		}
 

@@ -73,7 +73,8 @@ function build({ x64, arm64 } = options) {
 			asar: true,
 			asarUnpack: ["**/node_modules/sharp/**/*", "**/node_modules/@img/**/*", "**/node_modules/onnxruntime-web/**/*", "**/node_modules/@litertjs/core/wasm/**/*"],
 			compression: "normal",
-			extraFiles: ["bin/**", "templates/**"],
+			// "packages" holds this repository's babylonjs-editor-tools/cli tarballs that new projects install (see scripts/pack-runtime-packages.mjs).
+			extraFiles: ["bin/**", "templates/**", "packages/**"],
 			files: ["./build/**", "./fonts/**", "./assets/**", "./index.html"],
 		},
 	});

@@ -46,9 +46,9 @@
 		"build-website": "yarn workspace babylonjs-editor-website build",
 		"build-cli": "yarn workspace babylonjs-editor-cli build",
 		"build-mcp-server": "yarn workspace babylonjs-editor-mcp-server build",
-		"build": "yarn build-tools && yarn build-cli && yarn build-mcp-server && yarn build-editor && yarn build-plugins",
+		"build": "yarn build-tools && yarn build-cli && yarn pack-runtime-packages && yarn build-mcp-server && yarn build-editor && yarn build-plugins",
 		"build-all": "yarn build && yarn build-templates && yarn build-website",
-		"build-all-concurrently": "yarn build-tools && concurrently \"yarn build-cli\" \"yarn build-mcp-server\" -c bgBlue.bold,bgGreen.bold --names cli,mcp-server && yarn build-editor && concurrently \"yarn workspace babylonjs-editor-plugins build-concurrently\" \"yarn workspace babylonjs-editor-templates build-concurrently\" \"yarn workspace babylonjs-editor-website build\" -c bgYellow.bold,bgBlue.bold,bgGreen.bold --names plugins,templates,website",
+		"build-all-concurrently": "yarn build-tools && concurrently \"yarn build-cli\" \"yarn build-mcp-server\" -c bgBlue.bold,bgGreen.bold --names cli,mcp-server && yarn pack-runtime-packages && yarn build-editor && concurrently \"yarn workspace babylonjs-editor-plugins build-concurrently\" \"yarn workspace babylonjs-editor-templates build-concurrently\" \"yarn workspace babylonjs-editor-website build\" -c bgYellow.bold,bgBlue.bold,bgGreen.bold --names plugins,templates,website",
 		"start": "yarn workspace babylonjs-editor start",
 		"package": "yarn clean && yarn clean:node_modules && yarn && yarn lint && yarn build-all-concurrently && yarn test && node build.mjs",
 		"clean": "rimraf editor/build editor/declaration editor/electron-packages editor/coverage tools/build tools/declaration tools/coverage website/.next cli/build cli/declaration && yarn workspace babylonjs-editor-plugins clean && yarn workspace babylonjs-editor-templates clean",
@@ -65,7 +65,8 @@
 		"lint-cli": "cross-env NODE_OPTIONS='--max-old-space-size=8192' eslint --cache --no-warn-ignored ./cli/src/**",
 		"lint-mcp-server": "cross-env NODE_OPTIONS='--max-old-space-size=8192' eslint --cache --no-warn-ignored ./mcp/src/**",
 		"lint": "yarn format-check && concurrently \"yarn lint-editor\" \"yarn lint-tools\" \"yarn lint-cli\" \"yarn lint-mcp-server\" \"yarn lint-plugins\" \"yarn lint-templates\" \"yarn lint-website\" --names editor,tools,cli,mcp-server,plugins,templates,website",
-		"lint-fix": "yarn format && concurrently \"yarn lint-editor --fix\" \"yarn lint-tools --fix\" \"yarn lint-cli --fix\" \"yarn lint-mcp-server --fix\" \"yarn lint-plugins --fix\" \"yarn lint-templates --fix\" \"yarn lint-website --fix\" --names editor,tools,cli,mcp-server,plugins,templates,website"
+		"lint-fix": "yarn format && concurrently \"yarn lint-editor --fix\" \"yarn lint-tools --fix\" \"yarn lint-cli --fix\" \"yarn lint-mcp-server --fix\" \"yarn lint-plugins --fix\" \"yarn lint-templates --fix\" \"yarn lint-website --fix\" --names editor,tools,cli,mcp-server,plugins,templates,website",
+		"pack-runtime-packages": "node scripts/pack-runtime-packages.mjs"
 	},
 	"readme": "https://github.com/byte-mods/zvibe-editor/blob/main/README.md",
 	"license": "Apache-2.0",

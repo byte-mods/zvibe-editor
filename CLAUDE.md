@@ -29,7 +29,9 @@ yarn build              # tools -> cli -> mcp-server -> editor -> plugins (seque
 yarn build-all          # build + templates + website
 yarn build-all-concurrently
 yarn build-editor / build-tools / build-cli / build-mcp-server / build-plugins / build-templates / build-website
+yarn pack-runtime-packages  # packs built tools + cli into editor/packages (part of `yarn build`)
 ```
+New projects install `babylonjs-editor-tools` / `babylonjs-editor-cli` from those tarballs (vendored into the project's `.zvibe/packages/`), not from npm, whose packages of the same names and versions are the upstream ones. `editor/src/project/runtime-packages.ts` vendors them at project creation and reinstalls them on project load when the installed build stamp (`zvibeEditorBuild`) differs.
 
 ### Run / develop
 ```bash

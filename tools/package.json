@@ -53,11 +53,26 @@
 	},
 	"dependencies": {
 		"@litertjs/core": "2.5.3",
+		"@recast-navigation/core": "0.43.0",
+		"@recast-navigation/generators": "0.43.0",
 		"fflate": "0.8.3",
 		"onnx-proto": "8.0.1",
 		"onnxruntime-web": "1.27.0",
 		"typescript": "5.9.3",
 		"ws": "^8.19.0",
 		"yaml": "2.9.0"
+	},
+	"peerDependencies": {
+		"@babylonjs/addons": "^9.12.1",
+		"@babylonjs/core": "^9.12.1",
+		"@babylonjs/gui": "^9.12.1"
+	},
+	"peerDependenciesMeta": {
+		"@babylonjs/addons": {
+			"optional": true
+		},
+		"@babylonjs/gui": {
+			"optional": true
+		}
 	}
 }
