@@ -100,4 +100,8 @@ program
 		}
 	);
 
-await program.parseAsync();
+// No top-level await: the command line is also bundled as CommonJS (see esbuild.mjs).
+program.parseAsync().catch((error) => {
+	console.error(error);
+	process.exitCode = 1;
+});

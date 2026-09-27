@@ -1,4 +1,5 @@
-import { onnx } from "onnx-proto";
+import type { onnx } from "onnx-proto";
+import { onnxProto } from "../tools/onnx-proto";
 
 import type { Scene } from "@babylonjs/core/scene";
 
@@ -431,7 +432,7 @@ function targets(step: IMlTrainingStep, actions: IMlActionSpec): number[] {
 export function validateMlPolicyOnnx(bytes: Uint8Array, inputSize: number, outputSize: number, requestedInputName?: string, requestedOutputName?: string): IMlPolicyOnnxEvidence {
 	let model: onnx.IModelProto;
 	try {
-		model = onnx.ModelProto.decode(bytes);
+		model = onnxProto.ModelProto.decode(bytes);
 	} catch (error) {
 		throw new Error(`ML policy ONNX is invalid: ${error instanceof Error ? error.message : String(error)}`);
 	}
@@ -526,7 +527,7 @@ export function trainPortableBehaviorCloning(datasetValue: unknown, settingsValu
 		});
 	}
 	const tensorType = (size: number): onnx.ITypeProto => ({ tensorType: { elemType: 1, shape: { dim: [{ dimValue: 1 }, { dimValue: size }] } } });
-	const model = onnx.ModelProto.create({
+	const model = onnxProto.ModelProto.create({
 		irVersion: 8,
 		producerName: "Zvibe Portable ML Trainer",
 		producerVersion: "1.0.0",
@@ -544,11 +545,11 @@ export function trainPortableBehaviorCloning(datasetValue: unknown, settingsValu
 			],
 		},
 	});
-	const verification = onnx.ModelProto.verify(model);
+	const verification = onnxProto.ModelProto.verify(model);
 	if (verification) {
 		throw new Error(`Portable ML trainer produced an invalid ONNX model: ${verification}.`);
 	}
-	const modelBytes = onnx.ModelProto.encode(model).finish();
+	const modelBytes = onnxProto.ModelProto.encode(model).finish();
 	validateMlPolicyOnnx(modelBytes, inputSize, outputSize, "observations", "actions");
 	return {
 		model: modelBytes,

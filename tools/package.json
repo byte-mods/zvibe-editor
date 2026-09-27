@@ -4,7 +4,7 @@
 	"description": "Babylon.js Editor Tools is a set of tools to help you create, edit and manage your Babylon.js scenes made using the Babylon.js Editor",
 	"productName": "Babylon.js Editor Tools",
 	"scripts": {
-		"build": "tsc -p . && node esbuild.mjs",
+		"build": "tsc -p . && node scripts/finalize-esm.mjs && node esbuild.mjs",
 		"watch": "concurrently \"tsc -p . --watch\" \"node esbuild.mjs --watch\" -c bgYellow.bold,bgBlue.bold --names tools-ts,editor-dependencies",
 		"test": "vitest run",
 		"test:render-conformance": "node scripts/run-render-graph-conformance.mjs",

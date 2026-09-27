@@ -42,11 +42,46 @@ const mainBuildOptions = {
 	plugins: [replaceImportMetaDirname],
 };
 
+/**
+ * The command line entry point run by `bin/babylonjs-editor-cli.js` (and so by `yarn generate` in projects). Node cannot
+ * run the unbundled tsc output: it mixes the CommonJS "babylonjs" build with babylonjs-editor-tools, whose ESM build uses
+ * "@babylonjs/core" instead. Bundling as CommonJS resolves the tools package through its "require" build, which shares the
+ * same "babylonjs" instance, and inlines the ESM-only dependencies (chalk, ora, ...).
+ */
+const replaceCliImportMeta = {
+	name: "replaceCliImportMeta",
+	setup(build) {
+		build.onLoad({ filter: /\.mts$/ }, async (args) => {
+			const source = await readFile(args.path, "utf8");
+			// Workers stay standalone ESM files next to the tsc output ("build/src/tools/workers/*.mjs").
+			const dirname = args.path.replace(/\\/g, "/").endsWith("/src/tools/worker.mts") ? 'require("node:path").join(__dirname, "src/tools")' : "__dirname";
+
+			return {
+				loader: "ts",
+				contents: source.replace(/import.meta.dirname/g, dirname).replace(/import.meta.filename/g, "__filename"),
+			};
+		});
+	},
+};
+
+const cliBuildOptions = {
+	entryPoints: ["./src/index.mts"],
+	bundle: true,
+	platform: "node",
+	target: "node20",
+	format: "cjs",
+	outfile: "./build/cli.node.cjs",
+	// Native/wasm packages and the Babylon.js builds are loaded from the installed dependencies at runtime.
+	external: ["assimpjs", "assimpjs/*", "msdfgen-wasm", "msdfgen-wasm/*", "sharp", "babylonjs", "babylonjs-loaders", "babylonjs-editor-tools"],
+	keepNames: true,
+	minify: !isWatch,
+	plugins: [replaceCliImportMeta],
+};
+
 if (args.includes("--watch")) {
-	esbuild
-		.context(mainBuildOptions)
-		.then(async (buildcontext) => {
-			await buildcontext.watch();
+	Promise.all([esbuild.context(mainBuildOptions), esbuild.context(cliBuildOptions)])
+		.then(async (buildContexts) => {
+			await Promise.all(buildContexts.map((buildContext) => buildContext.watch()));
 			console.log("Watching...");
 		})
 		.catch((error) => {
@@ -54,7 +89,7 @@ if (args.includes("--watch")) {
 			exit(1);
 		});
 } else {
-	esbuild.build(mainBuildOptions).catch((error) => {
+	Promise.all([esbuild.build(mainBuildOptions), esbuild.build(cliBuildOptions)]).catch((error) => {
 		console.error(error);
 		exit(1);
 	});

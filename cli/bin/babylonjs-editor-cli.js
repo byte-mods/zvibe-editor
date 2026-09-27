@@ -1,3 +1,4 @@
 #!/usr/bin/env node
 
-import "../build/src/index.mjs";
+// Runs the bundled CommonJS command line (see esbuild.mjs), which works in plain Node.
+import "../build/cli.node.cjs";

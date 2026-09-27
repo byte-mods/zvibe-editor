@@ -1,4 +1,5 @@
-import { onnx } from "onnx-proto";
+import type { onnx } from "onnx-proto";
+import { onnxProto } from "../tools/onnx-proto";
 
 export type RuntimeAiModelFormat = "onnx" | "litert" | "pytorchExport";
 export type RuntimeAiModelFormatSelection = "automatic" | RuntimeAiModelFormat;
@@ -80,7 +81,7 @@ function numberValue(value: number | { toNumber(): number } | null | undefined):
 }
 
 function onnxGraph(bytes: Uint8Array): IRuntimeAiModelGraph {
-	const model = onnx.ModelProto.decode(bytes);
+	const model = onnxProto.ModelProto.decode(bytes);
 	if (!model.graph) {
 		throw new Error("ONNX model does not contain a graph.");
 	}
@@ -115,7 +116,7 @@ function onnxGraph(bytes: Uint8Array): IRuntimeAiModelGraph {
 export function getRuntimeAiOnnxExternalDataPaths(bytes: Uint8Array): string[] {
 	let model: onnx.IModelProto;
 	try {
-		model = onnx.ModelProto.decode(bytes);
+		model = onnxProto.ModelProto.decode(bytes);
 	} catch (error) {
 		throw new Error(`ONNX external-data metadata is invalid: ${error instanceof Error ? error.message : String(error)}`);
 	}

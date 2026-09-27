@@ -1,5 +1,6 @@
 import { unzip } from "fflate";
-import { onnx } from "onnx-proto";
+import type { onnx } from "onnx-proto";
+import { onnxProto } from "../tools/onnx-proto";
 
 import { IRuntimeAiModelGraph } from "./runtime-ai-model";
 
@@ -961,7 +962,7 @@ export async function compileRuntimeAiPyTorchExport(source: Uint8Array): Promise
 		node: builder.nodes,
 		initializer: builder.initializers,
 	};
-	const model = onnx.ModelProto.create({
+	const model = onnxProto.ModelProto.create({
 		irVersion: 8,
 		producerName: "Zvibe Editor PyTorch Export Lowerer",
 		producerVersion: "1.0.0",
@@ -970,11 +971,11 @@ export async function compileRuntimeAiPyTorchExport(source: Uint8Array): Promise
 		opsetImport: [{ domain: "", version: 18 }],
 		graph: onnxGraphValue,
 	});
-	const verification = onnx.ModelProto.verify(model);
+	const verification = onnxProto.ModelProto.verify(model);
 	if (verification) {
 		throw new Error(`Lowered PyTorch ONNX graph is invalid: ${verification}.`);
 	}
-	const onnxBytes = onnx.ModelProto.encode(model).finish();
+	const onnxBytes = onnxProto.ModelProto.encode(model).finish();
 	return {
 		onnxBytes,
 		schemaVersion,
