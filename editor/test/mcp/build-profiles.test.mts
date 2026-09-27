@@ -347,6 +347,32 @@ describe("mcp/build profiles", () => {
 		}
 	});
 
+	test("plans Runtime AI (ONNX Runtime / LiteRT) only when the project opts in, even though the runtime references it", async () => {
+		const runtime = await mkdtemp(join(tmpdir(), "zvibe-editor-runtime-"));
+		try {
+			// The runtime names the inference packages (session labels, the opt-in error) without importing them.
+			await ensureDir(join(runtime, "build/src/loading"));
+			await writeFile(
+				join(runtime, "build/src/loading/runtime-ai.js"),
+				'const engine = "onnxruntime-web";\nthrow new Error(\'Add import "babylonjs-editor-tools/runtime-ai-backends"; ort-wasm-simd-threaded\');\n'
+			);
+			await ensureDir(join(directory, "node_modules"));
+			await symlink(runtime, join(directory, "node_modules/babylonjs-editor-tools"));
+			await writeJSON(join(directory, "package.json"), { scripts: { "build:test": "build-test" }, dependencies: { "babylonjs-editor-tools": "latest" } });
+
+			const created = createBuildProfile(scene, { expectedRevision: 0, id: "web-ai", name: "Web AI", target: "web", settings: { buildScripts: ["build:test"] } });
+			const plan = await inspectWebBuildPlan(scene, { id: "web-ai", expectedRevision: created.configuration.revision }, options);
+			expect(plan.modules.find((entry: any) => entry.id === "runtime-ai")).toMatchObject({ decision: "strip", evidencePaths: [] });
+
+			await ensureDir(join(directory, "src"));
+			await writeFile(join(directory, "src/scripts.ts"), 'import "babylonjs-editor-tools/runtime-ai-backends";\n');
+			const optedIn = await inspectWebBuildPlan(scene, { id: "web-ai", expectedRevision: created.configuration.revision }, options);
+			expect(optedIn.modules.find((entry: any) => entry.id === "runtime-ai")).toMatchObject({ decision: "retain", evidencePaths: ["src/scripts.ts"] });
+		} finally {
+			await remove(runtime);
+		}
+	});
+
 	test("rejects native PNG or JPEG codec evidence even when it is embedded in a valid WebAssembly artifact", async () => {
 		const created = createBuildProfile(scene, {
 			expectedRevision: 0,

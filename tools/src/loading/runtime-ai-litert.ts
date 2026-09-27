@@ -1,6 +1,7 @@
 import type { CompiledModel, DType, Tensor as LiteRtTensor, TypedArray } from "@litertjs/core";
 
 import type { IRuntimeAiRunResult, IRuntimeAiTensorInput, IRuntimeAiTensorMetadata, IRuntimeAiTensorOutput, RuntimeAiEffectiveBackend } from "./runtime-ai";
+import { getRuntimeAiBackends } from "./runtime-ai-backends";
 
 export interface IRuntimeAiLiteRtExecutor {
 	inputs: IRuntimeAiTensorMetadata[];
@@ -202,7 +203,7 @@ export async function createRuntimeAiLiteRtExecutor(
 	wasmThreads: number,
 	wasmPath: string
 ): Promise<IRuntimeAiLiteRtExecutor> {
-	const runtime = (await import("@litertjs/core")) as ILiteRtModule;
+	const runtime = (await getRuntimeAiBackends().loadLiteRt()) as ILiteRtModule;
 	await ensureRuntime(runtime, wasmPath, wasmThreads, backend);
 	const model = await runtime.loadAndCompile(source, { accelerator: backend, cpuOptions: { numThreads: wasmThreads } });
 	return new RuntimeAiLiteRtExecutor(runtime, model);

@@ -44,6 +44,19 @@ const mainBuildOptions = {
 	plugins: [replaceBabylonJsImports],
 };
 
+// "babylonjs-editor-tools/runtime-ai-backends" for CommonJS consumers (the editor). Runtime AI sessions only reach the
+// inference runtimes through this opt-in entry, so bundled games that never import it do not ship their WebAssembly.
+const runtimeAiBackendsBuildOptions = {
+	entryPoints: ["./src/runtime-ai-backends.ts"],
+	bundle: true,
+	platform: "node",
+	target: "node20",
+	format: "cjs",
+	outfile: "./build/runtime-ai-backends.node.js",
+	external: ["@litertjs/core", "onnxruntime-web"],
+	minify: !isWatch,
+};
+
 const serverBuildOptions = {
 	entryPoints: ["./src/server/production-session-host.ts"],
 	bundle: true,
@@ -76,7 +89,12 @@ const developmentCoverageBuildOptions = {
 };
 
 if (args.includes("--watch")) {
-	Promise.all([esbuild.context(mainBuildOptions), esbuild.context(serverBuildOptions), esbuild.context(developmentCoverageBuildOptions)])
+	Promise.all([
+		esbuild.context(mainBuildOptions),
+		esbuild.context(runtimeAiBackendsBuildOptions),
+		esbuild.context(serverBuildOptions),
+		esbuild.context(developmentCoverageBuildOptions),
+	])
 		.then(async (buildContexts) => {
 			await Promise.all(buildContexts.map((buildContext) => buildContext.watch()));
 			console.log("Watching...");
@@ -86,7 +104,12 @@ if (args.includes("--watch")) {
 			exit(1);
 		});
 } else {
-	Promise.all([esbuild.build(mainBuildOptions), esbuild.build(serverBuildOptions), esbuild.build(developmentCoverageBuildOptions)]).catch((error) => {
+	Promise.all([
+		esbuild.build(mainBuildOptions),
+		esbuild.build(runtimeAiBackendsBuildOptions),
+		esbuild.build(serverBuildOptions),
+		esbuild.build(developmentCoverageBuildOptions),
+	]).catch((error) => {
 		console.error(error);
 		exit(1);
 	});

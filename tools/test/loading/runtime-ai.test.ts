@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { onnx } from "onnx-proto";
 
+import "../../src/runtime-ai-backends";
 import { normalizeRuntimeAiSessionOptions, resolveRuntimeAiBackend, RuntimeAiSession } from "../../src/loading/runtime-ai";
 import { detectRuntimeAiModelFormat, inspectRuntimeAiModelGraph } from "../../src/loading/runtime-ai-model";
 

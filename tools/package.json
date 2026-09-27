@@ -31,6 +31,11 @@
 			"types": "./declaration/src/build/development-coverage.d.ts",
 			"import": "./build/build/development-coverage.mjs"
 		},
+		"./runtime-ai-backends": {
+			"types": "./declaration/src/runtime-ai-backends.d.ts",
+			"import": "./build/src/runtime-ai-backends.js",
+			"require": "./build/runtime-ai-backends.node.js"
+		},
 		"./*": {
 			"types": "./declaration/src/*.d.ts",
 			"import": "./build/src/*.js"

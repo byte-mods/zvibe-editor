@@ -1,5 +1,6 @@
 import type { InferenceSession, Tensor as OnnxTensor } from "onnxruntime-web";
 
+import { getRuntimeAiBackends } from "./runtime-ai-backends";
 import { createRuntimeAiLiteRtExecutor } from "./runtime-ai-litert";
 import { detectRuntimeAiModelFormat, inspectRuntimeAiModelGraph, IRuntimeAiModelGraph, RuntimeAiModelFormat, RuntimeAiModelFormatSelection } from "./runtime-ai-model";
 import { compileRuntimeAiPyTorchExport } from "./runtime-ai-pytorch";
@@ -409,10 +410,7 @@ function outputValues(tensor: OnnxTensor, maximum: number): RuntimeAiTensorValue
 }
 
 async function loadRuntimeModule(backend: RuntimeAiEffectiveBackend): Promise<IRuntimeAiModule> {
-	if (typeof window === "undefined") {
-		return import("onnxruntime-web") as Promise<IRuntimeAiModule>;
-	}
-	return backend === "webgpu" ? (import("onnxruntime-web/webgpu") as Promise<IRuntimeAiModule>) : (import("onnxruntime-web/wasm") as Promise<IRuntimeAiModule>);
+	return (await getRuntimeAiBackends().loadOnnxRuntime(backend)) as IRuntimeAiModule;
 }
 
 interface IRuntimeAiExecutor {

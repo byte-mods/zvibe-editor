@@ -220,8 +220,8 @@ The exact tool names and descriptions are generated into `mcp/manifest.json`; th
 | MCP tool modules              |    70 | `mcp/src/tools/`    | Server implementation families                                      |
 | MCP evaluation specifications |    46 | `mcp/evaluations/`  | Agent-behavior evaluation coverage; not one file per tool           |
 | Live scenario scripts         |    81 | `mcp/scripts/`      | Family/integration lifecycle evidence; not one script per component |
-| Editor test files             |   324 | `editor/test/`      | Automated editor coverage                                           |
-| Shared runtime test files     |   159 | `tools/test/`       | Automated exported-runtime coverage                                 |
+| Editor test files             |   325 | `editor/test/`      | Automated editor coverage                                           |
+| Shared runtime test files     |   160 | `tools/test/`       | Automated exported-runtime coverage                                 |
 
 ## Inventory invariants
 

@@ -18,6 +18,7 @@ export * from "./loading/services-client";
 export * from "./loading/addressables";
 export * from "./loading/behavior-trees";
 export * from "./loading/runtime-ai";
+export * from "./loading/runtime-ai-backends";
 export * from "./loading/runtime-ai-model";
 export * from "./loading/input-actions";
 export * from "./loading/touch-controls";

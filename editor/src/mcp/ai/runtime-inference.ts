@@ -13,6 +13,8 @@ import {
 	normalizeRuntimeAiSessionOptions,
 	RuntimeAiSession,
 } from "babylonjs-editor-tools";
+// Opt in to the ONNX Runtime / LiteRT inference runtimes (games opt in with the same import).
+import "babylonjs-editor-tools/runtime-ai-backends";
 
 import { Editor } from "../../editor/main";
 import { projectConfiguration } from "../../project/configuration";

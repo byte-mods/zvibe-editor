@@ -78,7 +78,19 @@ const maximumBytes = 2 * 1024 * 1024 * 1024;
 const maximumEvidencePaths = 64;
 const maximumWasmBytes = 256 * 1024 * 1024;
 const textExtensions = new Set([".cjs", ".css", ".html", ".js", ".json", ".jsx", ".mjs", ".mts", ".ts", ".tsx", ".vue"]);
-const modules = [
+interface IWebBuildModuleDefinition {
+	id: string;
+	label: string;
+	/** Markers that show the module is reachable in project or runtime sources, and that it shipped in the Web output. */
+	markers: readonly string[];
+	/**
+	 * When set, only these markers in project sources make the module reachable: the editor runtime references the module
+	 * but only loads it once the project opts in (e.g. `import "babylonjs-editor-tools/runtime-ai-backends"`).
+	 */
+	projectMarkers?: readonly string[];
+}
+
+const modules: readonly IWebBuildModuleDefinition[] = [
 	{ id: "animation", label: "Animation", markers: ["@babylonjs/core/animations", "animationgroup", "beginanimation("] },
 	{ id: "physics", label: "3D Physics", markers: ["@babylonjs/core/physics", "@babylonjs/havok", "havokplugin", "physicsaggregate"] },
 	{ id: "physics-2d", label: "2D Physics", markers: ["planck-js", "matter-js", "box2d", "physics2d"] },
@@ -91,9 +103,15 @@ const modules = [
 	{ id: "xr", label: "WebXR", markers: ["@babylonjs/core/xr", "webxrdefaultperience", "webxrdefaultexperience"] },
 	{ id: "gltf-loaders", label: "glTF Loaders", markers: ["@babylonjs/loaders", "gltf2"] },
 	{ id: "procedural-materials", label: "Procedural Materials", markers: ["@babylonjs/materials", "proceduraltexture"] },
-] as const;
+	{
+		id: "runtime-ai",
+		label: "Runtime AI (ONNX Runtime / LiteRT)",
+		markers: ["ort-wasm-simd-threaded", "litert_wasm_"],
+		projectMarkers: ["babylonjs-editor-tools/runtime-ai-backends", "registerruntimeaibackends"],
+	},
+];
 const nativeCodecMarkers = ["libpng", "png_create_read_struct", "png_create_write_struct", "libjpeg", "jpeg_std_error", "jpeg_create_decompress", "jpeg_create_compress"];
-const markerCatalog = [...new Set([...modules.flatMap((module) => module.markers), ...nativeCodecMarkers])];
+const markerCatalog = [...new Set([...modules.flatMap((module) => [...module.markers, ...(module.projectMarkers ?? [])]), ...nativeCodecMarkers])];
 const maximumMarkerLength = Math.max(...markerCatalog.map((marker) => marker.length));
 
 function extension(path: string): string {
@@ -307,9 +325,10 @@ export async function createWebBuildPlan(projectDirectory: string, profile: IWeb
 	const searchable = scan.files.filter((file) => textExtensions.has(extension(file.path)));
 	const runtimeSearchable = (runtimeScan?.files ?? []).filter((file) => textExtensions.has(extension(file.path)));
 	const decisions: IWebBuildModuleDecision[] = modules.map((module) => {
-		const hasMarker = (file: IScannedFile): boolean => module.markers.some((marker) => file.markers.includes(marker));
+		const reachabilityMarkers = module.projectMarkers ?? module.markers;
+		const hasMarker = (file: IScannedFile): boolean => reachabilityMarkers.some((marker) => file.markers.includes(marker));
 		const projectEvidence = searchable.filter(hasMarker);
-		const runtimeEvidence = projectEvidence.length ? [] : runtimeSearchable.filter(hasMarker);
+		const runtimeEvidence = projectEvidence.length || module.projectMarkers ? [] : runtimeSearchable.filter(hasMarker);
 		const evidencePaths = [...projectEvidence, ...runtimeEvidence].slice(0, maximumEvidencePaths).map((file) => file.path);
 		const decision = evidencePaths.length ? "retain" : profile.settings.web!.moduleStripping ? "strip" : "preserve";
 		return {
