@@ -12,10 +12,7 @@ import {
 	parseAudioProbe,
 } from "babylonjs-editor-tools";
 
-function executable(name: "ffmpeg" | "ffprobe"): string {
-	const environment = process.env[name === "ffmpeg" ? "BABYLONJS_EDITOR_FFMPEG_PATH" : "BABYLONJS_EDITOR_FFPROBE_PATH"];
-	return environment || (process.platform === "win32" ? `${name}.exe` : name);
-}
+import { resolveMediaExecutable } from "../../tools/media-executables.mjs";
 
 async function run(command: string, args: string[]): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
@@ -51,15 +48,15 @@ async function run(command: string, args: string[]): Promise<string> {
 /** Applies the audio importer during CLI packing and returns probe evidence for the runtime sidecar. */
 export async function processExportedAudio(sourcePath: string, outputPath: string, settings: IAudioImporterSettings): Promise<IAudioImportResult> {
 	const temporary = `${outputPath}.${randomUUID()}.tmp${basename(outputPath).match(/(\.[^.]+)$/)?.[1] ?? ""}`;
-	const source = parseAudioProbe(JSON.parse(await run(executable("ffprobe"), createAudioProbeArguments(sourcePath))));
+	const source = parseAudioProbe(JSON.parse(await run(resolveMediaExecutable("ffprobe"), createAudioProbeArguments(sourcePath))));
 	const sourceDetails = await fs.stat(sourcePath);
 	try {
 		if (audioImportRequiresTranscode(settings)) {
-			await run(executable("ffmpeg"), createAudioTranscodeArguments(sourcePath, temporary, settings));
+			await run(resolveMediaExecutable("ffmpeg"), createAudioTranscodeArguments(sourcePath, temporary, settings));
 		} else {
 			await fs.copyFile(sourcePath, temporary);
 		}
-		const output = parseAudioProbe(JSON.parse(await run(executable("ffprobe"), createAudioProbeArguments(temporary))));
+		const output = parseAudioProbe(JSON.parse(await run(resolveMediaExecutable("ffprobe"), createAudioProbeArguments(temporary))));
 		const outputDetails = await fs.stat(temporary);
 		await fs.move(temporary, outputPath, { overwrite: true });
 		return {

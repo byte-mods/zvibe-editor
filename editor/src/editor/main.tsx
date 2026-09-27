@@ -31,6 +31,7 @@ import {
 } from "../tools/observables";
 
 import { initializeMcpServer } from "../mcp/mcp";
+import { configureBundledMediaExecutables } from "../mcp/assets/media-executables";
 import type { EditorExtensionHost } from "../extensions/host";
 import type { IEditorExtensionMenuDescriptor } from "../extensions/types";
 import { disposeProjectEditorExtensions } from "../extensions/project";
@@ -371,7 +372,11 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 		ipcRenderer.on("editor:quit-app", () => this.quitApp());
 		ipcRenderer.on("editor:close-window", () => this.close());
 
-		ipcRenderer.on("editor:path", (_, path) => (this.path = path.replace(/\\/g, sep)));
+		ipcRenderer.on("editor:path", (_, path) => {
+			const editorPath = path.replace(/\\/g, sep);
+			this.path = editorPath;
+			configureBundledMediaExecutables(editorPath);
+		});
 
 		ipcRenderer.on("editor:run-project", () => startProjectDevProcess(this));
 		ipcRenderer.on("editor:extension-command", this._extensionCommandHandler);

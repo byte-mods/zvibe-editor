@@ -1,6 +1,7 @@
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
-import { access, rename, rm, mkdir, copyFile } from "node:fs/promises";
+import { access, rename, rm, mkdir, copyFile, chmod } from "node:fs/promises";
 
 import nextjsTemplatePackageJson from "./templates/nextjs/package.json" with { type: "json" };
 import nuxtjsTemplatePackageJson from "./templates/nuxtjs/package.json" with { type: "json" };
@@ -90,3 +91,39 @@ async function packTemplates() {
 }
 
 await packTemplates();
+
+/**
+ * Copies the FFmpeg and FFprobe binaries for this platform into "editor/bin". The editor resolves media tools there
+ * (audio/video import, export and cinematic encoding) and electron-builder ships the folder next to the app ("extraFiles"),
+ * so users no longer need FFmpeg installed. Package the editor on the platform it targets, as for the other native deps.
+ */
+async function copyMediaExecutables() {
+	const require = createRequire(import.meta.url);
+	const binDirectory = join(import.meta.dirname, "editor/bin");
+	const suffix = process.platform === "win32" ? ".exe" : "";
+	const executables = [
+		["ffmpeg", () => require("ffmpeg-static")],
+		["ffprobe", () => require("@ffprobe-installer/ffprobe").path],
+	];
+
+	await mkdir(binDirectory, { recursive: true });
+
+	for (const [name, resolveSource] of executables) {
+		let source = null;
+		try {
+			source = resolveSource();
+			await access(source);
+		} catch (e) {
+			console.warn(`Could not find a bundled ${name} binary for ${process.platform}-${process.arch}; the editor will use ${name} from PATH.`);
+			continue;
+		}
+
+		const destination = join(binDirectory, `${name}${suffix}`);
+		await copyFile(source, destination);
+		await chmod(destination, 0o755);
+
+		console.log(`Copied ${name} to editor/bin`);
+	}
+}
+
+await copyMediaExecutables();

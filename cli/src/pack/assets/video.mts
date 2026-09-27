@@ -22,10 +22,7 @@ import {
 	videoImportRequiresTranscode,
 } from "babylonjs-editor-tools";
 
-function executable(name: "ffmpeg" | "ffprobe"): string {
-	const environment = process.env[name === "ffmpeg" ? "BABYLONJS_EDITOR_FFMPEG_PATH" : "BABYLONJS_EDITOR_FFPROBE_PATH"];
-	return environment || (process.platform === "win32" ? `${name}.exe` : name);
-}
+import { resolveMediaExecutable } from "../../tools/media-executables.mjs";
 
 async function run(command: string, args: string[]): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
@@ -59,18 +56,18 @@ async function run(command: string, args: string[]): Promise<string> {
 }
 
 async function probe(path: string): Promise<IVideoImportProbe> {
-	return parseVideoProbe(JSON.parse(await run(executable("ffprobe"), createVideoProbeArguments(path))));
+	return parseVideoProbe(JSON.parse(await run(resolveMediaExecutable("ffprobe"), createVideoProbeArguments(path))));
 }
 
 /** Detects built FFmpeg encoders before accepting an explicit hardware backend. */
 export async function getExportedVideoEncoderCapabilities(): Promise<IVideoEncoderCapabilities> {
-	return parseVideoEncoderCapabilities(await run(executable("ffmpeg"), createVideoEncoderListArguments()));
+	return parseVideoEncoderCapabilities(await run(resolveMediaExecutable("ffmpeg"), createVideoEncoderListArguments()));
 }
 
 async function transcode(sourcePath: string, outputPath: string, settings: IVideoImporterSettings, source: IVideoImportProbe): Promise<IVideoEncoderSelection> {
 	const capabilities = await getExportedVideoEncoderCapabilities();
 	const selection = selectVideoEncoder(resolveVideoCodec(sourcePath, settings, source), settings.encoder, capabilities);
-	await run(executable("ffmpeg"), createVideoTranscodeArguments(sourcePath, outputPath, settings, source, selection));
+	await run(resolveMediaExecutable("ffmpeg"), createVideoTranscodeArguments(sourcePath, outputPath, settings, source, selection));
 	return selection;
 }
 

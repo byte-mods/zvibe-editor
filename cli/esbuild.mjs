@@ -32,7 +32,8 @@ const mainBuildOptions = {
 	target: "node20", // target version of Node.js
 	format: "cjs", // output format as CommonJS
 	outfile: "./build/index.node.js",
-	external: ["assimpjs", "assimpjs/*", "msdfgen-wasm", "msdfgen-wasm/*"],
+	// FFmpeg/FFprobe packages resolve their binary paths relative to their own install location.
+	external: ["assimpjs", "assimpjs/*", "msdfgen-wasm", "msdfgen-wasm/*", "ffmpeg-static", "@ffprobe-installer/ffprobe"],
 	treeShaking: false,
 	loader: {
 		".mts": "ts",
@@ -72,7 +73,18 @@ const cliBuildOptions = {
 	format: "cjs",
 	outfile: "./build/cli.node.cjs",
 	// Native/wasm packages and the Babylon.js builds are loaded from the installed dependencies at runtime.
-	external: ["assimpjs", "assimpjs/*", "msdfgen-wasm", "msdfgen-wasm/*", "sharp", "babylonjs", "babylonjs-loaders", "babylonjs-editor-tools"],
+	external: [
+		"assimpjs",
+		"assimpjs/*",
+		"msdfgen-wasm",
+		"msdfgen-wasm/*",
+		"sharp",
+		"babylonjs",
+		"babylonjs-loaders",
+		"babylonjs-editor-tools",
+		"ffmpeg-static",
+		"@ffprobe-installer/ffprobe",
+	],
 	keepNames: true,
 	minify: !isWatch,
 	plugins: [replaceCliImportMeta],
