@@ -1,6 +1,6 @@
 {
 	"name": "babylonjs-editor",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "Zvibe Editor is a next-generation visual game development environment powered by Babylon.js.",
 	"productName": "Zvibe Editor",
 	"runtimeDependenciesVersion": "5.4.3-alpha.1",

@@ -1,6 +1,6 @@
 {
 	"name": "zvibe-editor",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"private": true,
 	"description": "A next-generation open-source game editor powered by Babylon.js, Electron, TypeScript, and MCP.",
 	"productName": "Zvibe Editor",

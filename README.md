@@ -5,7 +5,7 @@
 
 ### A next-generation, open-source game development environment powered by Babylon.js
 
-[![Version](https://img.shields.io/badge/version-1.0.0-8b5cf6?style=for-the-badge)](editor/package.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-8b5cf6?style=for-the-badge)](editor/package.json)
 [![License](https://img.shields.io/badge/license-Apache--2.0-22c55e?style=for-the-badge)](LICENSE)
 [![Babylon.js](https://img.shields.io/badge/Babylon.js-9.12.1-bb464b?style=for-the-badge)](https://www.babylonjs.com/)
 [![Electron](https://img.shields.io/badge/Electron-39-47848f?style=for-the-badge&logo=electron)](https://www.electronjs.org/)
@@ -30,6 +30,18 @@ It is designed for teams that want a Unity-style visual workflow while keeping t
 - **Web and desktop delivery** — build Web, PWA, Electron desktop, headless, Android, and iOS project targets through reproducible Build Profiles.
 - **Portable engine stack** — Babylon.js 9, WebGPU/WebGL, Havok, Recast/Detour, Electron, React, and open asset formats.
 - **Open source** — the repository is licensed under Apache 2.0 and preserves attribution to the upstream Babylon.js Editor project.
+
+## What's new in 1.1
+
+- **Projects run this editor's own runtime.** New projects install `babylonjs-editor-tools` and `babylonjs-editor-cli` from tarballs shipped with the editor (vendored into `.zvibe/packages/`), not the upstream npm packages of the same names; opening a project reinstalls them when they differ.
+- **`yarn generate` works in plain Node.** The CLI is bundled as CommonJS and the runtime's ESM build is valid for Node.
+- **FFmpeg is bundled.** Audio/video export no longer needs FFmpeg on `PATH`; normalized audio keeps its source sample rate.
+- **Smaller web builds.** Runtime AI (ONNX Runtime / LiteRT) is opt-in, so games that do not use it no longer ship ~64 MB of WebAssembly.
+- **Stable physics.** Templates and Play mode step Havok at a fixed 60 Hz, with centimeter-scale speed limits and Audio V2 engines created by default.
+- **Faster, sturdier asset pipeline.** Registry refreshes are coalesced and atomic, large folder imports/deletes take seconds instead of minutes, cinematic capture uses the correct canvas, and timed-out project tests no longer leave processes behind.
+- **Orb Rush**, a complete example game built end to end through MCP, lives in [`examples/orb-rush`](examples/orb-rush).
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list and [E2E-TEST-REPORT.md](E2E-TEST-REPORT.md) for the end-to-end verification behind this release.
 
 ## Features
 
@@ -92,7 +104,18 @@ yarn build
 yarn start
 ```
 
-The packaged application identifies itself as **Zvibe Editor 1.0.0**.
+The packaged application identifies itself as **Zvibe Editor 1.1.0**. FFmpeg and FFprobe ship with the editor, so audio and video import/export work without a system install.
+
+### Try the example game
+
+[`examples/orb-rush`](examples/orb-rush) is a complete physics game — Havok bodies, 10 sounds, scripts, GUI HUD, post-processing — authored entirely through the MCP tools. Build the runtime and CLI first (`yarn build-tools && yarn build-cli`), then:
+
+```bash
+cd examples/orb-rush
+yarn install
+yarn dev        # play at http://localhost:3000
+yarn build      # static site ready for itch.io, GitHub Pages or any static host
+```
 
 ### Development loop
 
@@ -218,6 +241,17 @@ yarn package --noSign --arm64
 yarn package --noSign --x64
 ```
 
+Packaging ships the editor's own runtime packages and media tools next to the app:
+
+- `yarn build` runs `yarn pack-runtime-packages`, which packs the built `tools` and `cli` into `editor/packages`. New projects vendor these tarballs, and each is stamped with a content hash (`zvibeEditorBuild`) so the editor can tell its builds apart from the upstream npm packages.
+- `yarn install` copies this platform's FFmpeg and FFprobe into `editor/bin`.
+
+Games that use Runtime AI opt in with one import, which keeps ONNX Runtime and LiteRT out of every other build:
+
+```ts
+import "babylonjs-editor-tools/runtime-ai-backends";
+```
+
 Packaging is platform-bound. Build macOS artifacts on macOS and Windows artifacts on Windows. Signed macOS releases require these environment variables in a local `.env` file:
 
 ```env
@@ -238,6 +272,8 @@ zvibe-editor/
 ├── mcp/          1,722-tool Model Context Protocol server and live verification scenarios
 ├── plugins/      Fab and Quixel marketplace integrations
 ├── templates/    Next.js, Nuxt, Solid, vanilla Web and Electron game templates
+├── examples/     Complete example games (Orb Rush)
+├── scripts/      Repository build helpers (runtime package packing)
 └── website/      Documentation, tutorials, downloads and project website
 ```
 
@@ -262,7 +298,7 @@ Live scenarios intentionally modify editor state and should run only against a d
 yarn workspace babylonjs-editor-mcp-server all-live-scenarios
 ```
 
-See [FUNCTIONALITY-VERIFICATION.md](FUNCTIONALITY-VERIFICATION.md) for the distinction between contract coverage, live editor verification, packaged application checks, and manual gameplay verification.
+The latest full end-to-end pass — feature inventory, all 81 live MCP scenarios, marketplaces, and a complete game — is recorded in [E2E-TEST-REPORT.md](E2E-TEST-REPORT.md). See [FUNCTIONALITY-VERIFICATION.md](FUNCTIONALITY-VERIFICATION.md) for the distinction between contract coverage, live editor verification, packaged application checks, and manual gameplay verification.
 
 ## Contributing
 

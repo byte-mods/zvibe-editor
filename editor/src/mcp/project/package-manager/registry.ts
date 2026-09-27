@@ -5,6 +5,8 @@ import { join } from "path";
 
 import { Scene } from "babylonjs";
 
+import packageJson from "../../../../package.json";
+
 import { IMCPActionOptions } from "../../action";
 import { getProjectPackageContext, packageSha256 } from "./context";
 import { validateProjectPackageName, validateProjectPackageVersion } from "./process";
@@ -327,7 +329,7 @@ async function registryRequest(registry: IProjectPackageRegistryInternal, relati
 		timeout.unref?.();
 		let response: Response;
 		try {
-			const headers: Record<string, string> = { accept, "user-agent": "Zvibe-Editor/1.0.0" };
+			const headers: Record<string, string> = { accept, "user-agent": `Zvibe-Editor/${packageJson.version}` };
 			if (registry.credential.token && url.origin === registryOrigin) {
 				headers.authorization = `Bearer ${registry.credential.token}`;
 			}
